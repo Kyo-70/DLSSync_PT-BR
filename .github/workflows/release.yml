@@ -66,17 +66,12 @@ jobs:
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
-          cache: "pnpm"
+          package-manager-cache: false
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           targets: x86_64-pc-windows-msvc
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          workspaces: ". -> target"
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
@@ -155,12 +150,13 @@ jobs:
           When a new version is released, DLSSync opens the GitHub release page
           and you replace DLSSync.exe manually.
 
-          Settings are stored under %APPDATA%/DLSSync (per-user).
+          Settings, catalog, backups, and journal are stored under .\data.
 
           For unattended updates and tray integration, use the installer instead:
             https://github.com/xt0n1-t3ch/DLSSync/releases/latest
           "@
           Set-Content -Path (Join-Path $portableDir "portable.txt") -Value $marker -Encoding UTF8
+          Set-Content -Path (Join-Path $portableDir "portable.flag") -Value "DLSSync portable data boundary" -Encoding ASCII
           $zipPath = "target/release/bundle/nsis/DLSSync_${env:VERSION}_x64-portable.zip"
           New-Item -ItemType Directory -Force -Path (Split-Path $zipPath -Parent) | Out-Null
           Compress-Archive -Path "$portableDir/*" -DestinationPath $zipPath -Force
@@ -177,7 +173,7 @@ jobs:
             target/release/bundle/nsis/*-portable.zip
             target/release/bundle/msi/*.msi
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
   sign-windows:
     name: Sign Windows artifacts (SignPath)
@@ -210,6 +206,7 @@ jobs:
         with:
           name: dlssync-windows-signed
           path: signed/
+          retention-days: 1
 
   publish:
     name: Publish GitHub Release
@@ -268,7 +265,7 @@ jobs:
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
-          cache: "pnpm"
+          package-manager-cache: false
 
       - name: Re-sign updater signature over the Authenticode-signed exe
         if: needs.sign-windows.result == 'success'
