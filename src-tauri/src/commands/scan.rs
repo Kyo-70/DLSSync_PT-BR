@@ -14,6 +14,7 @@ use std::time::Instant;
 use tauri::State;
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn scan_libraries(
     state: State<'_, AppState>,
     launchers: Vec<LauncherKind>,
@@ -129,6 +130,7 @@ fn e2e_mode_enabled() -> bool {
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn detect_dlls(
     _state: State<'_, AppState>,
     install_dir: String,
@@ -143,6 +145,7 @@ pub async fn detect_dlls(
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn detect_dlss_enabler(
     _state: State<'_, AppState>,
     install_dir: String,
@@ -618,7 +621,7 @@ fn scan_folder_markers(path: &Path, depth: u8) -> FolderMarkers {
     m
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct GameArt {
     pub grid_url: Option<String>,
     pub hero_url: Option<String>,
@@ -634,6 +637,7 @@ fn empty_art() -> GameArt {
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn fetch_steam_art(state: State<'_, AppState>, name: String) -> AppResult<GameArt> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
@@ -682,6 +686,7 @@ pub async fn fetch_steam_art(state: State<'_, AppState>, name: String) -> AppRes
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn enrich_game_art(
     state: State<'_, AppState>,
     name: String,

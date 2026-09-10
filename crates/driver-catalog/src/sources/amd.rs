@@ -18,6 +18,8 @@ pub enum AmdArch {
 /// Known PCI device ids on the RDNA1/RDNA2 legacy driver branch (Navi 10/12/14
 /// = RX 5000, Navi 21/22/23/24 = RX 6000). Used to pick the right branch even
 /// when an OEM renames the card so the model string is unreliable.
+// Maintenance path: update these branch tables from AMD's published PCI ID support
+// lists when a legacy split changes; tests pin representative boundary devices.
 const RDNA12_DEVICE_IDS: &[u16] = &[
     0x7310, 0x7312, 0x7318, 0x7319, 0x731A, 0x731B, 0x731E, 0x731F, 0x7340, 0x7341, 0x7347, 0x734F,
     0x7360, 0x7362, 0x73A0, 0x73A1, 0x73A2, 0x73A3, 0x73A5, 0x73AB, 0x73AE, 0x73AF, 0x73BF, 0x73D0,

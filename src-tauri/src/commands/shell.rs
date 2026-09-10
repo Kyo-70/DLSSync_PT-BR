@@ -14,6 +14,7 @@ fn reject_unsafe_path(path: &str) -> AppResult<()> {
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn open_path(path: String) -> AppResult<()> {
     reject_unsafe_path(&path)?;
     let p = PathBuf::from(&path);
@@ -26,6 +27,7 @@ pub async fn open_path(path: String) -> AppResult<()> {
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn reveal_path(path: String) -> AppResult<()> {
     reject_unsafe_path(&path)?;
     let p = PathBuf::from(&path);

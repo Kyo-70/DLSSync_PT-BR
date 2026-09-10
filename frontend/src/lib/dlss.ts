@@ -182,11 +182,47 @@ export const FG_COUNT_OPTIONS: Option<FrameGenCount>[] = [
 
 export const DLSS4_MIN_DRIVER_PACKED = 57216;
 export const DYNAMIC_MFG_MIN_DRIVER_PACKED = 59597;
+export const DLSS5_MIN_DRIVER_PACKED = 61047;
+
+export const RR_PRESET_OPTIONS: Option<DlssPreset>[] = [
+  {
+    value: "recommended",
+    label: "Recommended (latest)",
+    description:
+      "Lets NVIDIA pick the best Ray Reconstruction model for the installed driver. Best default for most RTX users.",
+    sourceUrl: SRC.dlss45,
+  },
+  {
+    value: "default",
+    label: "Use app default",
+    description: "Leave the game's own Ray Reconstruction model untouched — no preset is forced.",
+    sourceUrl: SRC.dlssOverview,
+  },
+  {
+    value: "k",
+    label: "Preset K — Transformer (latest)",
+    description:
+      "Latest transformer Ray Reconstruction model. Cleanest denoising with the least smearing — at a higher GPU cost.",
+    sourceUrl: SRC.streamline,
+  },
+  {
+    value: "j",
+    label: "Preset J — Transformer",
+    description:
+      "Transformer Ray Reconstruction, close to K with slightly different ghosting behavior. K is generally preferred.",
+    sourceUrl: SRC.streamline,
+  },
+  ...SR_PRESET_OPTIONS.filter((o) =>
+    ["l", "m", "e", "f", "c", "d", "n", "o", "a", "b", "g", "h", "i"].includes(o.value),
+  ),
+];
 
 export function emptyDlssConfig(): DlssOverrideConfig {
   return {
     enable_sr_dll_override: false,
     sr_preset: null,
+    enable_rr_dll_override: false,
+    rr_preset: null,
     enable_fg_dll_override: false,
     fg_preset: null,
     fg_mode: null,
@@ -211,10 +247,17 @@ export function hasActiveOverride(config: DlssOverrideConfig): boolean {
   return (
     config.enable_sr_dll_override ||
     config.enable_fg_dll_override ||
+    config.enable_rr_dll_override ||
     config.sr_preset != null ||
     config.fg_preset != null ||
+    config.rr_preset != null ||
     config.fg_mode != null ||
     config.fg_fixed_count != null ||
     config.fg_dynamic_target_fps != null
   );
+}
+
+
+export function dlss5Available(driverPacked: number): boolean {
+  return driverPacked >= DLSS5_MIN_DRIVER_PACKED;
 }

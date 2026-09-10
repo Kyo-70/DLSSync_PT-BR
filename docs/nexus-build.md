@@ -28,7 +28,7 @@ Build the Nexus package:
 pnpm run build:nexus
 ```
 
-`pnpm run build:nexus` temporarily swaps the Tauri config and default capability file with generated Nexus-compliant versions, runs `tauri build --features nexus`, and restores the normal source files afterward.
+`pnpm run build:nexus` temporarily swaps the Tauri config and default capability file with generated Nexus-compliant versions, runs `tauri build --no-default-features --features nexus`, and restores the normal source files afterward.
 
 Generated proof inputs live under `target/nexus/`:
 
@@ -55,7 +55,7 @@ Expected result:
 
 - `pnpm run check:nexus` passes;
 - frontend Nexus build has no app-updater import or `latest.json` endpoint;
-- Rust Nexus build compiles with the updater plugin registration disabled;
+- Rust Nexus build compiles without linking the optional updater dependency;
 - `dll-catalog` proves the embedded fallback remains pinned and signed;
 - `dlssync-application` proves the Nexus policy blocks `automatic` and permits only `manual_user` refresh triggers;
 - generated Nexus config has `plugins.updater.active = false` and no endpoints;
@@ -72,3 +72,7 @@ Use this wording when explaining the release:
 The Nexus build exposes the application source and the signed public catalog as transparency links. These links do not install or auto-update the application. The application update action itself remains disabled and routes users to the Nexus Mods page; the Tauri updater plugin, endpoint, permission, and polling code stay absent from the Nexus package.
 
 The Catalog footer states that automatic catalog updates are disabled. Its explicit button contacts the canonical manifest repository only after the user clicks it, and the Trust Center shows the signature result, generation time, refresh method, and pinned public-key fingerprint.
+
+## 2.0.0 release lane
+
+The standard `v2.0.0` tag builds the normal installer, portable archive, and `latest.json`. The separate `nexusmods-only-v2.0.0` tag builds the Nexus feature with default features disabled and publishes NexusMods-Only artifacts without `latest.json`. Neither lane is created automatically outside its matching tag, and release verification inspects the generated Nexus config and capability files before packaging.

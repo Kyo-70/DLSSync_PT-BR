@@ -30,7 +30,7 @@ pub enum NotificationsError {
     NotFound(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum NotificationKind {
     ApplySuccess,
@@ -88,7 +88,7 @@ impl NotificationKind {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct NotificationEntry {
     pub id: String,
     pub kind: NotificationKind,
@@ -110,7 +110,7 @@ pub struct NotificationEntry {
     pub dedup_key: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 pub struct ListFilter {
     pub include_dismissed: Option<bool>,
     pub limit: Option<u32>,

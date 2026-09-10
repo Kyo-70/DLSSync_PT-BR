@@ -6,6 +6,7 @@ use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use backup_store::BackupEntry;
 use dll_catalog::{DownloadOptions, DownloadProgress, Release};
+use dlssync_contracts::ApplyStage;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -19,17 +20,17 @@ pub const EVENT_APPLY_PROGRESS: &str = "apply_progress";
 pub const EVENT_DOWNLOAD_PROGRESS: &str = "download_progress";
 pub const EVENT_APPLY_INFLIGHT: &str = "apply_inflight";
 
-pub const STAGE_DOWNLOAD: &str = "download";
-pub const STAGE_VERIFY_SHA: &str = "verify_sha";
-pub const STAGE_VERIFY_SIGNATURE: &str = "verify_signature";
-pub const STAGE_BACKUP: &str = "backup";
-pub const STAGE_REPLACE: &str = "replace";
-pub const STAGE_VERIFY_POST: &str = "verify_post";
-pub const STAGE_COMPLETE: &str = "complete";
-pub const STAGE_FAILED: &str = "failed";
-pub const STAGE_CANCELLED: &str = "cancelled";
+pub const STAGE_DOWNLOAD: ApplyStage = ApplyStage::Download;
+pub const STAGE_VERIFY_SHA: ApplyStage = ApplyStage::VerifySha;
+pub const STAGE_VERIFY_SIGNATURE: ApplyStage = ApplyStage::VerifySignature;
+pub const STAGE_BACKUP: ApplyStage = ApplyStage::Backup;
+pub const STAGE_REPLACE: ApplyStage = ApplyStage::Replace;
+pub const STAGE_VERIFY_POST: ApplyStage = ApplyStage::VerifyPost;
+pub const STAGE_COMPLETE: ApplyStage = ApplyStage::Complete;
+pub const STAGE_FAILED: ApplyStage = ApplyStage::Failed;
+pub const STAGE_CANCELLED: ApplyStage = ApplyStage::Cancelled;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, specta::Type)]
 pub struct ApplyRequest {
     pub apply_id: String,
     pub game_id: String,
@@ -46,12 +47,12 @@ pub struct ApplyRequest {
     pub install_dir: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 pub struct ApplyBatchRequest {
     pub items: Vec<ApplyRequest>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 pub struct ApplyResult {
     pub apply_id: String,
     pub backup_id: String,
@@ -59,12 +60,12 @@ pub struct ApplyResult {
     pub new_version: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 pub struct ApplyBatchResult {
     pub outcomes: Vec<ApplyOutcome>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 pub struct ApplyOutcome {
     pub apply_id: String,
     pub success: bool,
@@ -74,21 +75,21 @@ pub struct ApplyOutcome {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct ApplyProgress {
     pub apply_id: String,
     pub group_id: String,
-    pub stage: String,
+    pub stage: ApplyStage,
     pub message: String,
     pub progress: Option<f64>,
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub error_class: Option<String>,
+    pub error_class: Option<dlssync_contracts::ApplyErrorClass>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attempt: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct GroupDownloadProgress {
     pub group_id: String,
     pub url: String,
@@ -98,12 +99,13 @@ pub struct GroupDownloadProgress {
     pub attempt: u32,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct InflightSnapshot {
     pub in_flight: usize,
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn apply_update(
     handle: AppHandle,
     state: State<'_, AppState>,
@@ -135,6 +137,7 @@ pub async fn apply_update(
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn apply_update_batch(
     handle: AppHandle,
     state: State<'_, AppState>,
@@ -222,11 +225,13 @@ pub async fn apply_update_batch(
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn cancel_apply(state: State<'_, AppState>, apply_id: String) -> AppResult<bool> {
     Ok(state.apply_registry.cancel(&apply_id))
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn cancel_all_applies(state: State<'_, AppState>) -> AppResult<usize> {
     Ok(state.apply_registry.cancel_all())
 }
@@ -250,7 +255,6 @@ pub(crate) async fn lookup_release(
             &request.target_version,
             filename,
         )
-        .or_else(|| catalog.find(&request.vendor, &request.family, &request.target_version))
         .ok_or_else(|| {
             AppError::Other(format!(
                 "release {}::{}::{} not in catalog",
@@ -275,6 +279,30 @@ pub(crate) async fn apply_single_item(
         apply_id: request.apply_id.clone(),
         group_id: group_id.clone(),
     };
+
+    if let Some(minimum) = release.min_driver.as_deref() {
+        let installed = crate::system_info::collect()
+            .gpus
+            .into_iter()
+            .find(|gpu| gpu_vendor_matches(gpu.vendor, &request.vendor))
+            .map(|gpu| gpu.driver_version);
+        if !installed
+            .as_deref()
+            .is_some_and(|version| driver_meets_minimum(&request.vendor, version, minimum))
+        {
+            let installed = installed.unwrap_or_else(|| "unknown".into());
+            let reason = format!(
+                "{} {} requires {} driver {minimum} or newer; installed: {installed}",
+                request.vendor, release.version, request.vendor
+            );
+            ctx.fail(
+                "Driver requirement not met",
+                reason.clone(),
+                Some("driver_too_old"),
+            );
+            return Ok(failure_outcome(request, &group_id, reason));
+        }
+    }
 
     let dll_path = PathBuf::from(&request.dll_path);
     if let Err(guard_err) = crate::paths::PathGuard::assert_dll_ext(&dll_path)
@@ -333,6 +361,30 @@ pub(crate) async fn apply_single_item(
         return Ok(failure_outcome(request, &group_id, err));
     }
 
+    let game_executable =
+        match super::dlss_profile::find_game_executable(game_root.to_string_lossy().into_owned())
+            .await
+        {
+            Ok(executable) => executable,
+            Err(error) => {
+                ctx.fail(
+                    "Game executable could not be inspected",
+                    error.to_string(),
+                    Some("architecture"),
+                );
+                return Ok(failure_outcome(request, &group_id, error.to_string()));
+            }
+        };
+    if let Some(executable) = &game_executable {
+        if let Err(error) = pe_version::require_x64_executable(std::path::Path::new(executable)) {
+            ctx.fail(
+                "Incompatible game architecture",
+                error.to_string(),
+                Some("architecture"),
+            );
+            return Ok(failure_outcome(request, &group_id, error.to_string()));
+        }
+    }
     let backup_root = match state.backups.read().as_ref().map(|s| s.root_dir.clone()) {
         Some(p) => p,
         None => {
@@ -364,6 +416,15 @@ pub(crate) async fn apply_single_item(
                 return Ok(failure_outcome(request, &group_id, err));
             }
         };
+
+    if let Err(error) = pe_version::require_x64_dll_pair(&dll_path, &staged_dll) {
+        ctx.fail(
+            "Incompatible binary architecture",
+            error.to_string(),
+            Some("architecture"),
+        );
+        return Ok(failure_outcome(request, &group_id, error.to_string()));
+    }
 
     let algo = dll_catalog::HashAlgo::from_hex_len(&release.sha256)
         .unwrap_or(dll_catalog::HashAlgo::Sha256);
@@ -555,6 +616,17 @@ pub(crate) async fn apply_single_item(
     }
     let copy_src = dll_path.clone();
     let copy_dst = backup_path.clone();
+    let backup_space = std::fs::metadata(&dll_path)
+        .map_err(dll_catalog::CatalogError::from)
+        .and_then(|metadata| dll_catalog::ensure_available_space(&backup_path, metadata.len()));
+    if let Err(error) = backup_space {
+        ctx.fail(
+            "Backup storage unavailable",
+            error.to_string(),
+            Some("backup"),
+        );
+        return Ok(failure_outcome(request, &group_id, error.to_string()));
+    }
     match tokio::task::spawn_blocking(move || std::fs::copy(&copy_src, &copy_dst)).await {
         Ok(Ok(_)) => {}
         Ok(Err(e)) => {
@@ -606,6 +678,32 @@ pub(crate) async fn apply_single_item(
     if cancel.is_cancelled() {
         ctx.cancelled();
         return Ok(failure_outcome(request, &group_id, "cancelled".into()));
+    }
+    let identity_check = pe_version::require_x64_dll_pair(&dll_path, &staged_dll).and_then(|()| {
+        game_executable
+            .as_ref()
+            .map(|exe| pe_version::require_x64_executable(std::path::Path::new(exe)))
+            .transpose()
+            .map(|_| ())
+    });
+    if let Err(error) = identity_check {
+        ctx.fail(
+            "Binary architecture changed before installation",
+            error.to_string(),
+            Some("architecture"),
+        );
+        return Ok(failure_outcome(request, &group_id, error.to_string()));
+    }
+    let target_space = std::fs::metadata(&staged_dll)
+        .map_err(dll_catalog::CatalogError::from)
+        .and_then(|metadata| dll_catalog::ensure_available_space(&dll_path, metadata.len()));
+    if let Err(error) = target_space {
+        ctx.fail(
+            "Game storage unavailable",
+            error.to_string(),
+            Some("backup"),
+        );
+        return Ok(failure_outcome(request, &group_id, error.to_string()));
     }
     if let Err(e) = atomic_replace(&staged_dll, &dll_path) {
         let os = e.raw_os_error().unwrap_or(0);
@@ -767,13 +865,13 @@ struct StageContext {
 }
 
 impl StageContext {
-    fn stage(&self, stage: &str, message: &str, progress: Option<f64>, attempt: Option<u32>) {
+    fn stage(&self, stage: ApplyStage, message: &str, progress: Option<f64>, attempt: Option<u32>) {
         let _ = self.handle.emit(
             EVENT_APPLY_PROGRESS,
             ApplyProgress {
                 apply_id: self.apply_id.clone(),
                 group_id: self.group_id.clone(),
-                stage: stage.to_string(),
+                stage,
                 message: message.to_string(),
                 progress,
                 error: None,
@@ -789,11 +887,14 @@ impl StageContext {
             ApplyProgress {
                 apply_id: self.apply_id.clone(),
                 group_id: self.group_id.clone(),
-                stage: STAGE_FAILED.to_string(),
+                stage: STAGE_FAILED,
                 message: message.to_string(),
                 progress: None,
                 error: Some(error),
-                error_class: error_class.map(|s| s.to_string()),
+                error_class: error_class.map(|code| {
+                    serde_json::from_value(serde_json::json!(code))
+                        .unwrap_or(dlssync_contracts::ApplyErrorClass::Other)
+                }),
                 attempt: None,
             },
         );
@@ -805,11 +906,11 @@ impl StageContext {
             ApplyProgress {
                 apply_id: self.apply_id.clone(),
                 group_id: self.group_id.clone(),
-                stage: STAGE_CANCELLED.to_string(),
+                stage: STAGE_CANCELLED,
                 message: "Cancelled".to_string(),
                 progress: None,
                 error: Some("cancelled".to_string()),
-                error_class: Some("cancelled".to_string()),
+                error_class: Some(dlssync_contracts::ApplyErrorClass::Cancelled),
                 attempt: None,
             },
         );
@@ -912,6 +1013,37 @@ fn exe_is_under_root(exe: &std::path::Path, root: &str) -> bool {
     exe_norm
         .strip_prefix(root)
         .is_some_and(|rest| rest.starts_with('/'))
+}
+
+fn gpu_vendor_matches(vendor: crate::system_info::GpuVendor, requested: &str) -> bool {
+    matches!(
+        (vendor, requested.to_ascii_lowercase().as_str()),
+        (crate::system_info::GpuVendor::Nvidia, "nvidia")
+            | (crate::system_info::GpuVendor::Amd, "amd")
+            | (crate::system_info::GpuVendor::Intel, "intel")
+    )
+}
+
+fn version_numbers(raw: &str) -> Vec<u32> {
+    raw.split(|ch: char| !ch.is_ascii_digit())
+        .filter(|part| !part.is_empty())
+        .filter_map(|part| part.parse().ok())
+        .collect()
+}
+
+fn driver_meets_minimum(vendor: &str, installed: &str, minimum: &str) -> bool {
+    let mut installed = version_numbers(installed);
+    if vendor.eq_ignore_ascii_case("nvidia")
+        && installed.len() >= 4
+        && installed[0] >= 30
+        && installed[2] >= 10
+    {
+        installed = vec![
+            (installed[2] - 10) * 100 + installed[3] / 100,
+            installed[3] % 100,
+        ];
+    }
+    installed.as_slice() >= version_numbers(minimum).as_slice()
 }
 
 fn ensure_writable(path: &std::path::Path) -> Result<(), String> {
@@ -1041,5 +1173,17 @@ mod tests {
         )));
         assert!(is_executable_image(Path::new(r"C:\Games\Halo\halo.exe")));
         assert!(is_executable_image(Path::new(r"C:\Games\Halo\Halo.EXE")));
+    }
+
+    #[test]
+    fn minimum_driver_comparison_normalizes_nvidia_wmi_versions() {
+        assert!(driver_meets_minimum("nvidia", "32.0.15.9174", "535.98"));
+        assert!(!driver_meets_minimum("nvidia", "32.0.15.2240", "535.98"));
+        assert!(driver_meets_minimum("amd", "32.0.21040.7000", "22.7.1"));
+        assert!(!driver_meets_minimum(
+            "intel",
+            "31.0.101.2115",
+            "31.0.101.4255"
+        ));
     }
 }

@@ -61,7 +61,7 @@
 
   async function loadRuntimeMode(): Promise<void> {
     try {
-      runtime = await transport<RuntimeMode>(COMMANDS.runtime_mode);
+      runtime = await transport(COMMANDS.runtime_mode);
     } catch {
       runtime = null;
     }

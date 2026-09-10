@@ -39,9 +39,26 @@ const MISSING_NEEDLES = ["not in zip", "dll not found", "release ", "not in cata
 const BACKUP_NEEDLES = ["backup"];
 const CANCELLED_NEEDLES = ["cancelled by user", "cancelled"];
 
-export function classifyApplyError(message: string | null | undefined): ClassifiedError {
+export function normalizeErrorClass(code: string | null | undefined): ApplyErrorClass {
+  return code && Object.hasOwn(ERROR_CLASS_LABEL, code) ? code as ApplyErrorClass : "other";
+}
+
+export function classifyApplyError(message: string | null | undefined, code?: string | null): ClassifiedError {
   const raw = (message ?? "").trim();
   const lower = raw.toLowerCase();
+  const kind = normalizeErrorClass(code);
+  if (kind === "architecture" || lower.includes("incompatible binary architecture")) {
+    return { kind: "architecture", short: "Incompatible binary", hint: "The file architecture does not match the game. Refresh the catalog and review the compatible candidate.", retryable: false, action: "report" };
+  }
+  if (kind === "streamline_locked" || lower.includes("matching sl.interposer.dll")) {
+    return { kind: "streamline_locked", short: "Streamline updates disabled", hint: "Review Streamline settings and the complete runtime set.", retryable: false, action: "none" };
+  }
+  if (kind === "driver_too_old") {
+    return { kind, short: "Driver update required", hint: "Review the required driver version before applying this runtime.", retryable: false, action: "none" };
+  }
+  if (kind === "game_running") {
+    return { kind, short: "Game is running", hint: "Close the game before applying changes.", retryable: true, action: "close_game_and_retry" };
+  }
   if (!raw) {
     return {
       kind: "other",
@@ -150,6 +167,10 @@ export const ERROR_CLASS_LABEL: Record<ApplyErrorClass, string> = {
   backup: "Backup",
   cancelled: "Cancelled",
   other: "Unknown",
+  streamline_locked: "Streamline disabled",
+  driver_too_old: "Driver update required",
+  game_running: "Game running",
+  architecture: "Architecture",
 };
 
 export const ERROR_CLASS_TONE: Record<ApplyErrorClass, "danger" | "warning" | "info" | "neutral"> = {
@@ -162,4 +183,8 @@ export const ERROR_CLASS_TONE: Record<ApplyErrorClass, "danger" | "warning" | "i
   backup: "danger",
   cancelled: "neutral",
   other: "danger",
+  streamline_locked: "info",
+  driver_too_old: "warning",
+  game_running: "info",
+  architecture: "danger",
 };

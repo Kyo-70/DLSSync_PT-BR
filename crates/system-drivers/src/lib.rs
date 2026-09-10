@@ -52,7 +52,7 @@ pub enum DriverError {
 }
 
 /// An installed device + its current driver, from WMI `Win32_PnPSignedDriver`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct SystemDevice {
     pub name: String,
     pub class: DeviceClass,
@@ -78,7 +78,7 @@ fn default_present() -> bool {
 }
 
 /// A candidate driver offered by Windows Update / the Microsoft Update Catalog.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct DriverUpdate {
     /// `UpdateID:RevisionNumber` — the stable handle used to install.
     pub update_id: String,
@@ -105,23 +105,23 @@ pub struct DriverUpdate {
     pub support_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
-pub enum InstallStage {
+pub enum SystemDriverInstallStage {
     Downloading,
     Installing,
     Completed,
     Failed,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InstallProgress {
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct SystemDriverInstallProgress {
     pub stage: InstallStage,
     pub message: String,
     pub fraction: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct InstallReport {
     pub success: bool,
     pub reboot_required: bool,
@@ -130,7 +130,7 @@ pub struct InstallReport {
 }
 
 /// Per-class group of available updates, for the UI's "System & Components" view.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct DeviceGroup {
     pub class: DeviceClass,
     pub label: String,
@@ -486,6 +486,9 @@ pub fn group_by_class(updates: Vec<DriverUpdate>) -> Vec<DeviceGroup> {
         })
         .collect()
 }
+
+pub type InstallProgress = SystemDriverInstallProgress;
+pub type InstallStage = SystemDriverInstallStage;
 
 #[cfg(test)]
 mod tests {
@@ -998,3 +1001,5 @@ mod tests {
         assert!(!matches_device(&update, &device));
     }
 }
+
+// Compatibility aliases for existing Rust callers. The wire type names remain unambiguous.

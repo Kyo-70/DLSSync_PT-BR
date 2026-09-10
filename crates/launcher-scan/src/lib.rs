@@ -11,7 +11,7 @@ pub enum ScanError {
     Parse(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum LauncherKind {
     Steam,
@@ -24,7 +24,7 @@ pub enum LauncherKind {
     Manual,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct DetectedGame {
     pub id: String,
     pub name: String,
@@ -41,6 +41,10 @@ pub trait LauncherScanner {
 }
 
 #[cfg(windows)]
+mod battlenet;
+#[cfg(windows)]
+mod ea;
+#[cfg(windows)]
 mod epic;
 #[cfg(windows)]
 mod gog;
@@ -48,7 +52,13 @@ mod gog;
 mod steam;
 #[cfg(windows)]
 mod ubisoft;
+#[cfg(windows)]
+mod xbox;
 
+#[cfg(windows)]
+pub use battlenet::BattlenetScanner;
+#[cfg(windows)]
+pub use ea::EaDesktopScanner;
 #[cfg(windows)]
 pub use epic::EpicScanner;
 #[cfg(windows)]
@@ -57,42 +67,8 @@ pub use gog::GogScanner;
 pub use steam::SteamScanner;
 #[cfg(windows)]
 pub use ubisoft::UbisoftScanner;
-
 #[cfg(windows)]
-pub struct EaDesktopScanner;
-#[cfg(windows)]
-impl LauncherScanner for EaDesktopScanner {
-    fn kind(&self) -> LauncherKind {
-        LauncherKind::EaDesktop
-    }
-    fn scan(&self) -> Result<Vec<DetectedGame>, ScanError> {
-        Ok(Vec::new())
-    }
-}
-
-#[cfg(windows)]
-pub struct XboxScanner;
-#[cfg(windows)]
-impl LauncherScanner for XboxScanner {
-    fn kind(&self) -> LauncherKind {
-        LauncherKind::Xbox
-    }
-    fn scan(&self) -> Result<Vec<DetectedGame>, ScanError> {
-        Ok(Vec::new())
-    }
-}
-
-#[cfg(windows)]
-pub struct BattlenetScanner;
-#[cfg(windows)]
-impl LauncherScanner for BattlenetScanner {
-    fn kind(&self) -> LauncherKind {
-        LauncherKind::Battlenet
-    }
-    fn scan(&self) -> Result<Vec<DetectedGame>, ScanError> {
-        Ok(Vec::new())
-    }
-}
+pub use xbox::XboxScanner;
 
 pub fn scan_all(launchers: &[LauncherKind]) -> Result<Vec<DetectedGame>, ScanError> {
     let mut out = Vec::new();

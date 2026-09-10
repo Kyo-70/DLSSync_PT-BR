@@ -2,8 +2,8 @@
 export const PRODUCT = {
   "anticheatFaq": "https://www.pcgamingwiki.com/wiki/Glossary:Anti-cheat",
   "author": "https://github.com/xt0n1-t3ch",
-  "canonicalManifest": "https://cdn.jsdelivr.net/gh/xt0n1-t3ch/dlssync-manifest@main/manifest.json",
-  "homepage": "https://xt0n1-t3ch.github.io/DLSSync/",
+  "canonicalManifest": "https://cdn.jsdelivr.net/gh/xt0n1-t3ch/dlssync-manifest@main/manifest-v3.json",
+  "homepage": "https://github.com/xt0n1-t3ch/DLSSync",
   "issues": "https://github.com/xt0n1-t3ch/DLSSync/issues",
   "kofi": "https://ko-fi.com/xt0n1",
   "manifestRepository": "https://github.com/xt0n1-t3ch/DLSSync-Manifest",

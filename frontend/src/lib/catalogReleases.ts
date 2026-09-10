@@ -1,8 +1,9 @@
 import type { Release } from "./api";
+import { compareVersions } from "./versions";
 
 /// Merge the release lists of every DLL family that maps to one catalog feature
 /// (e.g. FSR Upscaling = DX12 + Vulkan), de-duped by version+hash and sorted
-/// newest-first by packed version.
+/// newest-first by file version components.
 export function mergeFamilyReleases(lists: Release[][]): Release[] {
   const seen = new Set<string>();
   const merged: Release[] = [];
@@ -15,5 +16,5 @@ export function mergeFamilyReleases(lists: Release[][]): Release[] {
       }
     }
   }
-  return merged.sort((a, b) => Number(b.version_packed ?? 0) - Number(a.version_packed ?? 0));
+  return merged.sort((a, b) => compareVersions(b.version, a.version));
 }

@@ -1,6 +1,42 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::BTreeMap;
+pub mod runtime;
+pub use runtime::*;
+
+/// Legacy progress spelling retained while all callers migrate to OperationStage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplyStage {
+    Download,
+    VerifySha,
+    VerifySignature,
+    Backup,
+    Replace,
+    VerifyPost,
+    Complete,
+    Failed,
+    Cancelled,
+}
+
+/// Stable codes for presentation. Technical error details are separate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplyErrorClass {
+    Network,
+    Signature,
+    Lock,
+    Permission,
+    Hash,
+    Missing,
+    Backup,
+    Cancelled,
+    StreamlineLocked,
+    DriverTooOld,
+    GameRunning,
+    Architecture,
+    Other,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
@@ -14,6 +50,39 @@ pub enum DistributionChannel {
 pub enum InstallMode {
     Installed,
     Portable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum DlssGeneration {
+    Dlss2,
+    Dlss3,
+    Dlss4,
+    Dlss5,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum NvidiaGpuArchitecture {
+    PreRtx,
+    Turing,
+    Ampere,
+    Ada,
+    Blackwell,
+    Future,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct DlssCapability {
+    pub gpu_architecture: NvidiaGpuArchitecture,
+    pub generations: Vec<DlssGeneration>,
+    pub valid_presets: Vec<String>,
+    pub frame_generation_multipliers: Vec<u8>,
+    pub installed_driver: Option<String>,
+    pub minimum_driver: String,
+    pub ray_reconstruction: bool,
+    pub neural_rendering: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -172,11 +241,20 @@ pub struct UpdatePlanItem {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct UpdatePlan {
     pub id: String,
+    /// Zero identifies a persisted plan from a previous, unverified planner.
+    #[serde(default)]
+    pub schema_version: u16,
     pub created_at: String,
     pub catalog_generated_at: String,
+    /// Digest of the exact signed catalog bytes used by the planner.
+    #[serde(default)]
+    pub catalog_revision: String,
     pub fingerprint: String,
     pub stale: bool,
     pub items: Vec<UpdatePlanItem>,
+    /// File observations, exact artifacts and coherent-set dependencies.
+    #[serde(default)]
+    pub changes: Vec<PlannedChange>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -215,6 +293,13 @@ pub struct ApiError {
     pub message: String,
     pub retryable: bool,
     pub context: BTreeMap<String, String>,
+}
+
+/// Error representation used by the existing Tauri commands during migration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct CommandError {
+    pub kind: String,
+    pub message: String,
 }
 
 #[cfg(test)]

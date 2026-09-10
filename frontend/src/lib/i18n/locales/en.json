@@ -1099,6 +1099,26 @@
       "label": "Unknown",
       "short": "Unexpected error",
       "hint": "An unclassified failure occurred. Use 'Copy report' and open an issue if it persists."
+    },
+    "streamline_locked": {
+      "label": "Streamline disabled",
+      "short": "Streamline disabled",
+      "hint": "Streamline updates are disabled. Review Settings → Advanced and update the complete compatible set."
+    },
+    "driver_too_old": {
+      "label": "Driver update required",
+      "short": "Driver update required",
+      "hint": "The installed driver does not meet this runtime requirement. Review Drivers before applying."
+    },
+    "game_running": {
+      "label": "Game running",
+      "short": "Game running",
+      "hint": "Close the game before changing its files, then retry."
+    },
+    "architecture": {
+      "label": "Architecture",
+      "short": "Architecture",
+      "hint": "The DLL architecture does not match the game. Refresh the catalog and review a compatible candidate."
     }
   },
   "notifKind": {
@@ -1750,10 +1770,13 @@
       "grdRequired": "Game Ready Driver 572.16 or newer is required for DLSS 4 overrides.",
       "superResolution": "Super Resolution",
       "frameGeneration": "Frame Generation",
+      "rayReconstruction": "Ray Reconstruction",
+      "forceLatestRrDll": "Force the latest installed Ray Reconstruction DLL",
       "forceLatestSrDll": "Force the latest installed DLSS DLL",
       "forceLatestFgDll": "Force the latest installed Frame Generation DLL",
       "modelPreset": "Model preset",
       "modelPresetAria": "DLSS model preset",
+      "rrPresetAria": "Ray Reconstruction model preset",
       "noPresetOverride": "No preset override",
       "mode": "Mode",
       "modeAria": "Frame generation mode",
@@ -1769,6 +1792,7 @@
       "working": "Working…",
       "resetToDefault": "Reset to default",
       "note": "Writes an NVIDIA driver application profile — the same mechanism the NVIDIA app uses. Fully reversible with Reset. Multiplayer titles with anti-cheat may flag a forced profile; check the game's policy first.",
+      "rrNote": "Ray Reconstruction uses its own driver setting (0x10E41DF7) — separate from Super Resolution. Requires an RTX GPU and a Ray Reconstruction-capable game.",
       "toast": {
         "openLinkFailed": "Open link failed: {error}",
         "needsElevation": "Super Resolution applied. Frame-generation overrides need administrator — relaunch DLSSync as administrator to apply them.",

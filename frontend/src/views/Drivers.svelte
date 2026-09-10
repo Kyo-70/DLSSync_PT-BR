@@ -84,7 +84,7 @@
 
   function hasChangelog(report: DriverStatusReport): boolean {
     const log = report.latest?.changelog;
-    return !!log && (log.highlights.length > 0 || log.fixed.length > 0);
+    return !!log && ((log.highlights?.length ?? 0) > 0 || (log.fixed?.length ?? 0) > 0);
   }
 
   async function open(url: string | null): Promise<void> {
@@ -325,15 +325,15 @@
           {#if expanded}
             <div class="changelog">
               {#if hasChangelog(report) && report.latest?.changelog}
-                {#if report.latest.changelog.highlights.length > 0}
+                {#if (report.latest.changelog.highlights?.length ?? 0) > 0}
                   <ul class="cl-highlights">
-                    {#each report.latest.changelog.highlights as h}<li>{h}</li>{/each}
+                    {#each (report.latest.changelog.highlights ?? []) as h}<li>{h}</li>{/each}
                   </ul>
                 {/if}
-                {#if report.latest.changelog.fixed.length > 0}
+                {#if (report.latest.changelog.fixed?.length ?? 0) > 0}
                   <span class="cl-label">{$t("view.drivers.changelogFixed")}</span>
                   <ul class="cl-fixed">
-                    {#each report.latest.changelog.fixed as f}<li>{f}</li>{/each}
+                    {#each (report.latest.changelog.fixed ?? []) as f}<li>{f}</li>{/each}
                   </ul>
                 {/if}
               {:else}

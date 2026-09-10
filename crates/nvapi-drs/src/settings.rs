@@ -5,6 +5,8 @@ pub mod ids {
     pub const DLSS_RR_ENABLE_OVERRIDE: u32 = 0x10E4_1E02;
     pub const DLSS_FG_ENABLE_OVERRIDE: u32 = 0x10E4_1E03;
     pub const DLSS_SR_FORCED_PRESET: u32 = 0x10E4_1DF3;
+    /// NVIDIA NVAPI `NGX_DLSS_RR_OVERRIDE_RENDER_PRESET_SELECTION_ID`.
+    pub const DLSS_RR_FORCED_PRESET: u32 = 0x10E4_1DF7;
     pub const DLSS_FG_FORCED_PRESET: u32 = 0x10E4_1DF1;
     pub const DLSS_FG_FORCED_MODE: u32 = 0x1030_8298;
     pub const DLSS_MFG_FIXED_COUNT: u32 = 0x104D_6667;
@@ -22,13 +24,14 @@ pub const RESETTABLE_IDS: &[u32] = &[
     ids::DLSS_RR_ENABLE_OVERRIDE,
     ids::DLSS_FG_ENABLE_OVERRIDE,
     ids::DLSS_SR_FORCED_PRESET,
+    ids::DLSS_RR_FORCED_PRESET,
     ids::DLSS_FG_FORCED_PRESET,
     ids::DLSS_FG_FORCED_MODE,
     ids::DLSS_MFG_FIXED_COUNT,
     ids::DLSS_MFG_TARGET_FRAME_RATE,
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum DlssPreset {
     Default,
@@ -97,7 +100,7 @@ impl DlssPreset {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum FrameGenMode {
     AppControlled,
@@ -124,7 +127,7 @@ impl FrameGenMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum FrameGenCount {
     AppControlled,
@@ -154,23 +157,25 @@ impl FrameGenCount {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct DrsSetting {
     pub id: u32,
     pub value: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case", tag = "scope")]
 pub enum OverrideScope {
     Global,
     PerGame { executable_path: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, specta::Type)]
 pub struct DlssOverrideConfig {
     pub enable_sr_dll_override: bool,
     pub sr_preset: Option<DlssPreset>,
+    pub enable_rr_dll_override: bool,
+    pub rr_preset: Option<DlssPreset>,
     pub enable_fg_dll_override: bool,
     pub fg_preset: Option<DlssPreset>,
     pub fg_mode: Option<FrameGenMode>,
@@ -190,6 +195,18 @@ impl DlssOverrideConfig {
         if let Some(preset) = self.sr_preset {
             settings.push(DrsSetting {
                 id: ids::DLSS_SR_FORCED_PRESET,
+                value: preset.to_value(),
+            });
+        }
+        if self.enable_rr_dll_override {
+            settings.push(DrsSetting {
+                id: ids::DLSS_RR_ENABLE_OVERRIDE,
+                value: VALUE_ON,
+            });
+        }
+        if let Some(preset) = self.rr_preset {
+            settings.push(DrsSetting {
+                id: ids::DLSS_RR_FORCED_PRESET,
                 value: preset.to_value(),
             });
         }
@@ -236,6 +253,8 @@ impl DlssOverrideConfig {
         DlssOverrideConfig {
             enable_sr_dll_override: get(ids::DLSS_SR_ENABLE_OVERRIDE) == Some(VALUE_ON),
             sr_preset: get(ids::DLSS_SR_FORCED_PRESET).and_then(DlssPreset::from_value),
+            enable_rr_dll_override: get(ids::DLSS_RR_ENABLE_OVERRIDE) == Some(VALUE_ON),
+            rr_preset: get(ids::DLSS_RR_FORCED_PRESET).and_then(DlssPreset::from_value),
             enable_fg_dll_override: get(ids::DLSS_FG_ENABLE_OVERRIDE) == Some(VALUE_ON),
             fg_preset: get(ids::DLSS_FG_FORCED_PRESET).and_then(DlssPreset::from_value),
             fg_mode: get(ids::DLSS_FG_FORCED_MODE).and_then(FrameGenMode::from_value),
@@ -249,10 +268,16 @@ impl DlssOverrideConfig {
         if self.enable_sr_dll_override {
             count += 1;
         }
+        if self.enable_rr_dll_override {
+            count += 1;
+        }
         if self.enable_fg_dll_override {
             count += 1;
         }
         if matches!(self.sr_preset, Some(p) if p != DlssPreset::Default) {
+            count += 1;
+        }
+        if matches!(self.rr_preset, Some(p) if p != DlssPreset::Default) {
             count += 1;
         }
         if matches!(self.fg_preset, Some(p) if p != DlssPreset::Default) {
@@ -312,6 +337,8 @@ mod tests {
     #[test]
     fn dynamic_frame_gen_config_emits_mode_and_target() {
         let config = DlssOverrideConfig {
+            enable_rr_dll_override: false,
+            rr_preset: None,
             enable_fg_dll_override: true,
             fg_mode: Some(FrameGenMode::Dynamic),
             fg_dynamic_target_fps: Some(240),
@@ -355,8 +382,33 @@ mod tests {
 
     #[test]
     fn resettable_ids_cover_every_override_setting() {
-        assert_eq!(RESETTABLE_IDS.len(), 8);
+        assert_eq!(RESETTABLE_IDS.len(), 9);
+        assert!(RESETTABLE_IDS.contains(&ids::DLSS_RR_ENABLE_OVERRIDE));
+        assert!(RESETTABLE_IDS.contains(&ids::DLSS_RR_FORCED_PRESET));
         assert!(RESETTABLE_IDS.contains(&ids::DLSS_FG_FORCED_MODE));
+    }
+
+    #[test]
+    fn rr_override_uses_distinct_verified_ids_and_values() {
+        let config = DlssOverrideConfig {
+            enable_rr_dll_override: true,
+            rr_preset: Some(DlssPreset::O),
+            ..Default::default()
+        };
+        assert_eq!(
+            config.to_drs_settings(),
+            vec![
+                DrsSetting {
+                    id: ids::DLSS_RR_ENABLE_OVERRIDE,
+                    value: 1,
+                },
+                DrsSetting {
+                    id: ids::DLSS_RR_FORCED_PRESET,
+                    value: 15,
+                },
+            ]
+        );
+        assert_eq!(config.active_override_count(), 2);
     }
 
     #[test]
@@ -438,6 +490,8 @@ mod tests {
         let cfg = DlssOverrideConfig {
             enable_sr_dll_override: true,
             sr_preset: Some(DlssPreset::K),
+            enable_rr_dll_override: true,
+            rr_preset: Some(DlssPreset::O),
             enable_fg_dll_override: true,
             fg_preset: Some(DlssPreset::J),
             fg_mode: Some(FrameGenMode::Dynamic),
@@ -468,8 +522,13 @@ mod tests {
 
     #[test]
     fn unknown_drs_value_degrades_to_none_not_a_wrong_preset() {
-        let read = vec![(ids::DLSS_SR_FORCED_PRESET, Some(0x10))];
-        assert_eq!(DlssOverrideConfig::from_drs_settings(&read).sr_preset, None);
+        let read = vec![
+            (ids::DLSS_SR_FORCED_PRESET, Some(0x10)),
+            (ids::DLSS_RR_FORCED_PRESET, Some(0xDEAD)),
+        ];
+        let config = DlssOverrideConfig::from_drs_settings(&read);
+        assert_eq!(config.sr_preset, None);
+        assert_eq!(config.rr_preset, None);
     }
 
     #[test]

@@ -26,6 +26,9 @@ const frontendEnv = await readFile(frontendEnvPath, "utf8");
 assert(frontendEnv.includes("VITE_DLSSYNC_DISTRIBUTION=nexus"), "frontend/.env.nexus must set the nexus distribution");
 
 const lib = await readFile(libPath, "utf8");
-assert(lib.includes('#[cfg(not(feature = "nexus"))]'), "Tauri updater plugin must be cfg-gated off for the nexus feature");
+assert(lib.includes('#[cfg(feature = "standard")]'), "Tauri updater plugin must be standard-feature-only");
+const cargo = await readFile(path.join(root, "src-tauri", "Cargo.toml"), "utf8");
+assert(cargo.includes('standard = ["dep:tauri-plugin-updater"]'), "standard feature must own updater dependency");
+assert(cargo.includes('tauri-plugin-updater = { version = "2", optional = true }'), "updater dependency must be optional");
 
 console.log("Nexus build strip checks passed");

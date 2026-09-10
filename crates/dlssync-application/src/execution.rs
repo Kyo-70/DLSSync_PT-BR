@@ -19,6 +19,8 @@ pub enum ExecutionError {
     Io(#[from] std::io::Error),
     #[error("Authenticode verification failed: {0}")]
     Authenticode(String),
+    #[error("incompatible binary architecture: {0}")]
+    Architecture(String),
 }
 
 pub async fn apply_update_plan(
@@ -36,6 +38,7 @@ pub async fn apply_update_plan(
     let mut prepared = Vec::with_capacity(selected.len());
     for item in selected {
         let target = checked_target(&item.dll_path)?;
+        verify_sibling_executable(&target)?;
         let filename = target
             .file_name()
             .and_then(|value| value.to_str())
@@ -43,10 +46,11 @@ pub async fn apply_update_plan(
         let vendor = family_vendor(&item.family);
         let release = catalog
             .find_file(vendor, &item.family, &item.target_version, filename)
-            .or_else(|| catalog.find(vendor, &item.family, &item.target_version))
             .ok_or_else(|| ExecutionError::MissingRelease(item.id.clone()))?;
         let staged =
             dll_catalog::download_and_extract_dll(client, &release, staging.path()).await?;
+        pe_version::require_x64_dll_pair(&target, &staged)
+            .map_err(|error| ExecutionError::Architecture(error.to_string()))?;
         verify_publisher(&staged, vendor)?;
         prepared.push((item, target, staged));
     }
@@ -64,6 +68,7 @@ pub async fn apply_update_plan(
                 backup_path.display().to_string(),
             ));
         }
+        dll_catalog::ensure_available_space(&backups.root_dir, std::fs::metadata(target)?.len())?;
         copy_and_sync(target, &backup_path)?;
         let entry = BackupEntry {
             id: uuid::Uuid::new_v4().to_string(),
@@ -88,7 +93,14 @@ pub async fn apply_update_plan(
 
     let mut replaced = 0usize;
     for ((_, target, staged), backup) in prepared.iter().zip(&backup_entries) {
-        if let Err(error) = replace_atomic(staged, target) {
+        let write_result = (|| -> std::io::Result<()> {
+            pe_version::require_x64_dll_pair(target, staged)?;
+            verify_sibling_executable(target).map_err(std::io::Error::other)?;
+            dll_catalog::ensure_available_space(target, std::fs::metadata(staged)?.len())
+                .map_err(std::io::Error::other)?;
+            replace_atomic(staged, target)
+        })();
+        if let Err(error) = write_result {
             for restored in backup_entries[..replaced].iter().rev() {
                 let _ = replace_atomic(&restored.backup_path, &restored.original_path);
             }
@@ -156,6 +168,27 @@ fn checked_target(value: &str) -> Result<PathBuf, ExecutionError> {
     Ok(path)
 }
 
+fn verify_sibling_executable(target: &Path) -> Result<(), ExecutionError> {
+    let Some(parent) = target.parent() else {
+        return Ok(());
+    };
+    let executables: Vec<_> = std::fs::read_dir(parent)?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
+        })
+        .take(2)
+        .collect();
+    // Multiple executables require the explicit game resolver in a verified plan.
+    if executables.len() == 1 {
+        pe_version::require_x64_executable(&executables[0])
+            .map_err(|error| ExecutionError::Architecture(error.to_string()))?;
+    }
+    Ok(())
+}
+
 fn verify_publisher(path: &Path, vendor: &str) -> Result<(), ExecutionError> {
     let info = pe_version::read_authenticode(path)
         .ok_or_else(|| ExecutionError::Authenticode("signature is missing".into()))?;
@@ -211,6 +244,9 @@ mod tests {
         std::fs::write(&target, b"new").unwrap();
         std::fs::write(&backup, b"old").unwrap();
         let plan = UpdatePlan {
+            schema_version: 0,
+            catalog_revision: String::new(),
+            changes: Vec::new(),
             id: "plan".into(),
             created_at: chrono::Utc::now().to_rfc3339(),
             catalog_generated_at: chrono::Utc::now().to_rfc3339(),
@@ -246,6 +282,9 @@ mod tests {
         let dir = tempdir().unwrap();
         let catalog = dll_catalog::embedded_fallback_catalog().unwrap();
         let plan = UpdatePlan {
+            schema_version: 0,
+            catalog_revision: String::new(),
+            changes: Vec::new(),
             id: "stale-plan".into(),
             created_at: chrono::Utc::now().to_rfc3339(),
             catalog_generated_at: "2000-01-01T00:00:00+00:00".into(),

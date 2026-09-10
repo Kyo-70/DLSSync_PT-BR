@@ -4,6 +4,7 @@ use dlssync_contracts::{JournalFilter, OperationRecord};
 use tauri::State;
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn journal_list(
     state: State<'_, AppState>,
     filter: Option<JournalFilter>,
@@ -16,6 +17,7 @@ pub async fn journal_list(
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn journal_export(
     state: State<'_, AppState>,
     filter: Option<JournalFilter>,

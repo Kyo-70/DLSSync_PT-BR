@@ -19,7 +19,7 @@ export function formatSpeed(bytesPerSec: number | null | undefined): string {
 export function formatEta(
   bytesDownloaded: number,
   bytesTotal: number | null | undefined,
-  bytesPerSec: number,
+  bytesPerSec: number | null | undefined,
 ): string {
   if (!bytesTotal || !bytesPerSec || bytesPerSec <= 0) return "—";
   const remaining = Math.max(0, bytesTotal - bytesDownloaded);

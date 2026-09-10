@@ -1,24 +1,105 @@
-import { invokeCommand as transport, COMMANDS } from "../generated/bindings";
-
-export type LauncherKind =
-  | "steam"
-  | "epic"
-  | "gog"
-  | "ubisoft"
-  | "ea_desktop"
-  | "xbox"
-  | "battlenet"
-  | "manual";
-
-export interface DetectedGame {
-  id: string;
-  name: string;
-  launcher: LauncherKind;
-  install_dir: string;
-  app_id: string | null;
-  image_url: string | null;
-  size_bytes: number | null;
-}
+import type { ApplyStage } from "../generated/bindings";
+export type { ApplyStage, ApplyProgress_Serialize as ApplyProgress, GroupDownloadProgress, InflightSnapshot } from "../generated/bindings";
+import type {
+  LauncherKind,
+  DetectedGame,
+  DllRecord,
+  Release,
+  BackupEntry,
+  DeleteOutcome,
+  AppPathsDto,
+  SystemInfo,
+  DriverRelease as DriverReleaseDto,
+  DriverStatusReport,
+  CatalogSummary,
+  CatalogRefreshTrigger,
+  CatalogRefreshResult,
+  CatalogStatus as CatalogRuntimeStatus,
+  OperationKind,
+  OperationStatus,
+  OperationRecord,
+  GameArt,
+  ApplyRequest,
+  ApplyResult,
+  ApplyBatchRequest,
+  ApplyBatchResult,
+  StreamlineSetResult,
+  AntiCheatReport,
+  InstallOutcome as DriverInstallOutcome,
+  DriverUpdate as SystemDriverUpdate,
+  DeviceGroup as SystemDeviceGroup,
+  SystemDriverOutcome,
+  DriverInstallContext,
+  DriverStoreVersion,
+  DlssOverrideConfig,
+  OverrideScope,
+  DlssOverrideReadback,
+  DlssApplyOutcome,
+  LogPaths,
+  IssueReport
+} from "../generated/bindings";
+export type {
+  LauncherKind,
+  DetectedGame,
+  DllFamily,
+  DllRecord,
+  Release,
+  BackupEntry,
+  DeleteOutcome,
+  AppPathsDto,
+  GpuVendor,
+  OsInfo,
+  CpuInfo,
+  RamModule,
+  RamInfo,
+  GpuInfo,
+  SystemInfo,
+  DriverVersion as DriverVersionDto,
+  DriverChangelog as DriverChangelogDto,
+  DriverRelease as DriverReleaseDto,
+  DeviceId as DeviceIdDto,
+  DriverStatusReport,
+  CatalogSummary,
+  CatalogRefreshTrigger,
+  CatalogDelta,
+  CatalogProvenance,
+  CatalogRefreshResult,
+  CatalogStatus as CatalogRuntimeStatus,
+  OperationActor,
+  OperationKind,
+  OperationStatus,
+  OperationRecord,
+  VendorSummary,
+  FamilySummary,
+  GameArt,
+  ApplyRequest,
+  ApplyResult,
+  ApplyBatchRequest,
+  ApplyOutcome,
+  ApplyBatchResult,
+  StreamlineSetResult,
+  ProtectionKind,
+  DetectedAntiCheat,
+  AntiCheatReport,
+  InstallStage,
+  SystemDeviceClass,
+  DriverUpdate as SystemDriverUpdate,
+  DeviceGroup as SystemDeviceGroup,
+  SystemDriverOutcome,
+  DriverInstallContext,
+  DriverStoreVersion,
+  DlssPreset,
+  FrameGenMode,
+  FrameGenCount,
+  DlssOverrideConfig,
+  OverrideScope,
+  DlssOverrideSource,
+  DlssOverrideReadback,
+  DlssApplyOutcome,
+  LogPaths,
+  IssueReport
+} from "../generated/bindings";
+import { REQUIRED_SETTINGS_PATHS, invokeCommand as transport, COMMANDS } from "../generated/bindings";
 
 export type UpdateStatus =
   | "outdated"
@@ -28,257 +109,13 @@ export type UpdateStatus =
   | "scanning"
   | "scan_failed";
 
-export type DllFamily =
-  | "dlss_sr"
-  | "dlss_fg"
-  | "dlss_rr"
-  | "sl_dlss_sr"
-  | "sl_dlss_fg"
-  | "sl_dlss_rr"
-  | "streamline"
-  | "streamline_common"
-  | "streamline_pcl"
-  | "streamline_nis"
-  | "streamline_direct_sr"
-  | "reflex"
-  | "xess_sr"
-  | "xess_sr_dx11"
-  | "xess_fg"
-  | "xell"
-  | "fsr_upscaler"
-  | "fsr_upscaler_vk"
-  | "fsr_fg"
-  | "fsr_loader"
-  | "fsr_denoiser"
-  | "direct_storage"
-  | "direct_storage_core";
-
-export interface DllRecord {
-  family: DllFamily;
-  path: string;
-  current_version: string | null;
-  file_description: string | null;
-  sha256: string | null;
-}
-
-export interface Release {
-  version: string;
-  version_packed: number;
-  filename: string;
-  sha256: string;
-  size_bytes: number;
-  signed: boolean;
-  released_at: string;
-  source: string;
-  cdn_url: string;
-  release_notes: string | null;
-  signature_subject: string | null;
-  channel: "stable" | "experimental" | string;
-  is_dev: boolean;
-  min_driver: string | null;
-}
-
-export interface BackupEntry {
-  id: string;
-  game_id: string;
-  dll_family: string;
-  dll_filename: string;
-  original_path: string;
-  backup_path: string;
-  previous_version: string | null;
-  previous_sha256: string | null;
-  created_at: string;
-  restored_at: string | null;
-  size_bytes: number | null;
-  backup_type: string;
-  device_class: string | null;
-  hardware_id: string | null;
-  driver_provider: string | null;
-}
-
-export interface DeleteOutcome {
-  removed_file: boolean;
-  removed_empty_dirs: number;
-  file_error: string | null;
-}
-
-export interface AppPathsDto {
-  install_mode: "installed" | "portable";
-  root: string;
-  backups_dir: string;
-  cache_dir: string;
-  logs_dir: string;
-  settings_dir: string;
-  backups_db: string;
-  catalog_cache: string;
-  journal_db: string;
-  catalog_metadata: string;
-  settings_file: string;
-}
-
-export type GpuVendor = "nvidia" | "amd" | "intel" | "other";
-
-export interface OsInfo {
-  name: string;
-  version: string;
-  build: string;
-  edition: string;
-}
-
-export interface CpuInfo {
-  brand: string;
-  physical_cores: number;
-  logical_cores: number;
-}
-
-export interface RamModule {
-  capacity_bytes: number;
-  mhz: number;
-  type_label: string;
-}
-
-export interface RamInfo {
-  total_bytes: number;
-  modules: RamModule[];
-}
-
-export interface GpuInfo {
-  vendor: GpuVendor;
-  pci_vendor_id: number;
-  pci_device_id: number;
-  model: string;
-  driver_version: string;
-  vram_bytes: number;
-  fsr4_capable: boolean;
-  recommended_runtimes: string[];
-}
-
-export interface SystemInfo {
-  os: OsInfo;
-  cpu: CpuInfo;
-  ram: RamInfo;
-  gpus: GpuInfo[];
-  collected_at: string;
-}
-
 export type DriverUpdateStatus = "up_to_date" | "update_available" | "unknown" | "unsupported";
-
-export interface DriverVersionDto {
-  packed: number;
-  display: string;
-  raw: string;
-}
-
-export interface DriverChangelogDto {
-  highlights: string[];
-  fixed: string[];
-  notes_page_url: string | null;
-}
-
-export interface DriverReleaseDto {
-  vendor: GpuVendor;
-  version: DriverVersionDto;
-  channel: "stable" | "beta";
-  display_version: string | null;
-  is_beta: boolean;
-  download_url: string;
-  size_bytes: number;
-  signature_subject: string;
-  released_at: string | null;
-  release_notes_url: string | null;
-  changelog: DriverChangelogDto | null;
-}
-
-export interface DeviceIdDto {
-  class: "gpu";
-  vendor: GpuVendor;
-  pci_vendor_id: number;
-  pci_device_id: number;
-  model: string;
-}
-
-export interface DriverStatusReport {
-  device: DeviceIdDto;
-  installed: DriverVersionDto;
-  latest: DriverReleaseDto | null;
-  status: DriverUpdateStatus;
-}
-
-export interface CatalogSummary {
-  generated_at: string;
-  vendors: VendorSummary[];
-  incompatible_games: string[];
-}
-
-export type CatalogRefreshTrigger = "automatic" | "manual_user";
-
-export interface CatalogDelta {
-  added: number;
-  updated: number;
-  removed: number;
-}
-
-export interface CatalogProvenance {
-  manifest_url: string;
-  manifest_repository: string;
-  generated_at: string;
-  checked_at: string;
-  signature_verified: boolean;
-  public_key_fingerprint: string;
-  source_commit: string | null;
-  trigger: CatalogRefreshTrigger;
-}
-
-export interface CatalogRefreshResult {
-  refreshed: boolean;
-  blocked_by_policy: boolean;
-  provenance: CatalogProvenance;
-  delta: CatalogDelta;
-}
-
-export interface CatalogRuntimeStatus {
-  distribution: "standard" | "nexus";
-  install_mode: "installed" | "portable";
-  automatic_refresh_enabled: boolean;
-  manual_refresh_enabled: boolean;
-  app_updates_enabled: boolean;
-  provenance: CatalogProvenance;
-}
-
-export type OperationActor = "gui" | "cli" | "background";
-export type OperationKind = "scan" | "catalog_refresh" | "plan" | "dll_apply" | "rollback" | "driver_install";
-export type OperationStatus = "started" | "succeeded" | "failed" | "cancelled";
 
 export interface JournalFilter {
   target?: string | null;
   kind?: OperationKind | null;
   status?: OperationStatus | null;
   limit?: number | null;
-}
-
-export interface OperationRecord {
-  id: string;
-  created_at: string;
-  actor: OperationActor;
-  kind: OperationKind;
-  status: OperationStatus;
-  target: string | null;
-  summary: string;
-  details: Record<string, string>;
-  duration_ms: number | null;
-  backup_id: string | null;
-  error: string | null;
-}
-
-export interface VendorSummary {
-  vendor: string;
-  families: FamilySummary[];
-}
-
-export interface FamilySummary {
-  family: string;
-  latest: string;
-  release_count: number;
 }
 
 export interface LauncherOverrides {
@@ -342,12 +179,6 @@ export interface SteamApiConfig {
 
 export interface SgdbConfig {
   api_key: string;
-}
-
-export interface GameArt {
-  grid_url: string | null;
-  hero_url: string | null;
-  capsule_url: string | null;
 }
 
 export interface WindowState {
@@ -419,92 +250,7 @@ export interface AppSettings {
   background: BackgroundConfig;
 }
 
-export interface ApplyRequest {
-  apply_id: string;
-  game_id: string;
-  dll_path: string;
-  vendor: string;
-  family: string;
-  target_version: string;
-  game_label?: string;
-}
-
-export interface ApplyResult {
-  apply_id: string;
-  backup_id: string;
-  previous_version: string | null;
-  new_version: string;
-}
-
-export type ApplyStage =
-  | "download"
-  | "verify_sha"
-  | "verify_signature"
-  | "backup"
-  | "replace"
-  | "verify_post"
-  | "complete"
-  | "failed"
-  | "cancelled";
-
-export type ApplyErrorClass =
-  | "network"
-  | "signature"
-  | "lock"
-  | "permission"
-  | "hash"
-  | "missing"
-  | "backup"
-  | "cancelled"
-  | "other";
-
-export interface ApplyProgress {
-  apply_id: string;
-  group_id: string;
-  stage: ApplyStage;
-  message: string;
-  progress: number | null;
-  error: string | null;
-  error_class?: ApplyErrorClass | null;
-  attempt?: number | null;
-}
-
-export interface GroupDownloadProgress {
-  group_id: string;
-  url: string;
-  bytes_downloaded: number;
-  bytes_total: number | null;
-  bytes_per_sec: number;
-  attempt: number;
-}
-
-export interface InflightSnapshot {
-  in_flight: number;
-}
-
-export interface ApplyBatchRequest {
-  items: ApplyRequest[];
-}
-
-export interface ApplyOutcome {
-  apply_id: string;
-  success: boolean;
-  backup_id: string | null;
-  previous_version: string | null;
-  new_version: string | null;
-  error: string | null;
-}
-
-export interface ApplyBatchResult {
-  outcomes: ApplyOutcome[];
-}
-
-export interface StreamlineSetResult {
-  success: boolean;
-  applied: ApplyOutcome[];
-  error: string | null;
-  rolled_back: boolean;
-}
+export type { ApplyErrorClass } from "../generated/bindings";
 
 export const APPLY_STAGES: { id: ApplyStage; label: string }[] = [
   { id: "download", label: "Download" },
@@ -562,11 +308,11 @@ export async function getCatalogStatus(): Promise<CatalogRuntimeStatus> {
 }
 
 export async function listJournal(filter: JournalFilter = {}): Promise<OperationRecord[]> {
-  return transport(COMMANDS.journal_list, { filter });
+  return transport(COMMANDS.journal_list, { filter: { target: filter.target ?? null, kind: filter.kind ?? null, status: filter.status ?? null, limit: filter.limit ?? null } });
 }
 
 export async function exportJournal(filter: JournalFilter = {}): Promise<string> {
-  return transport(COMMANDS.journal_export, { filter });
+  return transport(COMMANDS.journal_export, { filter: { target: filter.target ?? null, kind: filter.kind ?? null, status: filter.status ?? null, limit: filter.limit ?? null } });
 }
 
 export async function catalogSummary(): Promise<CatalogSummary> {
@@ -612,20 +358,7 @@ export async function listDriverHistory(
   return transport(COMMANDS.list_driver_history, { model, vendor });
 }
 
-export type ProtectionKind = "anti_cheat" | "anti_tamper" | "drm";
 export type ProtectionSource = "binary" | "pe" | "dataset";
-
-export interface DetectedAntiCheat {
-  anticheat: string;
-  kind: ProtectionKind;
-  source: ProtectionSource;
-}
-
-export interface AntiCheatReport {
-  detected: DetectedAntiCheat[];
-  status: string | null;
-  source_url: string | null;
-}
 
 export async function detectAnticheat(
   installDir: string,
@@ -635,28 +368,12 @@ export async function detectAnticheat(
   return transport(COMMANDS.detect_anticheat, { installDir, appId, name });
 }
 
-export type InstallStage =
-  | "queued"
-  | "downloading"
-  | "verifying"
-  | "launching"
-  | "installing"
-  | "completed"
-  | "failed"
-  | "cancelled";
-
-export interface DriverInstallProgress {
-  stage: InstallStage;
-  message: string;
-  progress: number | null;
-}
-
-export interface DriverInstallOutcome {
-  stage: InstallStage;
-  exit_code: number;
-  message: string;
-  reboot_required: boolean;
-}
+export type {
+  InstallProgress as DriverInstallProgress,
+  InstallOutcome as DriverInstallOutcome,
+  SystemDriverInstallProgress as SystemDriverProgress,
+  SystemDriverInstallStage as SystemInstallStage,
+} from "../generated/bindings";
 
 export const DRIVER_INSTALL_EVENT = "driver_install_progress";
 
@@ -667,84 +384,11 @@ export async function installDriver(
   return transport(COMMANDS.install_driver, { vendor, downloadUrl });
 }
 
-
-export type SystemDeviceClass =
-  | "audio"
-  | "display"
-  | "monitor"
-  | "network"
-  | "bluetooth"
-  | "input"
-  | "storage"
-  | "printer"
-  | "camera"
-  | "sensor"
-  | "battery"
-  | "smart_card"
-  | "firmware"
-  | "chipset"
-  | "system"
-  | "usb"
-  | "other";
-
-export interface SystemDriverUpdate {
-  update_id: string;
-  title: string;
-  class: SystemDeviceClass;
-  provider: string;
-  driver_version: string | null;
-  driver_date: string | null;
-  hardware_id: string | null;
-  size_bytes: number;
-  target_device: string | null;
-  current_version: string | null;
-  /** DriverStore `oemNN.inf` of the matched installed device, for snapshot + version history. */
-  target_inf: string | null;
-  /** Hardware id of the matched installed device. */
-  target_hardware_id: string | null;
-  support_url: string | null;
-}
-
-export interface SystemDeviceGroup {
-  class: SystemDeviceClass;
-  label: string;
-  updates: SystemDriverUpdate[];
-}
-
-export type SystemInstallStage = "downloading" | "installing" | "completed" | "failed";
-
-export interface SystemDriverProgress {
-  stage: SystemInstallStage;
-  message: string;
-  fraction: number | null;
-}
-
-export interface SystemDriverOutcome {
-  success: boolean;
-  reboot_required: boolean;
-  result_code: number;
-  message: string;
-}
-
 export const SYSTEM_DRIVER_INSTALL_EVENT = "system_driver_install_progress";
 
 /** Installed-device context so the install snapshots the current driver before applying. */
-export interface DriverInstallContext {
-  infName: string | null;
-  hardwareId: string | null;
-  deviceClass: string | null;
-  provider: string | null;
-  currentVersion: string | null;
-}
 
 /** One DriverStore version (current or superseded) of a driver package. */
-export interface DriverStoreVersion {
-  publishedName: string;
-  version: string;
-  date: string | null;
-  provider: string;
-  current: boolean;
-}
 
 /** Build the snapshot context for a System & Components update from its matched device. */
 export function driverInstallContext(
@@ -752,8 +396,8 @@ export function driverInstallContext(
   deviceClass: string,
 ): DriverInstallContext {
   return {
-    infName: update.target_inf,
-    hardwareId: update.target_hardware_id,
+    infName: update.target_inf ?? null,
+    hardwareId: update.target_hardware_id ?? null,
     deviceClass,
     provider: update.provider,
     currentVersion: update.current_version,
@@ -781,55 +425,15 @@ export async function systemDriverVersions(infName: string): Promise<DriverStore
   return transport(COMMANDS.system_driver_versions, { infName });
 }
 
-export type DlssPreset =
-  | "default"
-  | "a"
-  | "b"
-  | "c"
-  | "d"
-  | "e"
-  | "f"
-  | "g"
-  | "h"
-  | "i"
-  | "j"
-  | "k"
-  | "l"
-  | "m"
-  | "n"
-  | "o"
-  | "recommended";
-
-export type FrameGenMode = "app_controlled" | "fixed" | "dynamic";
-export type FrameGenCount = "app_controlled" | "x2" | "x3" | "x4";
-
-export interface DlssOverrideConfig {
-  enable_sr_dll_override: boolean;
-  sr_preset: DlssPreset | null;
-  enable_fg_dll_override: boolean;
-  fg_preset: DlssPreset | null;
-  fg_mode: FrameGenMode | null;
-  fg_fixed_count: FrameGenCount | null;
-  fg_dynamic_target_fps: number | null;
-}
-
-export type OverrideScope = { scope: "global" } | { scope: "per_game"; executable_path: string };
-
-export type DlssOverrideSource = "per_game" | "global" | "none";
-
-export interface DlssOverrideReadback {
-  config: DlssOverrideConfig;
-  source: DlssOverrideSource;
-  active_count: number;
-}
+export type { DlssGeneration, NvidiaGpuArchitecture, DlssCapability } from "../generated/bindings";
+import type { DlssCapability } from "../generated/bindings";
 
 export async function dlssOverridesSupported(): Promise<boolean> {
   return transport(COMMANDS.dlss_overrides_supported);
 }
 
-export interface DlssApplyOutcome {
-  needs_elevation: boolean;
-  denied_settings: number[];
+export async function dlssCapabilities(): Promise<DlssCapability[]> {
+  return transport(COMMANDS.dlss_capabilities);
 }
 
 export async function applyDlssOverride(
@@ -852,7 +456,9 @@ export async function findGameExecutable(installDir: string): Promise<string | n
 }
 
 export async function getSettings(): Promise<AppSettings> {
-  return transport(COMMANDS.get_settings);
+  const value = await transport(COMMANDS.get_settings);
+  assertCompleteSettings(value);
+  return value;
 }
 
 export async function saveSettings(settings: AppSettings): Promise<void> {
@@ -932,17 +538,6 @@ export async function revealPath(path: string): Promise<void> {
   return transport(COMMANDS.reveal_path, { path });
 }
 
-export interface LogPaths {
-  logs_dir: string;
-  current_log: string | null;
-  file_count: number;
-}
-
-export interface IssueReport {
-  url: string;
-  body: string;
-}
-
 export async function getLogPaths(): Promise<LogPaths> {
   return transport(COMMANDS.get_log_paths);
 }
@@ -971,4 +566,15 @@ export async function showMainWindow(): Promise<void> {
  *  0 reverts the tray to its idle tooltip. */
 export async function traySetPending(count: number): Promise<void> {
   return transport(COMMANDS.tray_set_pending, { count });
+}
+
+/** Missing settings are an IPC error, never an instruction to reset preferences. */
+function assertCompleteSettings(value: unknown): asserts value is AppSettings {
+  for (const path of REQUIRED_SETTINGS_PATHS) {
+    let node: unknown = value;
+    for (const key of path.split(".")) {
+      node = node !== null && typeof node === "object" ? (node as Record<string, unknown>)[key] : undefined;
+    }
+    if (node === undefined) throw new Error(`Incomplete settings response: ${path}`);
+  }
 }

@@ -5,15 +5,13 @@ import {
   buildArgs,
   buildCommand,
   buildTimeoutMs,
-  killScriptPath,
+  buildTargetDir,
   repoRoot,
 } from "./config";
 
 const SKIP_BUILD_ENV = "DLSS_E2E_SKIP_BUILD";
 
 export default function globalSetup(): void {
-  spawnSync(process.execPath, [killScriptPath], { stdio: "ignore" });
-
   if (process.env[SKIP_BUILD_ENV] === "1" && fs.existsSync(appBinaryPath)) {
     return;
   }
@@ -22,6 +20,7 @@ export default function globalSetup(): void {
     cwd: repoRoot,
     stdio: "inherit",
     timeout: buildTimeoutMs,
+    env: { ...process.env, CARGO_TARGET_DIR: buildTargetDir },
   });
 
   if (result.status !== 0) {

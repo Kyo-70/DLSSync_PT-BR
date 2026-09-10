@@ -1099,6 +1099,26 @@
       "label": "Desconhecido",
       "short": "Erro inesperado",
       "hint": "Ocorreu uma falha não classificada. Use 'Copiar relatório' e abra um problema se ele persistir."
+    },
+    "streamline_locked": {
+      "label": "Streamline desativado",
+      "short": "Streamline desativado",
+      "hint": "As atualizações do Streamline estão desativadas. Confira Configurações → Avançado e atualize o conjunto compatível completo."
+    },
+    "driver_too_old": {
+      "label": "Atualização de driver necessária",
+      "short": "Atualização de driver necessária",
+      "hint": "O driver instalado não atende ao requisito desta biblioteca. Confira os drivers antes de aplicar."
+    },
+    "game_running": {
+      "label": "Jogo aberto",
+      "short": "Jogo aberto",
+      "hint": "Feche o jogo antes de alterar os arquivos e tente novamente."
+    },
+    "architecture": {
+      "label": "Arquitetura",
+      "short": "Arquitetura",
+      "hint": "A arquitetura da DLL não corresponde ao jogo. Atualize o catálogo e confira um arquivo compatível."
     }
   },
   "notifKind": {
@@ -1750,10 +1770,13 @@
       "grdRequired": "O driver Game Ready 572.16 ou mais recente é necessário para DLSS 4 sobrescrituras.",
       "superResolution": "Super Resolução",
       "frameGeneration": "Geração de quadros",
+      "rayReconstruction": "Reconstrução de raios",
+      "forceLatestRrDll": "Forçar a DLL mais recente de Reconstrução de raios instalada",
       "forceLatestSrDll": "Forçar a instalação mais recente DLSS DLL",
       "forceLatestFgDll": "Forçar a última DLL de Geração de Quadros instalada",
       "modelPreset": "Preset do modelo",
       "modelPresetAria": "DLSS modelo preset",
+      "rrPresetAria": "Preset do modelo de Reconstrução de raios",
       "noPresetOverride": "Sem override de predefinição",
       "mode": "Modo",
       "modeAria": "Modo geração de quadros",
@@ -1769,6 +1792,7 @@
       "working": "Trabalhando...",
       "resetToDefault": "Resetar para o padrão",
       "note": "Grava um perfil de aplicativo de driver NVIDIA — o mesmo mecanismo que o app NVIDIA usa. Totalmente reversível com Reset. Títulos multiplayer com anti-trapaça podem sinalizar um perfil forçado; Verifique primeiro a política do jogo.",
+      "rrNote": "A Reconstrução de raios usa sua própria configuração do driver (0x10E41DF7), separada da Super Resolution. Requer GPU RTX e jogo compatível.",
       "toast": {
         "openLinkFailed": "Link aberto falhou: {error}",
         "needsElevation": "Super Resolution aplicada. Overrides de geração de quadros precisam de administrador — reiniciar DLSSync como administrador para aplicá-los.",

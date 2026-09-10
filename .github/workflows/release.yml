@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*.*.*"
+      - "nexusmods-only-v*.*.*"
   workflow_dispatch:
     inputs:
       tag:
@@ -24,6 +25,8 @@ jobs:
     runs-on: windows-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      channel: ${{ steps.version.outputs.channel }}
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -39,9 +42,11 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         run: |
           $tag = if ($env:EVENT_NAME -eq 'workflow_dispatch') { $env:INPUT_TAG } else { $env:REF_NAME }
-          $version = $tag -replace '^v', ''
+          $channel = if ($tag -match '^nexusmods-only-v') { 'nexus' } else { 'standard' }
+          $version = $tag -replace '^nexusmods-only-v', '' -replace '^v', ''
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "tag=$tag"         | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "channel=$channel" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       # A mistyped workflow_dispatch tag must never publish a latest.json whose
       # version disagrees with the binary inside — the updater would loop forever.
@@ -59,13 +64,13 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
-          version: 9.0.0
+          version: 11.25.0
           run_install: false
 
       - name: Setup Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: "22"
+          node-version: "24.18.0"
           cache: "pnpm"
 
       - name: Setup Rust toolchain
@@ -91,11 +96,22 @@ jobs:
           [System.IO.File]::WriteAllText($keyPath, $env:PRIVATE_KEY, (New-Object System.Text.UTF8Encoding $false))
           "path=$keyPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-      - name: Build (Tauri)
+      - name: Build standard (Tauri)
+        if: steps.version.outputs.channel == 'standard'
         env:
           TAURI_SIGNING_PRIVATE_KEY_PATH: ${{ steps.keymat.outputs.path }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri build
+
+      - name: Build NexusMods-Only (Tauri)
+        if: steps.version.outputs.channel == 'nexus'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY_PATH: ${{ steps.keymat.outputs.path }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm run build:nexus
+
+      - name: Verify release channel
+        run: cargo xtask verify-release --channel ${{ steps.version.outputs.channel }}
 
       - name: Sign installer (explicit safety net)
         shell: pwsh
@@ -138,6 +154,7 @@ jobs:
           Write-Host "MSI smoke-install + uninstall succeeded."
 
       - name: Build portable archive
+        if: steps.version.outputs.channel == 'standard'
         shell: pwsh
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -261,14 +278,14 @@ jobs:
         if: needs.sign-windows.result == 'success'
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
-          version: 9.0.0
+          version: 11.25.0
           run_install: false
 
       - name: Setup Node.js (re-sign updater signature)
         if: needs.sign-windows.result == 'success'
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: "22"
+          node-version: "24.18.0"
           cache: "pnpm"
 
       - name: Re-sign updater signature over the Authenticode-signed exe
@@ -297,7 +314,7 @@ jobs:
         id: notes
         env:
           VERSION: ${{ needs.build-windows.outputs.version }}
-          TAG: v${{ needs.build-windows.outputs.version }}
+          TAG: ${{ needs.build-windows.outputs.tag }}
         run: |
           set -euo pipefail
           python3 scripts/extract-changelog-section.py "$VERSION" CHANGELOG.md > release-body.md || : > release-body.md
@@ -319,9 +336,10 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Generate latest.json
+        if: needs.build-windows.outputs.channel == 'standard'
         env:
           VERSION: ${{ needs.build-windows.outputs.version }}
-          TAG: v${{ needs.build-windows.outputs.version }}
+          TAG: ${{ needs.build-windows.outputs.tag }}
           EXE_NAME: ${{ steps.locate.outputs.exe_name }}
           SIG_FILE: ${{ steps.locate.outputs.sig }}
         run: |
@@ -351,7 +369,7 @@ jobs:
       - name: Delete existing release (idempotent)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: v${{ needs.build-windows.outputs.version }}
+          TAG: ${{ needs.build-windows.outputs.tag }}
         run: |
           set -euo pipefail
           if gh release view "$TAG" --repo ${{ github.repository }} >/dev/null 2>&1; then
@@ -363,8 +381,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
-          tag_name: v${{ needs.build-windows.outputs.version }}
-          name: DLSSync v${{ needs.build-windows.outputs.version }}
+          tag_name: ${{ needs.build-windows.outputs.tag }}
+          name: DLSSync ${{ needs.build-windows.outputs.channel == 'nexus' && 'NexusMods-Only' || '' }} v${{ needs.build-windows.outputs.version }}
           draft: false
           prerelease: false
           generate_release_notes: false

@@ -1099,6 +1099,26 @@
       "label": "Desconocido",
       "short": "Error inesperado",
       "hint": "Ocurrió un fallo sin clasificar. Usa «Copiar informe» y abre un issue si persiste."
+    },
+    "streamline_locked": {
+      "label": "Streamline desactivado",
+      "short": "Streamline desactivado",
+      "hint": "Las actualizaciones de Streamline están desactivadas. Revisa Ajustes → Avanzado y actualiza el conjunto compatible completo."
+    },
+    "driver_too_old": {
+      "label": "Requiere actualizar el driver",
+      "short": "Requiere actualizar el driver",
+      "hint": "El driver instalado no cumple el requisito de esta biblioteca. Revisa Drivers antes de aplicar."
+    },
+    "game_running": {
+      "label": "Juego abierto",
+      "short": "Juego abierto",
+      "hint": "Cierra el juego antes de cambiar sus archivos y vuelve a intentar."
+    },
+    "architecture": {
+      "label": "Arquitectura",
+      "short": "Arquitectura",
+      "hint": "La arquitectura de la DLL no corresponde al juego. Actualiza el catálogo y revisa un candidato compatible."
     }
   },
   "notifKind": {
@@ -1750,10 +1770,13 @@
       "grdRequired": "Se necesita el Game Ready Driver 572.16 o más reciente para las anulaciones de DLSS 4.",
       "superResolution": "Super Resolution",
       "frameGeneration": "Frame Generation",
+      "rayReconstruction": "Reconstrucción de rayos",
+      "forceLatestRrDll": "Forzar la DLL más reciente de Reconstrucción de rayos instalada",
       "forceLatestSrDll": "Forzar la DLL de DLSS instalada más reciente",
       "forceLatestFgDll": "Forzar la DLL de Frame Generation instalada más reciente",
       "modelPreset": "Ajuste del modelo",
       "modelPresetAria": "Ajuste del modelo DLSS",
+      "rrPresetAria": "Preset del modelo de Reconstrucción de rayos",
       "noPresetOverride": "Sin anulación de ajuste",
       "mode": "Modo",
       "modeAria": "Modo de Frame Generation",
@@ -1769,6 +1792,7 @@
       "working": "Procesando…",
       "resetToDefault": "Restablecer a predeterminado",
       "note": "Escribe un perfil de aplicación del controlador NVIDIA — el mismo mecanismo que usa la app de NVIDIA. Totalmente reversible con Restablecer. Los títulos multijugador con anti-trampas pueden marcar un perfil forzado; consulta primero la política del juego.",
+      "rrNote": "Reconstrucción de rayos usa su propio ajuste del driver (0x10E41DF7), separado de Super Resolution. Requiere GPU RTX y un juego compatible.",
       "toast": {
         "openLinkFailed": "No se pudo abrir el enlace: {error}",
         "needsElevation": "Super Resolution aplicado. Las anulaciones de Frame Generation requieren administrador — reinicia DLSSync como administrador para aplicarlas.",

@@ -1099,6 +1099,26 @@
       "label": "不明",
       "short": "予期せぬ誤差",
       "hint": "機密外の故障が発生しました。「報告をコピー」して問題が解決しなければ問題を開いてください。"
+    },
+    "streamline_locked": {
+      "label": "Streamline 無効",
+      "short": "Streamline 無効",
+      "hint": "Streamline の更新は無効です。設定 → 詳細設定を確認し、互換性のあるセット全体を更新してください。"
+    },
+    "driver_too_old": {
+      "label": "ドライバーの更新が必要",
+      "short": "ドライバーの更新が必要",
+      "hint": "インストール済みのドライバーは、このライブラリの要件を満たしていません。適用前にドライバーを確認してください。"
+    },
+    "game_running": {
+      "label": "ゲームが実行中",
+      "short": "ゲームが実行中",
+      "hint": "ファイルを変更する前にゲームを終了し、再試行してください。"
+    },
+    "architecture": {
+      "label": "アーキテクチャ",
+      "short": "アーキテクチャ",
+      "hint": "DLL のアーキテクチャがゲームと一致しません。カタログを更新し、互換性のあるファイルを確認してください。"
     }
   },
   "notifKind": {
@@ -1750,10 +1770,13 @@
       "grdRequired": "4回のオーバーライドにはGame Ready Driver 572.16以降DLSSが必要です。",
       "superResolution": "スーパーレゾリューション",
       "frameGeneration": "フレーム生成",
+      "rayReconstruction": "レイ再構成",
+      "forceLatestRrDll": "インストール済みの最新レイ再構成DLLを強制する",
       "forceLatestSrDll": "最新のインストールされたDLSS DLLを強制的にインストールしてください",
       "forceLatestFgDll": "最新インストールのフレームジェネレーションDLLを強制する",
       "modelPreset": "モデルプリセット",
       "modelPresetAria": "DLSSモデルプリセット",
+      "rrPresetAria": "レイ再構成モデルプリセット",
       "noPresetOverride": "プリセットオーバーライドなし",
       "mode": "モード",
       "modeAria": "フレーム生成モード",
@@ -1769,6 +1792,7 @@
       "working": "仕事中...",
       "resetToDefault": "デフォルトにリセット",
       "note": "NVIDIAのドライバーアプリケーションプロファイルを書き込みます。これはNVIDIAアプリが使う仕組みと同じです。リセットで完全に元に戻します。アンチチート機能付きのマルチプレイヤータイトルでは、強制プロフィールがマークされることがあります。まずはゲームのポリシーを確認してください。",
+      "rrNote": "レイ再構成はSuper Resolutionとは別のドライバー設定 (0x10E41DF7) を使います。RTX GPUと対応ゲームが必要です。",
       "toast": {
         "openLinkFailed": "リンクが開かれませんでした:{error}",
         "needsElevation": "スーパー解像度が適用されました。フレーム生成のオーバーライドは管理者が必要です — 管理者として再DLSSync起動して適用してください。",

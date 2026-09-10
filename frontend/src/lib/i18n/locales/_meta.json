@@ -5104,6 +5104,26 @@
     "desc": "DLSS Frame Generation group title; feature name kept English",
     "where": "DlssOverridePanel.svelte"
   },
+  "component.dlss.rayReconstruction": {
+    "en": "Ray Reconstruction",
+    "desc": "DLSS Overrides panel section title for Ray Reconstruction (issue #32).",
+    "where": "DlssOverridePanel RR group."
+  },
+  "component.dlss.forceLatestRrDll": {
+    "en": "Force the latest installed Ray Reconstruction DLL",
+    "desc": "Checkbox label: force latest installed RR DLL via driver override 0x10E41E02.",
+    "where": "DlssOverridePanel RR group."
+  },
+  "component.dlss.rrPresetAria": {
+    "en": "Ray Reconstruction model preset",
+    "desc": "Accessible name for the RR preset selector (DRS 0x10E41DF7).",
+    "where": "DlssOverridePanel RR preset Select."
+  },
+  "component.dlss.rrNote": {
+    "en": "Ray Reconstruction uses its own driver setting (0x10E41DF7) — separate from Super Resolution. Requires an RTX GPU and a Ray Reconstruction-capable game.",
+    "desc": "Helper note under the RR preset selector.",
+    "where": "DlssOverridePanel RR group."
+  },
   "component.dlss.forceLatestSrDll": {
     "en": "Force the latest installed DLSS DLL",
     "desc": "Checkbox to force the newest installed Super Resolution DLL; DLSS/DLL kept English",

@@ -1099,6 +1099,26 @@
       "label": "Unbekannt",
       "short": "Unerwarteter Fehler",
       "hint": "Es trat ein nicht klassifizierter Fehler auf. Benutze 'Bericht kopieren' und eröffne ein Problem, falls es weiterhin besteht."
+    },
+    "streamline_locked": {
+      "label": "Streamline deaktiviert",
+      "short": "Streamline deaktiviert",
+      "hint": "Streamline-Updates sind deaktiviert. Prüfe Einstellungen → Erweitert und aktualisiere den vollständigen kompatiblen Satz."
+    },
+    "driver_too_old": {
+      "label": "Treiberupdate erforderlich",
+      "short": "Treiberupdate erforderlich",
+      "hint": "Der installierte Treiber erfüllt die Anforderungen dieser Bibliothek nicht. Prüfe zuerst die Treiber."
+    },
+    "game_running": {
+      "label": "Spiel läuft",
+      "short": "Spiel läuft",
+      "hint": "Schließe das Spiel, bevor du seine Dateien änderst. Versuche es danach erneut."
+    },
+    "architecture": {
+      "label": "Architektur",
+      "short": "Architektur",
+      "hint": "Die DLL-Architektur passt nicht zum Spiel. Aktualisiere den Katalog und prüfe eine kompatible Datei."
     }
   },
   "notifKind": {
@@ -1750,10 +1770,13 @@
       "grdRequired": "Game Ready Driver 572.16 oder neuer ist für DLSS 4 Overrides erforderlich.",
       "superResolution": "Super-Auflösung",
       "frameGeneration": "Frame-Generierung",
+      "rayReconstruction": "Ray Reconstruction",
+      "forceLatestRrDll": "Neueste installierte Ray-Reconstruction-DLL erzwingen",
       "forceLatestSrDll": "Erzwingen Sie die neueste installierte DLSS DLL",
       "forceLatestFgDll": "Erzwingen Sie die zuletzt installierte Frame Generation DLL",
       "modelPreset": "Modellvoreinstellung",
       "modelPresetAria": "DLSS Modellvoreinstellung",
+      "rrPresetAria": "Ray-Reconstruction-Modellpreset",
       "noPresetOverride": "Kein Preset-Override",
       "mode": "Modus",
       "modeAria": "Frame-Generierungsmodus",
@@ -1769,6 +1792,7 @@
       "working": "Arbeitet...",
       "resetToDefault": "Zurücksetzen auf Standard",
       "note": "Schreibt ein NVIDIA-Treiber-Anwendungsprofil – denselben Mechanismus, den die NVIDIA-App verwendet. Vollständig reversibel mit Reset. Mehrspieler-Titel mit Anti-Cheat können ein erzwungenes Profil markieren; Schau dir zuerst die Spielrichtlinien an.",
+      "rrNote": "Ray Reconstruction nutzt eine eigene Treibereinstellung (0x10E41DF7) — getrennt von Super Resolution. Erfordert RTX-GPU und unterstütztes Spiel.",
       "toast": {
         "openLinkFailed": "Link öffnen fehlgeschlagen: {error}",
         "needsElevation": "Super Resolution wurde angewendet. Frame-Generation-Overrides benötigen einen Administrator – starten Sie DLSSync als Administrator neu, um sie anzuwenden.",

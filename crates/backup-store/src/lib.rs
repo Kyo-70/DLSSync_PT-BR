@@ -13,7 +13,7 @@ pub enum BackupError {
     InvalidColumn(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct BackupEntry {
     pub id: String,
     pub game_id: String,
@@ -254,7 +254,7 @@ impl BackupStore {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, specta::Type)]
 pub struct DeleteOutcome {
     pub removed_file: bool,
     pub removed_empty_dirs: usize,

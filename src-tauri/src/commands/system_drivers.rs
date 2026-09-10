@@ -30,7 +30,7 @@ fn is_valid_update_id(id: &str) -> bool {
             .is_some_and(|rev| !rev.is_empty() && rev.chars().all(|c| c.is_ascii_digit()))
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct SystemDriverOutcome {
     pub success: bool,
     pub reboot_required: bool,
@@ -41,7 +41,7 @@ pub struct SystemDriverOutcome {
 /// Installed-device context the install carries so it can snapshot the current
 /// driver (`pnputil /export-driver`) and record a rollback-able backup before
 /// applying the update. Sourced from the matched `DriverUpdate` fields.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DriverInstallContext {
     pub inf_name: Option<String>,
@@ -53,7 +53,7 @@ pub struct DriverInstallContext {
 
 /// One DriverStore version of a driver package (current or superseded), for the
 /// "old / latest versions" display in System & Components.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DriverStoreVersion {
     pub published_name: String,
@@ -335,6 +335,7 @@ fn install_blocking(
 /// anti-downgrade guard: an entry only appears when it is provably newer than
 /// the installed driver.
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn scan_system_drivers() -> AppResult<Vec<DeviceGroup>> {
     tokio::task::spawn_blocking(scan_blocking)
         .await
@@ -348,6 +349,7 @@ pub async fn scan_system_drivers() -> AppResult<Vec<DeviceGroup>> {
 /// snapshot the current driver (and lay a System Restore checkpoint) before
 /// applying the update — recorded as a rollback-able `driver_package` backup.
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn install_system_driver(
     app: AppHandle,
     update_id: String,
@@ -369,6 +371,7 @@ pub async fn install_system_driver(
 /// re-installing its exported DriverStore package (`pnputil /add-driver
 /// /install`) via an elevated child. Marks the backup restored on success.
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn restore_system_driver(
     state: State<'_, AppState>,
     backup_id: String,
@@ -478,6 +481,7 @@ async fn restore_blocking(_dir: std::path::PathBuf) -> AppResult<SystemDriverOut
 /// `pnputil /enum-drivers` (works unelevated); returns an empty list off Windows
 /// or when the package isn't found.
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn system_driver_versions(inf_name: String) -> AppResult<Vec<DriverStoreVersion>> {
     if !system_drivers::is_published_oem_inf(&inf_name) {
         return Ok(Vec::new());

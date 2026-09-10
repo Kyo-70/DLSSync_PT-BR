@@ -190,18 +190,29 @@ fn verify_version_surfaces(root: &Path, expected: &str) -> Result<(), String> {
 }
 
 fn generate_bindings(root: &Path) -> Result<(), String> {
-    run_command(
-        root,
-        "cargo",
-        &[
-            "test",
+    generate_bindings_at(root, &root.join("frontend/src/generated/bindings.ts"))
+}
+
+fn generate_bindings_at(root: &Path, output: &Path) -> Result<(), String> {
+    let status = Command::new("cargo")
+        .current_dir(root)
+        .env("DLSSYNC_BINDINGS_OUTPUT", output)
+        .args([
+            "run",
             "-p",
             "dlssync",
-            "export_typescript_bindings",
-            "--",
-            "--ignored",
-        ],
-    )
+            "--features",
+            "bindings",
+            "--example",
+            "export_bindings",
+        ])
+        .status()
+        .map_err(display)?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("binding generation failed: {status}"))
+    }
 }
 
 fn check_bindings(root: &Path) -> Result<(), String> {
@@ -212,8 +223,10 @@ fn check_bindings(root: &Path) -> Result<(), String> {
             path.display()
         )
     })?;
-    generate_bindings(root)?;
-    let after = fs::read(&path).map_err(display)?;
+    let temporary = tempfile::tempdir().map_err(display)?;
+    let output = temporary.path().join("bindings.ts");
+    generate_bindings_at(root, &output)?;
+    let after = fs::read(&output).map_err(display)?;
     if before != after {
         return Err("generated TypeScript bindings were stale".into());
     }
@@ -420,13 +433,30 @@ fn verify_release(root: &Path, args: Vec<String>) -> Result<(), String> {
     }
     if channel == "nexus" {
         let cargo = fs::read_to_string(root.join("src-tauri/Cargo.toml")).map_err(display)?;
-        if !cargo.contains("nexus =") {
-            return Err("Nexus Cargo feature is missing".into());
+        if !cargo.contains("nexus =")
+            || !cargo.contains("standard = [\"dep:tauri-plugin-updater\"]")
+            || !cargo.contains("tauri-plugin-updater = { version = \"2\", optional = true }")
+        {
+            return Err("Nexus must exclude the optional standard-only updater dependency".into());
         }
-        let catalog_view =
-            fs::read_to_string(root.join("frontend/src/views/Catalog.svelte")).map_err(display)?;
-        if catalog_view.contains("void loadCatalog();") {
-            return Err("Nexus Catalog mount must not trigger a network refresh".into());
+        let generated = root.join("target/nexus");
+        let config = fs::read_to_string(generated.join("tauri.conf.json")).map_err(|_| {
+            "target/nexus/tauri.conf.json missing; run pnpm run check:nexus first".to_string()
+        })?;
+        let capability =
+            fs::read_to_string(generated.join("default.capability.json")).map_err(|_| {
+                "target/nexus/default.capability.json missing; run pnpm run check:nexus first"
+                    .to_string()
+            })?;
+        if config.contains("latest.json") || !config.contains("\"active\": false") {
+            return Err("packaged Nexus config still exposes updater capability".into());
+        }
+        if capability.contains("updater:default") {
+            return Err("packaged Nexus capability still grants updater permission".into());
+        }
+        let lib = fs::read_to_string(root.join("src-tauri/src/lib.rs")).map_err(display)?;
+        if !lib.contains("#[cfg(feature = \"standard\")]") {
+            return Err("Nexus binary lacks compile-time updater exclusion proof".into());
         }
     }
     if channel == "portable" {

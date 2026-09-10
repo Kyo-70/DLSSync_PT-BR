@@ -8,7 +8,7 @@ use serde::Serialize;
 use std::path::PathBuf;
 use tauri::{AppHandle, State};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 pub struct StreamlineSetResult {
     pub success: bool,
     pub applied: Vec<ApplyOutcome>,
@@ -23,6 +23,7 @@ pub struct StreamlineSetResult {
 /// (DLSS Enabler / opt-in off / cross-major), and on any member failure rolls
 /// every already-swapped member back to its backup.
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn apply_streamline_set(
     handle: AppHandle,
     state: State<'_, AppState>,
@@ -43,6 +44,7 @@ pub async fn apply_streamline_set(
 /// loader 2.2.0 + upscaler 4.1.0 + frame-gen 4.0.0 in a single zip), and 4.x FSR
 /// members are refused outright when no RDNA4 GPU is present.
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn apply_dll_set(
     handle: AppHandle,
     state: State<'_, AppState>,

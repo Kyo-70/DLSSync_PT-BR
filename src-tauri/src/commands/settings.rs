@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::State;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, specta::Type)]
 pub struct LauncherOverrides {
     #[serde(default)]
     pub steam: Vec<String>,
@@ -25,7 +25,7 @@ pub struct LauncherOverrides {
     pub custom: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct UpdatePreferences {
     pub update_dlss: bool,
     pub update_dlss_fg: bool,
@@ -56,7 +56,7 @@ impl Default for UpdatePreferences {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct UiPreferences {
     pub theme: String,
     pub sidebar_collapsed: bool,
@@ -128,7 +128,7 @@ impl Default for UiPreferences {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, specta::Type)]
 pub struct SteamApiConfig {
     #[serde(default)]
     pub api_key: String,
@@ -136,13 +136,13 @@ pub struct SteamApiConfig {
     pub steam_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, specta::Type)]
 pub struct SgdbConfig {
     #[serde(default)]
     pub api_key: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, specta::Type)]
 pub struct WindowState {
     pub width: Option<f64>,
     pub height: Option<f64>,
@@ -151,7 +151,7 @@ pub struct WindowState {
     pub maximized: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, specta::Type)]
 pub struct GamePreference {
     #[serde(default)]
     pub disabled_families: Vec<String>,
@@ -159,7 +159,7 @@ pub struct GamePreference {
     pub pinned_versions: std::collections::HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct AdvancedConfig {
     #[serde(default)]
     pub dlss_debug_overlay: bool,
@@ -197,7 +197,7 @@ impl Default for AdvancedConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct NetworkConfig {
     #[serde(default = "default_retry_attempts")]
     pub retry_attempts: u32,
@@ -238,7 +238,7 @@ impl Default for NetworkConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct BackgroundConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -286,7 +286,7 @@ impl BackgroundConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, specta::Type)]
 pub struct AppSettings {
     #[serde(default)]
     pub launcher_overrides: LauncherOverrides,
@@ -360,7 +360,7 @@ fn persist(state: &AppState, settings: &AppSettings) -> AppResult<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct AppPathsDto {
     pub install_mode: dlssync_contracts::InstallMode,
     pub root: String,
@@ -394,6 +394,7 @@ impl From<&AppPaths> for AppPathsDto {
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn get_app_paths(state: State<'_, AppState>) -> AppResult<AppPathsDto> {
     let guard = state.paths.read();
     let paths = guard
@@ -403,11 +404,13 @@ pub async fn get_app_paths(state: State<'_, AppState>) -> AppResult<AppPathsDto>
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn get_settings(state: State<'_, AppState>) -> AppResult<AppSettings> {
     Ok(state.settings.read().clone())
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn save_settings(state: State<'_, AppState>, settings: AppSettings) -> AppResult<()> {
     persist(&state, &settings)?;
     *state.settings.write() = settings;
@@ -415,6 +418,7 @@ pub async fn save_settings(state: State<'_, AppState>, settings: AppSettings) ->
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn add_blacklist_entry(
     state: State<'_, AppState>,
     game_id: String,
@@ -428,6 +432,7 @@ pub async fn add_blacklist_entry(
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn remove_blacklist_entry(
     state: State<'_, AppState>,
     game_id: String,
@@ -439,6 +444,7 @@ pub async fn remove_blacklist_entry(
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn add_favorite_game(
     state: State<'_, AppState>,
     game_id: String,
@@ -457,6 +463,7 @@ pub async fn add_favorite_game(
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn remove_favorite_game(
     state: State<'_, AppState>,
     game_id: String,
@@ -468,6 +475,7 @@ pub async fn remove_favorite_game(
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn save_window_state(
     state: State<'_, AppState>,
     window_state: WindowState,

@@ -14,10 +14,14 @@ name = "dlssync"
 path = "src/main.rs"
 
 [features]
+default = ["standard"]
+bindings = []
+standard = ["dep:tauri-plugin-updater"]
 nexus = ["dll-catalog/nexus"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+embed-resource = "3.0.9"
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
@@ -25,7 +29,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-shell = "2"
-tauri-plugin-updater = "2"
+tauri-plugin-updater = { version = "2", optional = true }
 tauri-plugin-single-instance = "2"
 tauri-plugin-store = "2"
 tauri-plugin-os = "2"
@@ -80,3 +84,8 @@ win32-ecoqos = "0.6"
 [dev-dependencies]
 rusqlite = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
+
+[[example]]
+name = "export_bindings"
+path = "examples/export_bindings.rs"
+required-features = ["bindings"]

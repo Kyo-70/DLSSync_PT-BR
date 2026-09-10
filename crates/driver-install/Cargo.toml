@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+specta.workspace = true
 serde = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 reqwest.workspace = true

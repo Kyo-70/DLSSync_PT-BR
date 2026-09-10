@@ -118,6 +118,7 @@ dependencies = [
  "once_cell",
  "pelite",
  "serde",
+ "specta",
  "tempfile",
 ]
 
@@ -364,6 +365,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "sha2",
+ "specta",
  "tempfile",
  "thiserror 2.0.18",
  "uuid",
@@ -1153,7 +1155,9 @@ version = "1.7.0"
 dependencies = [
  "bytes",
  "chrono",
+ "dlssync-contracts",
  "ed25519-dalek",
+ "fs2",
  "futures-util",
  "hex",
  "md-5",
@@ -1163,6 +1167,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "specta",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -1181,6 +1186,7 @@ dependencies = [
  "pe-version",
  "serde",
  "sha2",
+ "specta",
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
@@ -1223,6 +1229,7 @@ dependencies = [
  "dlssync-contracts",
  "driver-catalog",
  "driver-install",
+ "embed-resource",
  "launcher-scan",
  "notifications-store",
  "nvapi-drs",
@@ -1361,6 +1368,7 @@ dependencies = [
  "roxmltree",
  "serde",
  "serde_json",
+ "specta",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -1377,6 +1385,7 @@ dependencies = [
  "pe-version",
  "reqwest 0.12.28",
  "serde",
+ "specta",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -1701,6 +1710,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "fs2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+dependencies = [
+ "libc",
+ "winapi",
 ]
 
 [[package]]
@@ -2710,6 +2729,7 @@ version = "1.7.0"
 dependencies = [
  "serde",
  "serde_json",
+ "specta",
  "thiserror 2.0.18",
  "tracing",
  "winreg 0.55.0",
@@ -2849,15 +2869,19 @@ dependencies = [
  "chrono",
  "clap",
  "dll-catalog",
+ "dlssync-contracts",
  "ed25519-dalek",
  "hex",
+ "pe-version",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "wiremock",
  "zip 2.4.2",
 ]
 
@@ -3034,6 +3058,7 @@ dependencies = [
  "chrono",
  "rusqlite",
  "serde",
+ "specta",
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
@@ -3124,6 +3149,7 @@ name = "nvapi-drs"
 version = "1.7.0"
 dependencies = [
  "serde",
+ "specta",
  "windows-sys 0.59.0",
 ]
 
@@ -3504,9 +3530,12 @@ checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 name = "pe-version"
 version = "1.7.0"
 dependencies = [
+ "dlssync-contracts",
  "pelite",
  "serde",
  "serde_json",
+ "specta",
+ "tempfile",
  "thiserror 2.0.18",
  "tracing",
  "windows-sys 0.59.0",
@@ -4769,8 +4798,10 @@ version = "2.0.0-rc.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38f9a30cbcbb7011f1da7d73483983bf838af123883e45f2b36ed76328df9c50"
 dependencies = [
+ "chrono",
  "paste",
  "rustc_version",
+ "serde_json",
  "specta-macros",
 ]
 
@@ -4965,6 +4996,7 @@ name = "system-drivers"
 version = "1.7.0"
 dependencies = [
  "serde",
+ "specta",
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
@@ -7492,6 +7524,7 @@ version = "1.7.0"
 dependencies = [
  "serde",
  "serde_json",
+ "tempfile",
  "toml 0.9.12+spec-1.1.0",
 ]
 

@@ -5,6 +5,7 @@ use backup_store::{BackupEntry, DeleteOutcome};
 use tauri::State;
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn list_backups(state: State<'_, AppState>) -> AppResult<Vec<BackupEntry>> {
     let guard = state.backups.read();
     let store = guard
@@ -14,6 +15,7 @@ pub async fn list_backups(state: State<'_, AppState>) -> AppResult<Vec<BackupEnt
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn restore_backup(state: State<'_, AppState>, backup_id: String) -> AppResult<()> {
     let (entry, root_dir) = {
         let guard = state.backups.read();
@@ -71,6 +73,7 @@ pub async fn restore_backup(state: State<'_, AppState>, backup_id: String) -> Ap
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn delete_backup(
     state: State<'_, AppState>,
     backup_id: String,

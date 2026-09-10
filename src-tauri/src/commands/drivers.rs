@@ -56,7 +56,18 @@ fn device_for(gpu: &GpuInfo) -> (DeviceId, DriverVersion) {
     (device, installed)
 }
 
+const SYSTEM_INFO_CACHE_TTL_SECS: i64 = 60;
+
 pub(crate) async fn ensure_system_info(state: &State<'_, AppState>) -> AppResult<SystemInfo> {
+    let stale = state.system_info.read().as_ref().is_some_and(|info| {
+        chrono::Utc::now()
+            .signed_duration_since(info.collected_at)
+            .num_seconds()
+            >= SYSTEM_INFO_CACHE_TTL_SECS
+    });
+    if stale {
+        *state.system_info.write() = None;
+    }
     crate::state::coordinate_singleton(
         &state.system_info,
         &state.collect_system_info_lock,
@@ -70,6 +81,7 @@ pub(crate) async fn ensure_system_info(state: &State<'_, AppState>) -> AppResult
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn check_driver_updates(
     state: State<'_, AppState>,
 ) -> AppResult<Vec<DriverStatusReport>> {
@@ -101,6 +113,7 @@ pub async fn check_driver_updates(
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn list_driver_history(
     state: State<'_, AppState>,
     model: String,
@@ -133,14 +146,14 @@ pub async fn list_driver_history(
         .map_err(|e| AppError::Other(e.to_string()))
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct InstallProgress {
     pub stage: InstallStage,
     pub message: String,
     pub progress: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct InstallOutcome {
     pub stage: InstallStage,
     pub exit_code: i32,
@@ -205,6 +218,7 @@ fn clear_system_info_cache(state: &AppState) {
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn install_driver(
     app: AppHandle,
     state: State<'_, AppState>,

@@ -1,6 +1,24 @@
 pub mod download;
 pub mod hash;
+pub mod v3;
 pub mod zip;
+pub use v3::SourceHealth;
+
+pub fn ensure_available_space(path: &Path, required: u64) -> Result<(), CatalogError> {
+    let directory = if path.is_dir() {
+        path
+    } else {
+        path.parent()
+            .ok_or_else(|| CatalogError::Unsafe("destination has no directory".into()))?
+    };
+    let available = fs2::available_space(directory)?;
+    if available < required {
+        return Err(CatalogError::Unsafe(format!(
+            "insufficient disk space: {required} bytes required, {available} available"
+        )));
+    }
+    Ok(())
+}
 
 pub use download::{
     fetch_shared, DownloadCache, DownloadOptions, DownloadProgress, DEFAULT_CACHE_TTL,
@@ -55,13 +73,24 @@ pub enum CatalogError {
     EmptyCatalog,
     #[error("catalog downgrade refused: current {current}, fetched {fetched}")]
     Downgrade { current: String, fetched: String },
+    #[error("unsupported catalog schema: expected {expected}, got {actual}")]
+    UnsupportedSchema { expected: u32, actual: u32 },
+    #[error("catalog is stale: generated {generated}, maximum age is {max_age_days} days")]
+    StaleCatalog {
+        generated: String,
+        max_age_days: i64,
+    },
+    #[error("catalog timestamp is too far in the future: generated {generated}")]
+    FutureCatalog { generated: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct Catalog {
     pub schema_version: u32,
     pub generated_at: chrono::DateTime<chrono::Utc>,
     pub vendors: BTreeMap<String, BTreeMap<String, FamilyEntry>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sources: BTreeMap<String, SourceHealth>,
     #[serde(default)]
     pub incompatible_games: Vec<String>,
     #[serde(default)]
@@ -79,7 +108,7 @@ pub struct Catalog {
 /// `needle` matched as a substring against files on disk, and the canonical
 /// engine `name` reported on a hit. Mirrors a `(needle, name)` row of the
 /// compile-time `ANTI_CHEAT_BINARIES` table so the two layers merge cleanly.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct AntiCheatBinary {
     pub needle: String,
     pub name: String,
@@ -89,7 +118,7 @@ pub struct AntiCheatBinary {
 /// time (with an AreWeAntiCheatYet Linux/Wine status overlay applied
 /// server-side), bundled into the manifest with zero new runtime outbound. Keys
 /// in `by_name` are lowercased for case-insensitive matching.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 pub struct AntiCheatIndex {
     #[serde(default)]
     pub by_appid: BTreeMap<u32, AntiCheatEntry>,
@@ -97,7 +126,7 @@ pub struct AntiCheatIndex {
     pub by_name: BTreeMap<String, AntiCheatEntry>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct AntiCheatEntry {
     /// Kernel/usermode anti-cheat engines (Easy Anti-Cheat, BattlEye, Vanguard …)
     /// — account-ban risk on a DLL swap.
@@ -179,14 +208,16 @@ impl AntiCheatIndex {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct FamilyEntry {
     pub latest: String,
     pub releases: Vec<Release>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct Release {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact: Option<dlssync_contracts::ArtifactDescriptor>,
     pub version: String,
     pub version_packed: u64,
     pub filename: String,
@@ -226,28 +257,31 @@ fn default_hash_algorithm() -> String {
 
 /// Commit the embedded `fallback/manifest.json` (+ `.sig`) was snapshotted from.
 /// Refreshed alongside the bundled fallback when a release re-bundles it.
-pub const FALLBACK_MANIFEST_COMMIT_SHA: &str = "afc77c0da20834b616375a66338e70e113d64686";
+pub const FALLBACK_MANIFEST_COMMIT_SHA: &str = "9c5b4a3b717e3637c0b8e708f93c66c38dd6d912";
 
 /// Manifest URL used by the standard build. It tracks `@main` so the catalog can
 /// refresh with new upstream DLL versions between application releases.
 #[cfg(not(feature = "nexus"))]
 pub const DEFAULT_MANIFEST_URL: &str =
-    "https://cdn.jsdelivr.net/gh/xt0n1-t3ch/dlssync-manifest@main/manifest.json";
+    "https://cdn.jsdelivr.net/gh/xt0n1-t3ch/dlssync-manifest@main/manifest-v3.json";
 
 /// Manifest URL used by the Nexus Mods build. It is pinned to the same immutable
 /// commit as the bundled fallback manifest so outbound DLL download destinations
 /// cannot change without a manual source change and a new application release.
 #[cfg(feature = "nexus")]
 pub const DEFAULT_MANIFEST_URL: &str =
-    "https://cdn.jsdelivr.net/gh/xt0n1-t3ch/dlssync-manifest@afc77c0da20834b616375a66338e70e113d64686/manifest.json";
+    "https://cdn.jsdelivr.net/gh/xt0n1-t3ch/dlssync-manifest@9c5b4a3b717e3637c0b8e708f93c66c38dd6d912/manifest.json";
 
 /// Canonical moving upstream used only for a user-requested catalog refresh.
 /// The Nexus build never calls this automatically; its policy is enforced in
 /// `dlssync-application` before any request is created.
 pub const CANONICAL_MANIFEST_URL: &str =
-    "https://cdn.jsdelivr.net/gh/xt0n1-t3ch/dlssync-manifest@main/manifest.json";
+    "https://cdn.jsdelivr.net/gh/xt0n1-t3ch/dlssync-manifest@main/manifest-v3.json";
 
 pub const MANIFEST_ENV_VAR: &str = "DLSSYNC_MANIFEST_URL";
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 3;
+pub const MAX_CATALOG_AGE_DAYS: i64 = 180;
+pub const MAX_FUTURE_CLOCK_SKEW_MINUTES: i64 = 10;
 
 const MANIFEST_RETRY_BACKOFF_MS: &[u64] = &[200, 800, 2000];
 
@@ -340,6 +374,21 @@ fn verify_with_pubkey(
 }
 
 impl Catalog {
+    /// Read an existing signed document without claiming it is current.
+    /// The generator uses this to retain last-good historical data on failure.
+    pub fn from_signed_bytes(bytes: &[u8], signature: &str) -> Result<Self, CatalogError> {
+        verify_manifest_signature(bytes, signature).map_err(CatalogError::Signature)?;
+        let catalog: Catalog = serde_json::from_slice(bytes)?;
+        if !matches!(catalog.schema_version, 2 | 3) {
+            return Err(CatalogError::UnsupportedSchema {
+                expected: SUPPORTED_SCHEMA_VERSION,
+                actual: catalog.schema_version,
+            });
+        }
+        catalog.validate_artifacts()?;
+        Ok(catalog)
+    }
+
     pub async fn fetch(client: &reqwest::Client) -> Result<Self, CatalogError> {
         let url = manifest_url();
         Self::fetch_from(client, &url).await
@@ -434,7 +483,8 @@ impl Catalog {
         let f = v.get(family)?;
         f.releases
             .iter()
-            .find(|r| r.version == version && r.filename.eq_ignore_ascii_case(filename))
+            .filter(|r| r.version == version && r.filename.eq_ignore_ascii_case(filename))
+            .max_by_key(|r| (r.channel == "stable", !r.is_dev, r.released_at))
             .cloned()
     }
 
@@ -449,7 +499,8 @@ impl Catalog {
         f.releases
             .iter()
             .filter(|r| r.filename.eq_ignore_ascii_case(filename))
-            .max_by_key(|r| r.version_packed)
+            .filter(|r| r.channel == "stable" && !r.is_dev)
+            .max_by_key(|r| (r.version_packed, r.released_at))
             .cloned()
     }
 }
@@ -458,6 +509,31 @@ fn validate_catalog_candidate(
     catalog: &Catalog,
     minimum_generated_at: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<(), CatalogError> {
+    validate_catalog_at(catalog, minimum_generated_at, chrono::Utc::now())
+}
+
+fn validate_catalog_at(
+    catalog: &Catalog,
+    minimum_generated_at: Option<chrono::DateTime<chrono::Utc>>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<(), CatalogError> {
+    if !matches!(catalog.schema_version, 2 | 3) {
+        return Err(CatalogError::UnsupportedSchema {
+            expected: SUPPORTED_SCHEMA_VERSION,
+            actual: catalog.schema_version,
+        });
+    }
+    if catalog.generated_at > now + chrono::Duration::minutes(MAX_FUTURE_CLOCK_SKEW_MINUTES) {
+        return Err(CatalogError::FutureCatalog {
+            generated: catalog.generated_at.to_rfc3339(),
+        });
+    }
+    if catalog.generated_at < now - chrono::Duration::days(MAX_CATALOG_AGE_DAYS) {
+        return Err(CatalogError::StaleCatalog {
+            generated: catalog.generated_at.to_rfc3339(),
+            max_age_days: MAX_CATALOG_AGE_DAYS,
+        });
+    }
     if catalog.vendors.is_empty() {
         return Err(CatalogError::EmptyCatalog);
     }
@@ -469,6 +545,7 @@ fn validate_catalog_candidate(
             });
         }
     }
+    catalog.validate_artifacts()?;
     Ok(())
 }
 
@@ -510,6 +587,7 @@ async fn fetch_raw_strict_once(
         .ok_or_else(|| CatalogError::MissingSignature { url: url.into() })?;
     verify_manifest_signature(&bytes, &signature).map_err(CatalogError::Signature)?;
     let catalog = serde_json::from_slice::<Catalog>(&bytes)?;
+    validate_catalog_candidate(&catalog, None)?;
     Ok((catalog, bytes.to_vec(), signature))
 }
 
@@ -523,6 +601,7 @@ async fn try_fetch(client: &reqwest::Client, url: &str) -> Result<Catalog, Catal
         .await?;
     enforce_manifest_signature(client, url, &bytes).await?;
     let c: Catalog = serde_json::from_slice(&bytes)?;
+    validate_catalog_candidate(&c, None)?;
     Ok(c)
 }
 
@@ -636,6 +715,7 @@ async fn fetch_raw_once(
     };
     enforce_signature_outcome(url, &bytes, fetched)?;
     let c: Catalog = serde_json::from_slice(&bytes)?;
+    validate_catalog_candidate(&c, None)?;
     Ok((c, bytes.to_vec(), sig_opt))
 }
 
@@ -648,7 +728,20 @@ const FALLBACK_SIGNATURE: &str = include_str!("../fallback/manifest.json.sig");
 pub fn embedded_fallback_catalog() -> Result<Catalog, CatalogError> {
     verify_manifest_signature(FALLBACK_MANIFEST, FALLBACK_SIGNATURE)
         .map_err(CatalogError::Signature)?;
-    Ok(serde_json::from_slice(FALLBACK_MANIFEST)?)
+    let catalog: Catalog = serde_json::from_slice(FALLBACK_MANIFEST)?;
+    // The immutable fallback may outlive the network freshness window; require schema,
+    // signature, and non-empty data but do not brick offline startup over its age.
+    if !matches!(catalog.schema_version, 2 | 3) {
+        return Err(CatalogError::UnsupportedSchema {
+            expected: SUPPORTED_SCHEMA_VERSION,
+            actual: catalog.schema_version,
+        });
+    }
+    if catalog.vendors.is_empty() {
+        return Err(CatalogError::EmptyCatalog);
+    }
+    catalog.validate_artifacts()?;
+    Ok(catalog)
 }
 
 /// Sidecar path holding the detached signature next to the cached manifest, so
@@ -662,28 +755,15 @@ fn cache_sig_path(cache_path: &Path) -> PathBuf {
 /// Persist the RAW manifest bytes (atomic) plus the detached signature sidecar.
 /// Best-effort: cache write failures are logged, never fatal to a live fetch.
 fn write_catalog_cache(cache_path: &Path, raw: &[u8], sig: Option<&str>) {
-    let Some(parent) = cache_path.parent() else {
-        return;
-    };
-    let _ = std::fs::create_dir_all(parent);
-    match tempfile::NamedTempFile::new_in(parent) {
-        Ok(mut staged) => {
-            use std::io::Write as _;
-            if staged.write_all(raw).is_ok() && staged.as_file().sync_all().is_ok() {
-                if let Err(e) = staged.persist(cache_path) {
-                    tracing::warn!(error = %e.error, "failed to persist catalog cache");
-                }
+    match sig {
+        Some(signature) => {
+            if let Err(error) = write_verified_cache_atomic(cache_path, raw, signature) {
+                tracing::warn!(%error, "failed to persist verified catalog cache");
             }
         }
-        Err(e) => tracing::warn!(error = %e, "failed to stage catalog cache"),
-    }
-    let sig_path = cache_sig_path(cache_path);
-    match sig {
-        Some(sig) => {
-            let _ = std::fs::write(sig_path, sig);
-        }
         None => {
-            let _ = std::fs::remove_file(sig_path);
+            tracing::warn!("unsigned catalog cache is not persisted");
+            let _ = std::fs::remove_file(cache_sig_path(cache_path));
         }
     }
 }
@@ -742,7 +822,9 @@ fn load_cached_catalog_with(cache_path: &Path, require_signature: bool) -> Optio
         let sig = std::fs::read_to_string(cache_sig_path(cache_path)).ok()?;
         verify_manifest_signature(&raw, &sig).ok()?;
     }
-    serde_json::from_slice(&raw).ok()
+    let catalog: Catalog = serde_json::from_slice(&raw).ok()?;
+    validate_catalog_candidate(&catalog, None).ok()?;
+    Some(catalog)
 }
 
 /// A raw Ed25519 signature is 64 bytes = 128 hex chars.
@@ -810,6 +892,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn space_guard_rejects_impossible_allocation_without_creating_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("candidate.dll");
+        let error = ensure_available_space(&target, u64::MAX).unwrap_err();
+        assert!(error.to_string().contains("insufficient disk space"));
+        assert!(!target.exists());
+        ensure_available_space(dir.path(), 0).unwrap();
+    }
+
+    #[test]
     fn embedded_fallback_verifies_against_production_pubkey_and_parses() {
         // This is the brick-guard: it runs the real Ed25519 verification of the
         // bundled manifest.json.sig against MANIFEST_PUBKEY_HEX over the bundled
@@ -852,6 +944,7 @@ mod tests {
 
     fn release_with(filename: &str, version: &str, packed: u64, sha: &str) -> Release {
         Release {
+            artifact: None,
             version: version.into(),
             version_packed: packed,
             filename: filename.into(),
@@ -882,6 +975,7 @@ mod tests {
         let mut vendors = BTreeMap::new();
         vendors.insert("intel".to_string(), families);
         Catalog {
+            sources: Default::default(),
             schema_version: 2,
             generated_at: chrono::Utc::now(),
             vendors,
@@ -1174,6 +1268,42 @@ mod tests {
     }
 
     #[test]
+    fn automatic_candidate_excludes_preview_and_development() {
+        let stable = release_with("libxess.dll", "2.0.0", 200, "stable");
+        let mut preview = release_with("libxess.dll", "3.0.0", 300, "preview");
+        preview.channel = "experimental".into();
+        let mut developer = release_with("libxess.dll", "4.0.0", 400, "development");
+        developer.is_dev = true;
+        let catalog = catalog_with("xess_sr", vec![stable, preview, developer]);
+        assert_eq!(
+            catalog
+                .find_latest_for_file("intel", "xess_sr", "libxess.dll")
+                .unwrap()
+                .version,
+            "2.0.0"
+        );
+    }
+
+    #[test]
+    fn valid_signature_does_not_approve_an_arm_catalog_candidate() {
+        use ed25519_dalek::{Signer, SigningKey};
+        let mut candidate = release_with("libxess.dll", "2.0.0", 200, &"aa".repeat(32));
+        candidate.cdn_url = "https://example.com/sdk-aarch64.zip".into();
+        candidate.zip_entry = Some("bin/aarch64/libxess.dll".into());
+        let catalog = catalog_with("xess_sr", vec![candidate]);
+        let bytes = serde_json::to_vec(&catalog).unwrap();
+        let key = SigningKey::from_bytes(&[9; 32]);
+        let signature = hex::encode(key.sign(&bytes).to_bytes());
+        assert!(verify_with_pubkey(
+            &hex::encode(key.verifying_key().to_bytes()),
+            &bytes,
+            &signature
+        )
+        .is_ok());
+        assert!(catalog.validate_artifacts().is_err());
+    }
+
+    #[test]
     fn find_latest_for_file_filters_by_filename() {
         let c = catalog_with(
             "xess_sr",
@@ -1279,6 +1409,7 @@ mod tests {
     #[test]
     fn candidate_validation_rejects_empty_and_older_catalogs() {
         let empty = Catalog {
+            sources: Default::default(),
             schema_version: 2,
             generated_at: chrono::Utc::now(),
             vendors: BTreeMap::new(),
@@ -1289,6 +1420,26 @@ mod tests {
         assert!(matches!(
             validate_catalog_candidate(&empty, None),
             Err(CatalogError::EmptyCatalog)
+        ));
+
+        let now = chrono::Utc::now();
+        let mut invalid =
+            catalog_with("dlss_sr", vec![release_with("nvngx_dlss.dll", "1", 1, "a")]);
+        invalid.schema_version = 4;
+        assert!(matches!(
+            validate_catalog_at(&invalid, None, now),
+            Err(CatalogError::UnsupportedSchema { actual: 4, .. })
+        ));
+        invalid.schema_version = SUPPORTED_SCHEMA_VERSION;
+        invalid.generated_at = now - chrono::Duration::days(MAX_CATALOG_AGE_DAYS + 1);
+        assert!(matches!(
+            validate_catalog_at(&invalid, None, now),
+            Err(CatalogError::StaleCatalog { .. })
+        ));
+        invalid.generated_at = now + chrono::Duration::minutes(MAX_FUTURE_CLOCK_SKEW_MINUTES + 1);
+        assert!(matches!(
+            validate_catalog_at(&invalid, None, now),
+            Err(CatalogError::FutureCatalog { .. })
         ));
 
         let catalog = embedded_fallback_catalog().unwrap();

@@ -65,3 +65,9 @@ impl Serialize for AppError {
 
 /// Convenience alias used by every Tauri command handler.
 pub type AppResult<T> = Result<T, AppError>;
+
+impl specta::Type for AppError {
+    fn definition(types: &mut specta::Types) -> specta::datatype::DataType {
+        <dlssync_contracts::CommandError as specta::Type>::definition(types)
+    }
+}

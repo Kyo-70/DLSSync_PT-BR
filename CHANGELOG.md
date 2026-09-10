@@ -7,7 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.7.0] - 2026-07-10
+## [1.7.0] - Unreleased
+
+This version remains in development. The catalog and contract foundations are
+verified separately from the pending executor, interface, driver, and release work.
+
+### Catalog and contract foundations
+
+- Publish an independently signed v3 catalog while preserving the v2 endpoint for existing clients.
+- Select x64 vendor artifacts and verify PE identity before replacing files.
+- Record actual DLL versions, package versions, exact archive entries, SHA-256, and observed signature status separately.
+- Preserve historical MD5 records explicitly and keep per-source failure and freshness information.
+- Resolve current FidelityFX runtimes from immutable SDK commits and keep a verified archive cache.
+- Generate command arguments, results, errors, and events from Rust signatures.
+- Restore development startup with coordinated Vite, Svelte, and Node updates.
+
+### Integrated development work
+
+### Added
+
+- DLSS Ray Reconstruction profile overrides with the NVIDIA-documented RR enable and forced-preset DRS settings.
+- Explicit DLSS 2/3/4/5 capability reporting by NVIDIA GPU architecture, driver version, supported presets, and frame-generation multipliers.
+- Nexus distribution packaging and verification.
+
+### Changed
+
+- Catalog schema version 2, freshness, future-clock, and minimum-driver requirements are now enforced before update application.
+- Nexus builds compile without the updater dependency and share the Standard release while excluding Nexus assets from `latest.json`.
+- GPU driver detection prioritizes PCI identities, refreshes cached system data after external changes, and keeps AMD branch tables and Intel OS targeting explicit.
+
+### Security
+
+- Catalog cache writes now use one atomic signed-manifest path; stale, future-dated, wrong-schema, empty, and downgraded catalogs are rejected.
+- CI secret scanning now supplies the required pull-request token to Gitleaks.
+
+### Trust and control
 
 The trust-and-control release. DLSSync now shows the exact signed evidence behind a catalog and every proposed DLL change, keeps a durable operation journal, exposes the same safe plan/apply/rollback flow through a CLI, and finally makes the portable build keep all of its state beside the executable. The Nexus edition remains silent until the user explicitly refreshes the catalog.
 

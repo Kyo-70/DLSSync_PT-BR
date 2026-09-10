@@ -38,6 +38,7 @@
   import { motionDuration } from "../lib/ux";
   import {
     classifyApplyError,
+    normalizeErrorClass,
     ERROR_CLASS_TONE,
   } from "../lib/applyErrorClass";
   import {
@@ -152,7 +153,7 @@
       if (g.group_id) g.download = dlMap[g.group_id] ?? null;
       const firstFailed = g.items.find((i) => i.stage === "failed" || i.stage === "cancelled");
       g.primaryErrorClass = firstFailed
-        ? (firstFailed.error_class as ApplyErrorClass | null) ?? classifyApplyError(firstFailed.error).kind
+        ? normalizeErrorClass(firstFailed.error_class ?? classifyApplyError(firstFailed.error).kind)
         : null;
     }
     const arr = Array.from(by.values());
@@ -209,7 +210,7 @@
     return known ? sum : null;
   });
   const aggregateSpeed = $derived(
-    Object.values($downloadProgressByGroup).reduce((acc, d) => acc + d.bytes_per_sec, 0),
+    Object.values($downloadProgressByGroup).reduce((acc, d) => acc + (d.bytes_per_sec ?? 0), 0),
   );
   const downloadPct = $derived(percentOf(totalBytesDownloaded, totalBytesTotal));
 
@@ -293,7 +294,7 @@
       if (it.stage !== "failed" && it.stage !== "cancelled") continue;
       const message = (it.error ?? it.message ?? "Unknown error").trim();
       const klass: ApplyErrorClass =
-        (it.error_class as ApplyErrorClass | null) ?? classifyApplyError(message).kind;
+        normalizeErrorClass(it.error_class ?? classifyApplyError(message).kind);
       const existing = byMessage.get(message);
       if (existing) existing.affected.push(it);
       else byMessage.set(message, { message, class: klass, affected: [it] });
@@ -801,7 +802,7 @@
         {#if selectedDedupedErrors.length > 0}
           <div class="error-block-list">
             {#each selectedDedupedErrors as de}
-              {@const klass = classifyApplyError(de.message)}
+              {@const klass = classifyApplyError(de.message, de.class)}
               <div class="error-block" data-tone={ERROR_CLASS_TONE[de.class]}>
                 <div class="error-block-head">
                   <span class="error-block-kind">{$t("errorClass." + de.class + ".label")}</span>
@@ -871,7 +872,7 @@
                 {/if}
                 {#if isFailed}
                   <button class="btn btn-ghost btn-xs" disabled={!e.error} onclick={() => copyError(e.error)}>{$t("component.applyModal.action.copyError")}</button>
-                  <button class="btn btn-accent btn-xs" disabled={retryingId === e.apply_id} onclick={() => handleRetrySingle(e)}>
+                  <button class="btn btn-accent btn-xs" disabled={retryingId === e.apply_id || !classifyApplyError(e.error, e.error_class).retryable} onclick={() => handleRetrySingle(e)}>
                     {#if retryingId === e.apply_id}<span class="spinner-tiny"></span>{$t("component.applyModal.retrying")}{:else}{$t("common.retry")}{/if}
                   </button>
                 {/if}
@@ -907,7 +908,7 @@
           {$t("component.applyModal.action.allowUnsignedRetryCount", { count: failedSignatureCount })}
         </button>
       {/if}
-      {#if failedGroups > 0 && !anyRunning}
+      {#if failedGroups > 0 && !anyRunning && Object.values($activeApplies).some(e => (e.stage === "failed" || e.stage === "cancelled") && classifyApplyError(e.error, e.error_class).retryable)}
         <button class="aura-pill aura-pill-primary" disabled={busy} onclick={handleRetryAllFailed}>{$t("component.applyModal.action.retryAllFailed")}</button>
       {/if}
       {#if failedGroups > 0 || allDone}

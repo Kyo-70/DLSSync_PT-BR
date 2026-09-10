@@ -73,7 +73,7 @@ const originalCapability = await readFile(capabilityPath, "utf8");
 try {
   await writeFile(tauriConfigPath, await readFile(generatedConfigPath, "utf8"));
   await writeFile(capabilityPath, await readFile(generatedCapabilityPath, "utf8"));
-  await run("pnpm", ["exec", "tauri", "build", "--features", "nexus"]);
+  await run("pnpm", ["exec", "tauri", "build", "--no-default-features", "--features", "nexus"]);
 } finally {
   await writeFile(tauriConfigPath, originalConfig);
   await writeFile(capabilityPath, originalCapability);

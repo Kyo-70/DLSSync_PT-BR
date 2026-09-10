@@ -14,6 +14,7 @@
   } from "../lib/api";
   import {
     SR_PRESET_OPTIONS,
+    RR_PRESET_OPTIONS,
     FG_MODE_OPTIONS,
     FG_COUNT_OPTIONS,
     emptyDlssConfig,
@@ -29,6 +30,10 @@
   let srSelectOptions = $derived<{ value: DlssPreset | null; label: string }[]>([
     { value: null, label: $t("component.dlss.noPresetOverride") },
     ...SR_PRESET_OPTIONS.map((o) => ({ value: o.value, label: $t("dlss.preset." + o.value + ".label") })),
+  ]);
+  let rrSelectOptions = $derived<{ value: DlssPreset | null; label: string }[]>([
+    { value: null, label: $t("component.dlss.noPresetOverride") },
+    ...RR_PRESET_OPTIONS.map((o) => ({ value: o.value, label: $t("dlss.preset." + o.value + ".label") })),
   ]);
   let fgModeSelectOptions = $derived<
     { value: FrameGenMode | null; label: string; disabled?: boolean }[]
@@ -71,6 +76,7 @@
   let dynamicOk = $derived(driverPacked === 0 || dynamicMfgAvailable(driverPacked));
 
   let srHelp = $derived(SR_PRESET_OPTIONS.find((o) => o.value === config.sr_preset) ?? null);
+  let rrHelp = $derived(RR_PRESET_OPTIONS.find((o) => o.value === config.rr_preset) ?? null);
   let fgModeHelp = $derived(FG_MODE_OPTIONS.find((o) => o.value === config.fg_mode) ?? null);
   let fgCountHelp = $derived(FG_COUNT_OPTIONS.find((o) => o.value === config.fg_fixed_count) ?? null);
 
@@ -162,6 +168,29 @@
         <button class="dlss-learn" onclick={() => learnMore(srHelp.sourceUrl)}>{$t("component.dlss.learnMore")}</button>
       </p>
     {/if}
+  </section>
+
+  <section class="dlss-group">
+    <span class="dlss-group-title">{$t("component.dlss.rayReconstruction")}</span>
+    <Checkbox bind:checked={config.enable_rr_dll_override} label={$t("component.dlss.forceLatestRrDll")} />
+    <div class="dlss-field">
+      <span class="dlss-field-label">{$t("component.dlss.modelPreset")}</span>
+      <div class="dlss-control">
+        <Select
+          bind:value={config.rr_preset}
+          options={rrSelectOptions}
+          placeholder={$t("component.dlss.noPresetOverride")}
+          ariaLabel={$t("component.dlss.rrPresetAria")}
+        />
+      </div>
+    </div>
+    {#if rrHelp}
+      <p class="dlss-help">
+        {$t("dlss.preset." + rrHelp.value + ".desc")}
+        <button class="dlss-learn" onclick={() => learnMore(rrHelp.sourceUrl)}>{$t("component.dlss.learnMore")}</button>
+      </p>
+    {/if}
+    <p class="dlss-help">{$t("component.dlss.rrNote")}</p>
   </section>
 
   <section class="dlss-group">

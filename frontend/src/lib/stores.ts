@@ -318,7 +318,7 @@ export interface ApplyTracker {
   attempt: number | null;
   bytes_downloaded: number;
   bytes_total: number | null;
-  bytes_per_sec: number;
+  bytes_per_sec: number | null;
   started_at: number;
   ended_at: number | null;
 }
@@ -331,7 +331,7 @@ export interface GroupDownloadState {
   url: string;
   bytes_downloaded: number;
   bytes_total: number | null;
-  bytes_per_sec: number;
+  bytes_per_sec: number | null;
   attempt: number;
   last_update: number;
 }

@@ -1,4 +1,5 @@
 import { get } from "svelte/store";
+import { classifyApplyError } from "./applyErrorClass";
 import {
   applyUpdateBatch,
   applyUpdate,
@@ -13,6 +14,7 @@ import {
 } from "./api";
 import {
   activeApplies,
+  games,
   downloadProgressByGroup,
   formatError,
   showToast,
@@ -158,6 +160,7 @@ function prepareApply(targets: ApplyTarget[]): {
     requests.push({
       apply_id,
       game_id: t.game_id,
+      install_dir: get(games).find((game) => game.id === t.game_id)?.install_dir ?? null,
       game_label: t.game_label,
       dll_path: t.record.path,
       vendor: familyVendor(t.record.family),
@@ -291,6 +294,7 @@ export async function dispatchDllSet(
 }
 
 export async function retrySingleApply(tracker: ApplyTracker): Promise<void> {
+  if (!classifyApplyError(tracker.error, tracker.error_class).retryable) return;
   if (isApplyInflight()) {
     showToast("warning", translate(get(locale), "toast.applyInProgress"));
     return;
@@ -345,7 +349,7 @@ export async function retrySingleApply(tracker: ApplyTracker): Promise<void> {
 }
 
 export async function retryFailedTrackers(trackers: ApplyTracker[]): Promise<void> {
-  const failed = trackers.filter((t) => t.stage === "failed" || t.stage === "cancelled");
+  const failed = trackers.filter((t) => (t.stage === "failed" || t.stage === "cancelled") && classifyApplyError(t.error, t.error_class).retryable);
   if (failed.length === 0) return;
   if (isApplyInflight()) {
     showToast("warning", translate(get(locale), "toast.applyInProgress"));

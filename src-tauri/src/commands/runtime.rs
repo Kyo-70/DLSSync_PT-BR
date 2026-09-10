@@ -1,7 +1,7 @@
 use dlssync_application::product_config;
 use serde::Serialize;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct RuntimeMode {
     pub portable: bool,
     pub release_url: String,
@@ -20,6 +20,7 @@ pub fn devtools_allowed() -> bool {
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub fn runtime_mode() -> RuntimeMode {
     let config = product_config().expect("embedded product.toml must be valid");
     RuntimeMode {
@@ -29,6 +30,7 @@ pub fn runtime_mode() -> RuntimeMode {
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub fn open_devtools(window: tauri::WebviewWindow) {
     if !devtools_allowed() {
         return;

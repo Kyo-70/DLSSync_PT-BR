@@ -2,7 +2,8 @@ mod commands;
 mod constants;
 mod efficiency;
 mod error;
-mod ipc_bindings;
+#[cfg(feature = "bindings")]
+pub mod ipc_bindings;
 mod logging;
 mod netpolicy;
 mod paths;
@@ -257,10 +258,14 @@ pub fn run() {
 
     #[cfg(debug_assertions)]
     {
-        const CDP_REMOTE_DEBUGGING_PORT: u16 = 9333;
+        let cdp_port = std::env::var("DLSSYNC_CDP_PORT")
+            .ok()
+            .and_then(|value| value.parse::<u16>().ok())
+            .filter(|port| *port != 0)
+            .unwrap_or(9333);
         std::env::set_var(
             "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-            format!("--remote-debugging-port={CDP_REMOTE_DEBUGGING_PORT}"),
+            format!("--remote-debugging-port={cdp_port} --remote-debugging-address=127.0.0.1"),
         );
     }
 
@@ -289,7 +294,7 @@ pub fn run() {
         }
     }));
 
-    #[cfg(not(feature = "nexus"))]
+    #[cfg(feature = "standard")]
     let builder = builder.plugin(tauri_plugin_updater::Builder::default().build());
 
     builder
@@ -542,6 +547,7 @@ pub fn run() {
             commands::system_drivers::system_driver_versions,
             commands::anticheat::detect_anticheat,
             commands::dlss_profile::dlss_overrides_supported,
+            commands::dlss_profile::dlss_capabilities,
             commands::dlss_profile::apply_dlss_override,
             commands::dlss_profile::reset_dlss_override,
             commands::dlss_profile::read_dlss_override_config,

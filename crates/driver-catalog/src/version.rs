@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// Unparseable or empty input yields `packed == 0` — an `Unknown` that compares
 /// less than every real version. Callers must treat `0` as "version unknown",
 /// not "oldest". Comparison is packed-integer only; there are no semver rules.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct DriverVersion {
     pub packed: u64,
     pub display: String,

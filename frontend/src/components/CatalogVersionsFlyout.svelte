@@ -13,6 +13,7 @@
   } from "../lib/labels";
   import type { CatalogFamily } from "../lib/stores";
   import { showToast } from "../lib/stores";
+  import { compareVersions } from "../lib/versions";
   import { mergeFamilyReleases } from "../lib/catalogReleases";
   import FeatureIcon from "./FeatureIcon.svelte";
   import Checkbox from "./Checkbox.svelte";
@@ -89,7 +90,7 @@
     releases = [];
     try {
       const list = await listReleases(vendor, family);
-      list.sort((a, b) => Number(b.version_packed ?? 0) - Number(a.version_packed ?? 0));
+      list.sort((a, b) => compareVersions(b.version, a.version));
       releases = list;
     } catch (err: unknown) {
       error = toError(err);

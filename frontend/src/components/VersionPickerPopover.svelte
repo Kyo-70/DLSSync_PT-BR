@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { compareVersions } from "../lib/versions";
   import { onMount } from "svelte";
   import { fly } from "svelte/transition";
   import { t } from "../lib/i18n/index";
@@ -50,7 +51,7 @@
       const vendor = familyVendor(family);
       const key = familyCatalogKey(family);
       const list = await listReleases(vendor, key);
-      list.sort((a, b) => packed(b) - packed(a));
+      list.sort((a, b) => compareVersions(b.version, a.version));
       releases = list;
     } catch (err: unknown) {
       const msg =
@@ -63,21 +64,8 @@
     }
   });
 
-  function packed(r: Release): number {
-    return Number(r.version_packed ?? 0);
-  }
-  function packedFromString(v: string): number {
-    const parts = v.split(".").map((n) => parseInt(n, 10) || 0);
-    const major = BigInt(parts[0] ?? 0);
-    const minor = BigInt(parts[1] ?? 0);
-    const build = BigInt(parts[2] ?? 0);
-    const patch = BigInt(parts[3] ?? 0);
-    return Number((major << 48n) | (minor << 32n) | (build << 16n) | patch);
-  }
-
-  let currentPacked = $derived(currentVersion ? packedFromString(currentVersion) : 0);
   let currentInCatalog = $derived(
-    !!currentVersion && releases.some((r) => r.version === currentVersion),
+    !!currentVersion && releases.some((r) => compareVersions(r.version, currentVersion) === 0),
   );
 
   let filtered = $derived(
@@ -95,7 +83,7 @@
   type RankedRow = { release: Release; relation: "current" | "newer" | "older" };
   let ranked = $derived.by<RankedRow[]>(() =>
     filtered.map((r) => {
-      const cmp = currentVersion ? packedFromString(r.version) - currentPacked : 1;
+      const cmp = currentVersion ? compareVersions(r.version, currentVersion) : 1;
       const relation = cmp === 0 ? "current" : cmp > 0 ? "newer" : "older";
       return { release: r, relation };
     }),
@@ -113,7 +101,7 @@
   let recommendedIsNewer = $derived(
     !!recommendedVersion &&
       !!currentVersion &&
-      packedFromString(recommendedVersion) > currentPacked,
+      compareVersions(recommendedVersion, currentVersion) > 0,
   );
 
   function formatDate(iso: string): string {

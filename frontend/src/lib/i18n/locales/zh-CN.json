@@ -1099,6 +1099,26 @@
       "label": "未知",
       "short": "意外错误",
       "hint": "发生了一次非机密故障。使用“复制报告”，如果问题持续，就开启一个问题。"
+    },
+    "streamline_locked": {
+      "label": "Streamline 已禁用",
+      "short": "Streamline 已禁用",
+      "hint": "Streamline 更新已禁用。请检查设置 → 高级，并更新完整的兼容组件集。"
+    },
+    "driver_too_old": {
+      "label": "需要更新驱动程序",
+      "short": "需要更新驱动程序",
+      "hint": "已安装的驱动程序不满足此库的要求。请先检查驱动程序。"
+    },
+    "game_running": {
+      "label": "游戏正在运行",
+      "short": "游戏正在运行",
+      "hint": "更改游戏文件前，请关闭游戏后重试。"
+    },
+    "architecture": {
+      "label": "架构",
+      "short": "架构",
+      "hint": "DLL 架构与游戏不匹配。请刷新目录并检查兼容的文件。"
     }
   },
   "notifKind": {
@@ -1750,10 +1770,13 @@
       "grdRequired": "DLSS 4 次覆盖需要 Game Ready 驱动 572.16 或更高版本。",
       "superResolution": "超分辨率",
       "frameGeneration": "帧生成",
+      "rayReconstruction": "光线重构",
+      "forceLatestRrDll": "强制使用已安装的最新光线重构 DLL",
       "forceLatestSrDll": "强制安装最新安装的DLSS DLL",
       "forceLatestFgDll": "强制安装最新安装的帧生成DLL",
       "modelPreset": "模型预设",
       "modelPresetAria": "DLSS模型预设",
+      "rrPresetAria": "光线重构模型预设",
       "noPresetOverride": "没有预设覆盖",
       "mode": "模式",
       "modeAria": "帧生成模式",
@@ -1769,6 +1792,7 @@
       "working": "工作......",
       "resetToDefault": "重置为默认",
       "note": "编写NVIDIA驱动应用配置文件——这和NVIDIA应用使用的机制相同。用重置完全可逆。带有反作弊功能的多人游戏可能会被标记为强制配置文件;先查看游戏政策。",
+      "rrNote": "光线重构使用独立的驱动设置（0x10E41DF7），与超分辨率分开。需要 RTX GPU 和支持的游戏。",
       "toast": {
         "openLinkFailed": "打开链接失败：{error}",
         "needsElevation": "已应用超分辨率。帧生成覆盖需要管理员——重新DLSSync管理员身份应用。",

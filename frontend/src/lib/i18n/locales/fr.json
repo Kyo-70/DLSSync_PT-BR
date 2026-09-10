@@ -1099,6 +1099,26 @@
       "label": "Inconnu",
       "short": "Erreur inattendue",
       "hint": "Une défaillance non classifiée s’est produite. Utilisez « Copier le rapport » et ouvrez un problème si cela persiste."
+    },
+    "streamline_locked": {
+      "label": "Streamline désactivé",
+      "short": "Streamline désactivé",
+      "hint": "Les mises à jour Streamline sont désactivées. Consulte Paramètres → Avancé et mets à jour l’ensemble compatible complet."
+    },
+    "driver_too_old": {
+      "label": "Pilote à mettre à jour",
+      "short": "Pilote à mettre à jour",
+      "hint": "Le pilote installé ne répond pas aux exigences de cette bibliothèque. Consulte les pilotes avant de continuer."
+    },
+    "game_running": {
+      "label": "Jeu en cours",
+      "short": "Jeu en cours",
+      "hint": "Ferme le jeu avant de modifier ses fichiers, puis réessaie."
+    },
+    "architecture": {
+      "label": "Architecture",
+      "short": "Architecture",
+      "hint": "L’architecture de la DLL ne correspond pas au jeu. Actualise le catalogue et vérifie un fichier compatible."
     }
   },
   "notifKind": {
@@ -1750,10 +1770,13 @@
       "grdRequired": "Game Ready Driver 572.16 ou plus récent est nécessaire pour DLSS 4 overrides.",
       "superResolution": "Super Résolution",
       "frameGeneration": "Génération de trames",
+      "rayReconstruction": "Reconstruction de rayons",
+      "forceLatestRrDll": "Forcer la DLL Ray Reconstruction installée la plus récente",
       "forceLatestSrDll": "Force la dernière installation DLSS DLL",
       "forceLatestFgDll": "Force l’installation de la dernière DLL de génération de trames",
       "modelPreset": "Préréglage du modèle",
       "modelPresetAria": "DLSS préréglage du modèle",
+      "rrPresetAria": "Preset du modèle de reconstruction de rayons",
       "noPresetOverride": "Pas de dérogation de préréglage",
       "mode": "Mode",
       "modeAria": "Mode génération d’images",
@@ -1769,6 +1792,7 @@
       "working": "Travailler...",
       "resetToDefault": "Réinitialisation par défaut",
       "note": "Écrit un profil d’application de pilote NVIDIA — le même mécanisme que l’application NVIDIA utilise. Entièrement réversible avec Reset. Les titres multijoueurs avec anti-triche peuvent signaler un profil forcé ; Vérifiez d’abord la politique du jeu.",
+      "rrNote": "La reconstruction de rayons utilise son propre réglage pilote (0x10E41DF7), distinct de la Super Resolution. Nécessite un GPU RTX et un jeu compatible.",
       "toast": {
         "openLinkFailed": "Lien ouvert échoué : {error}",
         "needsElevation": "Super Resolution appliqué. Les overrides de génération d’images nécessitent un administrateur — relancer DLSSync en tant qu’administrateur pour les appliquer.",

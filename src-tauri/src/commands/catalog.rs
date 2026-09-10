@@ -13,20 +13,21 @@ use std::path::Path;
 use std::time::Instant;
 use tauri::State;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 pub struct CatalogSummary {
     pub generated_at: chrono::DateTime<chrono::Utc>,
     pub vendors: Vec<VendorSummary>,
     pub incompatible_games: Vec<String>,
+    pub sources: BTreeMap<String, dll_catalog::SourceHealth>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 pub struct VendorSummary {
     pub vendor: String,
     pub families: Vec<FamilySummary>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, specta::Type)]
 pub struct FamilySummary {
     pub family: String,
     pub latest: String,
@@ -34,6 +35,7 @@ pub struct FamilySummary {
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn refresh_catalog(
     state: State<'_, AppState>,
     trigger: Option<CatalogRefreshTrigger>,
@@ -88,6 +90,7 @@ pub async fn refresh_catalog(
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn catalog_status(state: State<'_, AppState>) -> AppResult<CatalogStatus> {
     let policy = *state.distribution_policy.read();
     let current = state.catalog.read();
@@ -111,6 +114,7 @@ pub async fn catalog_status(state: State<'_, AppState>) -> AppResult<CatalogStat
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn catalog_summary(state: State<'_, AppState>) -> AppResult<CatalogSummary> {
     let guard = state.catalog.read();
     let catalog = guard
@@ -132,6 +136,7 @@ pub async fn catalog_summary(state: State<'_, AppState>) -> AppResult<CatalogSum
         })
         .collect();
     Ok(CatalogSummary {
+        sources: catalog.sources.clone(),
         generated_at: catalog.generated_at,
         vendors,
         incompatible_games: catalog.incompatible_games.clone(),
@@ -139,6 +144,7 @@ pub async fn catalog_summary(state: State<'_, AppState>) -> AppResult<CatalogSum
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn list_releases(
     state: State<'_, AppState>,
     vendor: String,
@@ -161,6 +167,7 @@ pub fn shas_key(vendor: &str, family: &str, filename: &str) -> String {
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn catalog_latest_shas(state: State<'_, AppState>) -> AppResult<HashMap<String, String>> {
     let guard = state.catalog.read();
     let catalog = guard
@@ -332,6 +339,7 @@ mod tests {
 
     fn release(filename: &str, version_packed: u64) -> Release {
         Release {
+            artifact: None,
             version: version_packed.to_string(),
             version_packed,
             filename: filename.into(),
@@ -353,6 +361,7 @@ mod tests {
 
     fn catalog(files: &[(&str, u64)]) -> Catalog {
         Catalog {
+            sources: Default::default(),
             schema_version: 1,
             generated_at: chrono::Utc::now(),
             vendors: BTreeMap::from([(

@@ -13,6 +13,25 @@ use async_trait::async_trait;
 /// `curl <GPU_DATA_URL> > crates/driver-catalog/data/gpu-data.json`).
 const EMBEDDED_GPU_DATA: &str = include_str!("../../data/gpu-data.json");
 
+#[derive(Debug, serde::Deserialize, specta::Type)]
+struct PciPfidEntry {
+    device_id: u16,
+    pfid: String,
+}
+
+const PCI_PFID_DATA: &str = include_str!("../../data/nvidia-pci-pfid.json");
+
+fn pfid_from_pci(device_id: u16) -> Option<String> {
+    if device_id == 0 {
+        return None;
+    }
+    serde_json::from_str::<Vec<PciPfidEntry>>(PCI_PFID_DATA)
+        .ok()?
+        .into_iter()
+        .find(|entry| entry.device_id == device_id)
+        .map(|entry| entry.pfid)
+}
+
 pub struct NvidiaGpuSource;
 
 pub fn os_id(os: &OsTarget) -> u32 {
@@ -329,6 +348,9 @@ async fn resolve_pfid(
     client: &reqwest::Client,
     device: &DeviceId,
 ) -> Result<Option<String>, DriverError> {
+    if let Some(pfid) = pfid_from_pci(device.pci_device_id) {
+        return Ok(Some(pfid));
+    }
     let gpu_data = fetch_gpu_data(client).await;
     Ok(match_pfid(&gpu_data, &device.model))
 }
@@ -415,6 +437,13 @@ mod tests {
             clean_gpu_name("GeForce RTX 4070 Super"),
             "GeForce RTX 4070 SUPER"
         );
+    }
+
+    #[test]
+    fn pci_lookup_precedes_name_fallback_for_known_devices() {
+        assert_eq!(pfid_from_pci(0x2705).as_deref(), Some("1040"));
+        assert_eq!(pfid_from_pci(0), None);
+        assert_eq!(pfid_from_pci(0xFFFF), None);
     }
 
     #[test]
