@@ -1,4 +1,4 @@
-use dll_catalog::{manifest_url, Catalog};
+use dll_catalog::{Catalog, CANONICAL_MANIFEST_URL};
 
 const EXPECTED_VENDORS: &[&str] = &["nvidia", "amd", "intel", "microsoft"];
 const EXPECTED_FAMILIES: &[(&str, &str)] = &[
@@ -18,20 +18,38 @@ const EXPECTED_FAMILIES: &[(&str, &str)] = &[
 #[tokio::test]
 #[ignore = "hits live jsDelivr CDN — run via `cargo test -p dll-catalog --test live_endpoint -- --ignored`"]
 async fn live_catalog_endpoint_returns_valid_schema_v2() {
+    let url = CANONICAL_MANIFEST_URL.replace("manifest-v3.json", "manifest.json");
+    verify_live_catalog(&url, 2).await;
+}
+
+#[tokio::test]
+#[ignore = "hits live jsDelivr CDN — run via `cargo test -p dll-catalog --test live_endpoint -- --ignored`"]
+async fn live_catalog_endpoint_returns_valid_schema_v3() {
+    let catalog = verify_live_catalog(CANONICAL_MANIFEST_URL, 3).await;
+    assert!(
+        !catalog.sources.is_empty(),
+        "v3 must expose source freshness"
+    );
+    assert!(catalog
+        .vendors
+        .values()
+        .flat_map(|families| families.values())
+        .flat_map(|family| &family.releases)
+        .any(|release| release.artifact.is_some()));
+}
+
+async fn verify_live_catalog(url: &str, schema: u32) -> Catalog {
     let client = reqwest::Client::builder()
         .user_agent("dlssync-live-endpoint-test/1.0")
+        .timeout(std::time::Duration::from_secs(30))
         .build()
         .expect("build reqwest client");
 
-    let url = manifest_url();
-    let catalog = Catalog::fetch_from(&client, &url)
+    let catalog = Catalog::fetch_from(&client, url)
         .await
         .unwrap_or_else(|e| panic!("Catalog::fetch_from({url}) failed: {e}"));
 
-    assert_eq!(
-        catalog.schema_version, 2,
-        "live manifest must be schema_version=2"
-    );
+    assert_eq!(catalog.schema_version, schema);
 
     for vendor in EXPECTED_VENDORS {
         assert!(
@@ -76,4 +94,5 @@ async fn live_catalog_endpoint_returns_valid_schema_v2() {
             "{vendor}/{family} sha256 contains non-hex characters"
         );
     }
+    catalog
 }
