@@ -32,10 +32,28 @@ async function requestJson(url, token, options = {}, allowedStatuses = []) {
   return { response, body: text ? JSON.parse(text) : null };
 }
 
-async function getRelease(repo, tag, token) {
+async function getPublishedRelease(repo, tag, token) {
   const url = `https://api.github.com/repos/${repo}/releases/tags/${encodeURIComponent(tag)}`;
   const { response, body } = await requestJson(url, token, {}, [404]);
   return response.status === 404 ? null : body;
+}
+
+export async function getRelease(repo, tag, token) {
+  const published = await getPublishedRelease(repo, tag, token);
+  if (published) return published;
+
+  for (let page = 1; page <= 10; page += 1) {
+    const releases = (
+      await requestJson(
+        `https://api.github.com/repos/${repo}/releases?per_page=100&page=${page}`,
+        token,
+      )
+    ).body;
+    const match = releases.find((release) => release.tag_name === tag);
+    if (match) return match;
+    if (releases.length < 100) break;
+  }
+  return null;
 }
 
 async function resolveTagCommit(repo, tag, token) {
@@ -191,4 +209,3 @@ async function main(argv = process.argv.slice(2)) {
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   await main();
 }
-
