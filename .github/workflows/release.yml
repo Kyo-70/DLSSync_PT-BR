@@ -116,7 +116,7 @@ jobs:
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "24.18.0"
-          cache: "pnpm"
+          package-manager-cache: false
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -210,7 +210,7 @@ jobs:
           name: dlssync-windows-unsigned
           path: target/phase15/unsigned/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
   sign-windows:
     name: Authenticode sign exact Windows artifacts
@@ -254,6 +254,7 @@ jobs:
           name: dlssync-windows-signed
           path: signed/
           if-no-files-found: error
+          retention-days: 1
 
   verify-signatures:
     name: Verify exact Authenticode signatures
@@ -303,6 +304,7 @@ jobs:
           name: dlssync-windows-release-input
           path: signed-flat/
           if-no-files-found: error
+          retention-days: 1
 
   stage-unsigned:
     name: Record the unsigned Authenticode state of exact Windows artifacts
@@ -354,6 +356,7 @@ jobs:
           name: dlssync-windows-release-input
           path: release-input/
           if-no-files-found: error
+          retention-days: 1
 
   publish:
     name: Verify and publish one resumable release
@@ -387,7 +390,7 @@ jobs:
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "24.18.0"
-          cache: "pnpm"
+          package-manager-cache: false
 
       - name: Install dependencies for Tauri updater signing
         run: pnpm install --frozen-lockfile
