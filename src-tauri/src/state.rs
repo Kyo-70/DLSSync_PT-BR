@@ -161,7 +161,7 @@ impl AppState {
             .build()
             .expect("reqwest catalog client");
         let http_downloads = Arc::new(RwLock::new(
-            Self::build_download_client(HTTP_DOWNLOAD_CONNECT_TIMEOUT_SECS)
+            Self::download_client(HTTP_DOWNLOAD_CONNECT_TIMEOUT_SECS)
                 .expect("reqwest downloads client"),
         ));
         let http_art = reqwest::Client::builder()
@@ -207,12 +207,12 @@ impl AppState {
     }
 
     pub fn rebuild_download_client(&self, connect_timeout_secs: u64) -> Result<(), String> {
-        let client = Self::build_download_client(connect_timeout_secs)?;
+        let client = Self::download_client(connect_timeout_secs)?;
         *self.http_downloads.write() = client;
         Ok(())
     }
 
-    fn build_download_client(connect_timeout_secs: u64) -> Result<reqwest::Client, String> {
+    pub(crate) fn download_client(connect_timeout_secs: u64) -> Result<reqwest::Client, String> {
         reqwest::Client::builder()
             .user_agent(UA)
             .connect_timeout(Duration::from_secs(connect_timeout_secs.clamp(3, 60)))
