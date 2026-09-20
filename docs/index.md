@@ -3,7 +3,7 @@
 
 - [Local mods](local-mods.md): local-only recipe actions, durable recovery and explicit unsupported cases.
 
-Start with [installation and one-click game updates](../README.md). The repository version is 1.7.0 and its [changelog section](../CHANGELOG.md#170---unreleased) records the released scope. Source-based guides describe implementation and limits, not a certified release or game compatibility matrix.
+Start with [installation and one-click game updates](../README.md). The repository version is 1.7.0 and its [changelog section](../CHANGELOG.md#170---2026-09-20) records the released scope. Source-based guides describe implementation and limits, not a certified release or game compatibility matrix.
 
 ## Complete a user task
 
