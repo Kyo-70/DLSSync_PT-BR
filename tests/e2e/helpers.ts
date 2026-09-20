@@ -29,3 +29,15 @@ export async function openGameCard(page: Page, index: number): Promise<void> {
   await card.getByRole("heading").getByRole("button").click();
   await expect(page.locator(".detail-view")).toBeVisible();
 }
+
+export async function selectSettingsTab(page: Page, tab: "general" | "updates"): Promise<void> {
+  const picker = page.locator(".settings-section-picker select");
+  if (await picker.isVisible()) {
+    await picker.selectOption(tab);
+    await expect(picker).toHaveValue(tab);
+    return;
+  }
+  const button = page.locator(".side-tab").nth(tab === "general" ? 0 : 1);
+  await button.click();
+  await expect(button).toHaveClass(/active/);
+}

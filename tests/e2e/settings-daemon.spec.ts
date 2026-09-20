@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "./fixtures";
-import { gotoView } from "./helpers";
+import { gotoView, selectSettingsTab } from "./helpers";
 
 const MASTER_LABEL = "Enable background scanning";
 const INTERVAL_LABEL = "Scan every";
@@ -28,7 +28,7 @@ test.describe("settings daemon", () => {
   }) => {
     const { page } = app;
     await gotoView(page, "settings");
-    await page.locator(".side-tab", { hasText: /general/i }).first().click();
+    await selectSettingsTab(page, "general");
 
     await expect(page.getByText("Background updates").first()).toBeVisible();
 

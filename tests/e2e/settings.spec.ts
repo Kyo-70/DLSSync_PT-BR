@@ -1,6 +1,6 @@
 import { test, expect } from "./fixtures";
 import { appVersion } from "./config";
-import { gotoView } from "./helpers";
+import { gotoView, selectSettingsTab } from "./helpers";
 
 test.describe("settings", () => {
   test("file details, section headings, toggles and tab switching work", async ({ app }) => {
@@ -14,9 +14,7 @@ test.describe("settings", () => {
     expect(await page.locator(".section-title-h").count()).toBeGreaterThanOrEqual(2);
     expect(await page.locator(".side-tab input[type=checkbox], .card input[type=checkbox], .seg-btn").count()).toBeGreaterThan(0);
 
-    const updatesTab = page.locator(".side-tab", { hasText: /update/i }).first();
-    await updatesTab.click();
-    await expect(updatesTab).toHaveClass(/active/);
+    await selectSettingsTab(page, "updates");
     await expect(page.locator(".section-title-h").first()).toBeVisible();
   });
 });
