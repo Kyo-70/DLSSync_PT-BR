@@ -61,7 +61,6 @@ mod ea;
 mod epic;
 #[cfg(windows)]
 mod gog;
-#[cfg(windows)]
 mod steam;
 #[cfg(windows)]
 mod ubisoft;
@@ -76,7 +75,6 @@ pub use ea::EaDesktopScanner;
 pub use epic::EpicScanner;
 #[cfg(windows)]
 pub use gog::GogScanner;
-#[cfg(windows)]
 pub use steam::SteamScanner;
 #[cfg(windows)]
 pub use ubisoft::UbisoftScanner;
@@ -106,7 +104,12 @@ pub fn scan_all(launchers: &[LauncherKind]) -> Result<Vec<DetectedGame>, ScanErr
     }
     #[cfg(not(windows))]
     {
-        let _ = launchers;
+        if launchers.contains(&LauncherKind::Steam) {
+            match SteamScanner.scan() {
+                Ok(games) => out.extend(games),
+                Err(error) => tracing::warn!(%error, "Steam discovery failed"),
+            }
+        }
     }
     Ok(out)
 }
