@@ -123,7 +123,7 @@
     background: linear-gradient(90deg, var(--accent-progress), color-mix(in oklab, var(--accent-progress) 60%, #ffffff));
     box-shadow: 0 0 8px color-mix(in oklab, var(--accent-progress) 55%, transparent);
     border-radius: inherit;
-    transition: width var(--dur-normal) var(--ease);
+    transition: none;
   }
   .activity-dock.is-failed .dock-fill { background: var(--danger); box-shadow: none; }
   .activity-dock.is-failed .dock-dot { background: var(--danger); animation: none; }

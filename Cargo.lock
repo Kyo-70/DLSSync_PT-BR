@@ -95,7 +95,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -106,7 +106,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -118,6 +118,7 @@ dependencies = [
  "once_cell",
  "pelite",
  "serde",
+ "specta",
  "tempfile",
 ]
 
@@ -364,6 +365,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "sha2",
+ "specta",
  "tempfile",
  "thiserror 2.0.18",
  "uuid",
@@ -1121,7 +1123,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1153,7 +1155,9 @@ version = "1.7.0"
 dependencies = [
  "bytes",
  "chrono",
+ "dlssync-contracts",
  "ed25519-dalek",
+ "fs2",
  "futures-util",
  "hex",
  "md-5",
@@ -1163,6 +1167,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "specta",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -1181,6 +1186,7 @@ dependencies = [
  "pe-version",
  "serde",
  "sha2",
+ "specta",
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
@@ -1223,6 +1229,7 @@ dependencies = [
  "dlssync-contracts",
  "driver-catalog",
  "driver-install",
+ "embed-resource",
  "launcher-scan",
  "notifications-store",
  "nvapi-drs",
@@ -1280,6 +1287,8 @@ dependencies = [
  "dlssync-contracts",
  "hex",
  "launcher-scan",
+ "operation-journal",
+ "parking_lot",
  "pe-version",
  "reqwest 0.12.28",
  "serde",
@@ -1361,6 +1370,7 @@ dependencies = [
  "roxmltree",
  "serde",
  "serde_json",
+ "specta",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -1377,6 +1387,7 @@ dependencies = [
  "pe-version",
  "reqwest 0.12.28",
  "serde",
+ "specta",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -1538,7 +1549,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1701,6 +1712,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "fs2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+dependencies = [
+ "libc",
+ "winapi",
 ]
 
 [[package]]
@@ -2113,9 +2134,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.4.14"
+version = "0.4.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "171fefbc92fe4a4de27e0698d6a5b392d6a0e333506bc49133760b3bcf948733"
+checksum = "ef8e5e5a340588f4452631496976cf8636d4a7ecf600239fdc27615d2530bc16"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -2246,6 +2267,12 @@ dependencies = [
  "http-body",
  "pin-project-lite",
 ]
+
+[[package]]
+name = "http-range"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21dec9db110f5f872ed9699c3ecf50cf16f423502706ba5c72462e28d3157573"
 
 [[package]]
 name = "httparse"
@@ -2710,6 +2737,7 @@ version = "1.7.0"
 dependencies = [
  "serde",
  "serde_json",
+ "specta",
  "thiserror 2.0.18",
  "tracing",
  "winreg 0.55.0",
@@ -2849,15 +2877,19 @@ dependencies = [
  "chrono",
  "clap",
  "dll-catalog",
+ "dlssync-contracts",
  "ed25519-dalek",
  "hex",
+ "pe-version",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "wiremock",
  "zip 2.4.2",
 ]
 
@@ -2967,7 +2999,7 @@ dependencies = [
  "png 0.18.1",
  "serde",
  "thiserror 2.0.18",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3034,6 +3066,7 @@ dependencies = [
  "chrono",
  "rusqlite",
  "serde",
+ "specta",
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
@@ -3069,7 +3102,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3124,6 +3157,7 @@ name = "nvapi-drs"
 version = "1.7.0"
 dependencies = [
  "serde",
+ "specta",
  "windows-sys 0.59.0",
 ]
 
@@ -3417,7 +3451,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.45.0",
 ]
 
 [[package]]
@@ -3504,9 +3538,12 @@ checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 name = "pe-version"
 version = "1.7.0"
 dependencies = [
+ "dlssync-contracts",
  "pelite",
  "serde",
  "serde_json",
+ "specta",
+ "tempfile",
  "thiserror 2.0.18",
  "tracing",
  "windows-sys 0.59.0",
@@ -4202,14 +4239,14 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
 name = "rustls"
-version = "0.23.40"
+version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef86cd5876211988985292b91c96a8f2d298df24e75989a43a3c73f2d4d8168b"
+checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
  "once_cell",
  "ring",
@@ -4259,7 +4296,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4270,9 +4307,9 @@ checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.13"
+version = "0.103.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
+checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -4712,7 +4749,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4769,8 +4806,10 @@ version = "2.0.0-rc.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38f9a30cbcbb7011f1da7d73483983bf838af123883e45f2b36ed76328df9c50"
 dependencies = [
+ "chrono",
  "paste",
  "rustc_version",
+ "serde_json",
  "specta-macros",
 ]
 
@@ -4965,6 +5004,9 @@ name = "system-drivers"
 version = "1.7.0"
 dependencies = [
  "serde",
+ "serde_json",
+ "sha2",
+ "specta",
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
@@ -5057,6 +5099,7 @@ dependencies = [
  "gtk",
  "heck 0.5.0",
  "http",
+ "http-range",
  "jni 0.21.1",
  "libc",
  "log",
@@ -5524,7 +5567,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5969,7 +6012,7 @@ dependencies = [
  "png 0.18.1",
  "serde",
  "thiserror 2.0.18",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6009,7 +6052,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
 dependencies = [
  "memoffset",
  "tempfile",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6572,7 +6615,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7490,8 +7533,11 @@ dependencies = [
 name = "xtask"
 version = "1.7.0"
 dependencies = [
+ "base64 0.22.1",
+ "minisign-verify",
  "serde",
  "serde_json",
+ "tempfile",
  "toml 0.9.12+spec-1.1.0",
 ]
 

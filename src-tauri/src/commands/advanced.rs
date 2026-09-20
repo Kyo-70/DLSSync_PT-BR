@@ -2,6 +2,7 @@ use crate::error::{AppError, AppResult};
 
 #[cfg(windows)]
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn set_dlss_debug_overlay(enabled: bool) -> AppResult<()> {
     use winreg::enums::*;
     use winreg::RegKey;
@@ -21,6 +22,7 @@ pub async fn set_dlss_debug_overlay(enabled: bool) -> AppResult<()> {
 
 #[cfg(windows)]
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn get_dlss_debug_overlay() -> AppResult<bool> {
     use winreg::enums::*;
     use winreg::RegKey;
@@ -37,12 +39,14 @@ pub async fn get_dlss_debug_overlay() -> AppResult<bool> {
 
 #[cfg(not(windows))]
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn set_dlss_debug_overlay(_enabled: bool) -> AppResult<()> {
     Err(AppError::Other("DLSS overlay is Windows-only".into()))
 }
 
 #[cfg(not(windows))]
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn get_dlss_debug_overlay() -> AppResult<bool> {
     Ok(false)
 }

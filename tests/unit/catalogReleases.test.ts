@@ -41,4 +41,10 @@ describe("mergeFamilyReleases", () => {
     expect(mergeFamilyReleases([])).toEqual([]);
     expect(mergeFamilyReleases([[], []])).toEqual([]);
   });
+
+  it("keeps DLSS patch ordering when JSON rounded the packed u64", () => {
+    const rounded = Number(310n << 48n);
+    const merged = mergeFamilyReleases([[rel("310.9.1.0", rounded, "a"), rel("310.9.1.1", rounded, "b")]]);
+    expect(merged.map(release => release.version)).toEqual(["310.9.1.1", "310.9.1.0"]);
+  });
 });

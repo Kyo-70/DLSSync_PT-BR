@@ -38,6 +38,7 @@
   import { motionDuration } from "../lib/ux";
   import {
     classifyApplyError,
+    normalizeErrorClass,
     ERROR_CLASS_TONE,
   } from "../lib/applyErrorClass";
   import {
@@ -152,7 +153,7 @@
       if (g.group_id) g.download = dlMap[g.group_id] ?? null;
       const firstFailed = g.items.find((i) => i.stage === "failed" || i.stage === "cancelled");
       g.primaryErrorClass = firstFailed
-        ? (firstFailed.error_class as ApplyErrorClass | null) ?? classifyApplyError(firstFailed.error).kind
+        ? normalizeErrorClass(firstFailed.error_class ?? classifyApplyError(firstFailed.error).kind)
         : null;
     }
     const arr = Array.from(by.values());
@@ -209,9 +210,20 @@
     return known ? sum : null;
   });
   const aggregateSpeed = $derived(
-    Object.values($downloadProgressByGroup).reduce((acc, d) => acc + d.bytes_per_sec, 0),
+    Object.values($downloadProgressByGroup).reduce((acc, d) => acc + (d.bytes_per_sec ?? 0), 0),
   );
   const downloadPct = $derived(percentOf(totalBytesDownloaded, totalBytesTotal));
+  // While something is running without a known byte total, the aggregate is genuinely
+  // indeterminate: completed-item percentage would announce a precision the backend did not
+  // measure. In that state the bar drops `aria-valuenow` and shows an indeterminate treatment, so
+  // the visual and the accessibility value agree.
+  const progressIndeterminate = $derived(anyRunning && totalBytesTotal === null);
+  const renderedProgressPct = $derived(anyRunning ? downloadPct : itemProgressPct);
+  const reportedProgressPct = $derived(
+    !progressIndeterminate && Number.isFinite(renderedProgressPct)
+      ? Math.round(renderedProgressPct)
+      : undefined,
+  );
 
   const startedAt = $derived(
     entries.length === 0 ? Date.now() : Math.min(...entries.map((e) => e.started_at)),
@@ -293,7 +305,7 @@
       if (it.stage !== "failed" && it.stage !== "cancelled") continue;
       const message = (it.error ?? it.message ?? "Unknown error").trim();
       const klass: ApplyErrorClass =
-        (it.error_class as ApplyErrorClass | null) ?? classifyApplyError(message).kind;
+        normalizeErrorClass(it.error_class ?? classifyApplyError(message).kind);
       const existing = byMessage.get(message);
       if (existing) existing.affected.push(it);
       else byMessage.set(message, { message, class: klass, affected: [it] });
@@ -630,10 +642,18 @@
     </button>
   </header>
 
-  <div class="progress-track" role="progressbar" aria-valuenow={anyRunning ? Math.round(downloadPct) : itemProgressPct} aria-valuemin="0" aria-valuemax="100">
+  <div
+    class="progress-track"
+    role="progressbar"
+    aria-valuenow={reportedProgressPct}
+    aria-valuemin="0"
+    aria-valuemax="100"
+    aria-busy={progressIndeterminate ? "true" : undefined}
+  >
     <div
       class="progress-fill"
-      style:width="{anyRunning && totalBytesTotal !== null ? downloadPct : itemProgressPct}%"
+      class:is-indeterminate={progressIndeterminate}
+      style:width={progressIndeterminate ? "35%" : `${renderedProgressPct}%`}
       class:is-danger={failedGroups > 0 && !anyRunning}
       class:is-success={allDone && failedGroups === 0}
     ></div>
@@ -801,7 +821,7 @@
         {#if selectedDedupedErrors.length > 0}
           <div class="error-block-list">
             {#each selectedDedupedErrors as de}
-              {@const klass = classifyApplyError(de.message)}
+              {@const klass = classifyApplyError(de.message, de.class)}
               <div class="error-block" data-tone={ERROR_CLASS_TONE[de.class]}>
                 <div class="error-block-head">
                   <span class="error-block-kind">{$t("errorClass." + de.class + ".label")}</span>
@@ -871,7 +891,7 @@
                 {/if}
                 {#if isFailed}
                   <button class="btn btn-ghost btn-xs" disabled={!e.error} onclick={() => copyError(e.error)}>{$t("component.applyModal.action.copyError")}</button>
-                  <button class="btn btn-accent btn-xs" disabled={retryingId === e.apply_id} onclick={() => handleRetrySingle(e)}>
+                  <button class="btn btn-accent btn-xs" disabled={retryingId === e.apply_id || !classifyApplyError(e.error, e.error_class).retryable} onclick={() => handleRetrySingle(e)}>
                     {#if retryingId === e.apply_id}<span class="spinner-tiny"></span>{$t("component.applyModal.retrying")}{:else}{$t("common.retry")}{/if}
                   </button>
                 {/if}
@@ -907,7 +927,7 @@
           {$t("component.applyModal.action.allowUnsignedRetryCount", { count: failedSignatureCount })}
         </button>
       {/if}
-      {#if failedGroups > 0 && !anyRunning}
+      {#if failedGroups > 0 && !anyRunning && Object.values($activeApplies).some(e => (e.stage === "failed" || e.stage === "cancelled") && classifyApplyError(e.error, e.error_class).retryable)}
         <button class="aura-pill aura-pill-primary" disabled={busy} onclick={handleRetryAllFailed}>{$t("component.applyModal.action.retryAllFailed")}</button>
       {/if}
       {#if failedGroups > 0 || allDone}
@@ -1031,10 +1051,23 @@
     height: 100%;
     background: var(--accent);
     border-radius: var(--radius-full);
-    transition: width 0.4s var(--ease-out), background 0.2s var(--ease);
+    transition: none;
   }
   .progress-fill.is-success { background: var(--success); }
   .progress-fill.is-danger { background: var(--danger); }
+  /* Indeterminate treatment: a travelling segment instead of a filled proportion, so the bar does
+     not imply a measured percentage. Reduced motion keeps the segment static. */
+  .progress-fill.is-indeterminate {
+    animation: apply-progress-indeterminate 1.4s var(--ease-in-out, ease-in-out) infinite;
+  }
+  @keyframes apply-progress-indeterminate {
+    0% { margin-left: 0%; }
+    50% { margin-left: 65%; }
+    100% { margin-left: 0%; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .progress-fill.is-indeterminate { animation: none; }
+  }
 
   .modal-body {
     display: grid;
@@ -1117,7 +1150,7 @@
   .tile-sub { font-size: var(--fs-xs); color: var(--text-secondary); }
   .tile-download { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
   .tile-progress { height: 3px; background: var(--bg-input); border-radius: var(--radius-full); overflow: hidden; }
-  .tile-progress-fill { height: 100%; background: var(--accent); border-radius: var(--radius-full); transition: width 0.3s var(--ease-out); }
+  .tile-progress-fill { height: 100%; background: var(--accent); border-radius: var(--radius-full); transition: none; }
   .tile-progress-text { font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
   .tile-error-chip {
     margin-top: 4px;
@@ -1254,7 +1287,7 @@
     height: 100%;
     background: var(--accent);
     border-radius: var(--radius-full);
-    transition: width var(--dur-normal) var(--ease-out), background var(--dur-fast) var(--ease);
+    transition: none;
   }
   .phs-progress-fill.is-success { background: var(--success); }
   .phs-progress-fill.is-danger { background: var(--danger); }
@@ -1274,7 +1307,7 @@
   .block-label { display: flex; justify-content: space-between; align-items: baseline; font-size: var(--fs-sm); color: var(--text-secondary); font-weight: 600; }
   .attempt { color: var(--text-muted); font-size: var(--fs-2xs); }
   .block-progress { height: 6px; background: var(--bg-card); border-radius: var(--radius-full); overflow: hidden; }
-  .block-progress-fill { height: 100%; background: var(--accent); border-radius: var(--radius-full); transition: width 0.4s var(--ease-out); }
+  .block-progress-fill { height: 100%; background: var(--accent); border-radius: var(--radius-full); transition: none; }
   .block-stats { display: inline-flex; gap: 14px; font-size: var(--fs-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
   .error-block-list { display: flex; flex-direction: column; gap: 10px; }
@@ -1351,7 +1384,7 @@
     height: 100%;
     background: var(--accent);
     border-radius: var(--radius-full);
-    transition: width var(--dur-normal) var(--ease-out);
+    transition: none;
   }
   .file-stage.done .file-stage-bar-fill { background: var(--success); width: 100% !important; }
   .file-stage.failed .file-stage-bar-fill { background: var(--danger); }

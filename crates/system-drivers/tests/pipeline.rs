@@ -45,6 +45,8 @@ impl UpdateSource for FakeSource {
 
 fn device(name: &str, class: DeviceClass, hwid: &str, ver: &str, date: &str) -> SystemDevice {
     SystemDevice {
+        hardware_ids: Vec::new(),
+        problem_code: None,
         name: name.into(),
         class,
         manufacturer: "Vendor".into(),

@@ -58,9 +58,19 @@ beforeEach(async () => {
   detectAnticheat.mockReset();
   dispatchApply.mockClear();
   ({ autoApplyExcludingAntiCheat } = await import("@/lib/backgroundScan"));
+  const stores = await import("@/lib/stores");
+  stores.systemInfo.set({ gpus: [{ vendor: "nvidia" }] } as unknown as import("@/lib/api").SystemInfo);
+  stores.driverReports.set([]);
 });
 
 describe("autoApplyExcludingAntiCheat", () => {
+  it("does not auto-apply when hardware could not be identified", async () => {
+    const stores = await import("@/lib/stores");
+    stores.systemInfo.set(null);
+    await autoApplyExcludingAntiCheat([item("a")]);
+    expect(dispatchApply).not.toHaveBeenCalled();
+    expect(detectAnticheat).not.toHaveBeenCalled();
+  });
   it("no-ops on an empty set", async () => {
     await autoApplyExcludingAntiCheat([]);
     expect(dispatchApply).not.toHaveBeenCalled();
@@ -90,12 +100,10 @@ describe("autoApplyExcludingAntiCheat", () => {
     expect(dispatchApply).not.toHaveBeenCalled();
   });
 
-  it("keeps a game in (relies on backend guards) when the anti-cheat probe throws", async () => {
+  it("does not dispatch automatic changes when the anti-cheat probe throws", async () => {
     detectAnticheat.mockRejectedValue(new Error("probe boom"));
     await autoApplyExcludingAntiCheat([item("a")]);
-    expect(dispatchApply).toHaveBeenCalledTimes(1);
-    const targets = dispatchApply.mock.calls[0][0] as ApplyTarget[];
-    expect(targets.map((t) => t.game_id)).toEqual(["a"]);
+    expect(dispatchApply).not.toHaveBeenCalled();
   });
 
   it("probes each distinct game once, not once per DLL", async () => {

@@ -7,9 +7,17 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 pub mod execution;
+pub mod planning;
+pub mod policy;
 pub mod ports;
+pub mod recipes;
+pub mod refresh;
 pub mod scan;
+pub mod state;
+pub mod transaction;
+pub mod watch;
 pub use execution::{apply_update_plan, rollback_update_plan, ExecutionError};
+pub use planning::{build_verified_update_plan, validate_update_plan};
 pub use scan::{plan_items, scan_installed_games, scan_path, ScanUseCaseError};
 
 const PRODUCT_CONFIG: &str = include_str!("../../../product.toml");
@@ -34,7 +42,11 @@ pub struct ProductIdentity {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CatalogConfig {
     pub canonical_manifest: String,
+    pub nexus_manifest: String,
     pub signature_suffix: String,
+    pub schema_version: u32,
+    pub max_age_days: i64,
+    pub max_future_clock_skew_minutes: i64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -162,6 +174,9 @@ pub fn build_update_plan(catalog_generated_at: &str, mut items: Vec<UpdatePlanIt
     items.sort_by(|a, b| a.id.cmp(&b.id));
     let fingerprint = plan_fingerprint(catalog_generated_at, &items);
     UpdatePlan {
+        schema_version: 0,
+        catalog_revision: String::new(),
+        changes: Vec::new(),
         id: uuid::Uuid::new_v4().to_string(),
         created_at: Utc::now().to_rfc3339(),
         catalog_generated_at: catalog_generated_at.to_string(),
@@ -191,6 +206,9 @@ pub fn build_update_plan_at(
     items.sort_by(|a, b| a.id.cmp(&b.id));
     let fingerprint = plan_fingerprint(catalog_generated_at, &items);
     UpdatePlan {
+        schema_version: 0,
+        catalog_revision: String::new(),
+        changes: Vec::new(),
         id,
         created_at: Utc::now().to_rfc3339(),
         catalog_generated_at: catalog_generated_at.to_string(),

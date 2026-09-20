@@ -22,7 +22,9 @@
     "download": "下载",
     "install": "安装",
     "open": "开门",
-    "undo": "撤销"
+    "undo": "撤销",
+    "technicalDetails": "技术详情",
+    "update": "更新"
   },
   "status": {
     "outdated": "更新可用",
@@ -34,10 +36,10 @@
   },
   "view": {
     "journal": {
-      "title": "操作日志",
-      "subtitle": "用于记录扫描、目录刷新、计划、应用、回滚和驱动程序操作的持久审计日志。",
-      "export": "复制已脱敏的 JSON",
-      "filters": "操作日志筛选",
+      "title": "活动记录",
+      "subtitle": "你的更新、备份和游戏扫描记录。",
+      "export": "复制历史记录",
+      "filters": "筛选历史记录",
       "kind": "操作",
       "result": "结果",
       "all": "全部",
@@ -50,16 +52,22 @@
       "kinds": {
         "scan": "扫描",
         "catalog_refresh": "目录",
-        "plan": "计划",
-        "dll_apply": "应用",
-        "rollback": "回滚",
+        "plan": "检查更新",
+        "dll_apply": "更新",
+        "rollback": "恢复",
         "driver_install": "驱动程序"
       },
       "actors": {
         "gui": "应用",
         "cli": "CLI",
         "background": "后台"
-      }
+      },
+      "recovery": {
+        "rolled_back": "已回滚",
+        "rollback_failed": "回滚失败",
+        "rolling_back": "正在回滚"
+      },
+      "syncPending": "正在同步历史…"
     },
     "library": {
       "title": "图书馆",
@@ -81,13 +89,13 @@
         "segAria": "供应商待更新",
         "kpiGames": "游戏",
         "kpiUpToDate": "最新情况",
-        "kpiProtected": "受保护",
+        "kpiProtected": "已备份",
         "kpiProtectedTitle": "备份中带有恢复点的游戏",
-        "review": "影评",
+        "review": "查看更新",
         "reviewTitle": "把库筛选成只保留待更新的游戏",
-        "applyAll": "全部应用",
+        "applyAll": "全部更新",
         "applyAllTitle": "应用整个库中检测到的每一次更新",
-        "manifestStamp": "显{stamp}",
+        "manifestStamp": "列表更新时间：{stamp}",
         "manifestTitle": "目录清单刷新时间"
       },
       "filter": {
@@ -140,7 +148,8 @@
       "section": {
         "needsUpdate": "需要更新",
         "upToDate": "最新情况",
-        "viewAll": "查看所有 →"
+        "viewAll": "查看所有 →",
+        "otherGames": "其他游戏"
       },
       "noDllsZone": {
         "title": "没有支持技术的游戏",
@@ -171,11 +180,17 @@
       },
       "applyAllCount_one": "{count}更新",
       "applyAllCount_other": "应用所有更新（{count}）",
-      "applyAllTitle": "应用整个库中检测到的每一次更新"
+      "applyAllTitle": "应用整个库中检测到的每一次更新",
+      "shown": "显示 {count} 项",
+      "gameCount": "{count} 个游戏",
+      "summaryUpdates": "{games} 个游戏中有 {count} 项更新",
+      "updatesTab": "更新",
+      "filtersTitle": "筛选"
     },
     "catalog": {
       "title": "目录",
-      "subtitle": "所有的升频和帧生成技术DLSSync轨道。点击功能检查每个版本，复制CDN URL，或直接跳转到下载。",
+      "latest": "最新",
+      "subtitle": "查看组件版本和可用下载。",
       "refreshing": "清爽",
       "refreshManifest": "刷新清单",
       "stat": {
@@ -243,11 +258,14 @@
         "hours_other": "{count}h 前",
         "days_one": "{count}d 之前",
         "days_other": "{count}d 之前"
-      }
+      },
+      "browseSummary": "浏览 {families} 个库和 {versions} 个版本。",
+      "allVendors": "所有厂商",
+      "noMatches": "没有符合这些筛选条件的库。"
     },
     "drivers": {
       "title": "车手",
-      "subtitle": "每个检测到的适配器都配备了最新的GPU驱动，实时与厂商核对——以及DLSS预设和帧生成控制。",
+      "subtitle": "检查此电脑的显卡和 Windows 驱动程序。",
       "health": {
         "aria": "驾驶员健康总结",
         "gpuUpdates_one": "{count} GPU 驱动更新",
@@ -285,11 +303,11 @@
       "rescan": "重新扫描",
       "systemSub": "驱动更新覆盖你电脑的其他部分：音频、网络、蓝牙、芯片组、输入和存储。它们来自Windows Update和Microsoft Update Catalog，保持厂商签名，我们绝不会提供比你已有驱动更旧的版本。",
       "betaNote": "检测可能会漏掉或误读某些硬件，所以在应用更新前一定要检查一次。如果其中一个出现问题，自动备份会回滚。",
-      "systemSummary": "保持电脑其他设备的最新状态——音频、网络、芯片组、输入和存储驱动，直接来自Windows Update。",
+      "systemSummary": "Windows Update 为此电脑提供的驱动更新。",
       "learnMore": "了解更多",
       "showLess": "显示更少",
       "scanningWindowsUpdate": "正在扫描 Windows Update 中的组件驱动......",
-      "allComponentsUpToDate": "每个组件都是最新的——Windows Update没有更新的驱动。",
+      "allComponentsUpToDate": "Windows Update 未找到可用的驱动更新。",
       "latestFallback": "最新消息",
       "versionHistoryTitle": "显示已安装和之前安装的该驱动程序版本",
       "versionHistoryAria": "版本历史",
@@ -298,6 +316,7 @@
       "driverInfoAria": "驾驶员信息",
       "update": "更新",
       "installStageFallback": "工作",
+      "installFailedNote": "安装失败",
       "readingDriverStore": "看本地司机店......",
       "readVersionsError": "无法读取驱动版本。",
       "noCachedVersions": "这台电脑上没有缓存早期版本。最新可用：{version}。",
@@ -308,11 +327,14 @@
       "dlssOverridesSub": "通过NVIDIA驱动配置文件强制全局强制使用DLSS预设、帧生成模式和乘法器——这与NVIDIA应用使用的机制相同。每场比赛的覆盖都会实时显示在每场比赛的细节抽屉中。",
       "upscalingOn": "{vendors} 的放大",
       "upscalingSub": "驱动配置文件的预设覆盖仅限NVIDIA（NVAPI）。在AMD和Intel上，FSR和XeSS通过交换DLL来控制每场比赛——这些DLL可通过游戏的细节抽屉和目录管理。这个标签页会让你的AMD/Intel驱动本身保持最新。",
-      "openLinkFailed": "打开链接失败：{error}"
+      "openLinkFailed": "打开链接失败：{error}",
+      "graphics": "显卡",
+      "devices": "设备",
+      "notChecked": "尚未检查更新"
     },
     "backups": {
       "title": "备份",
-      "subtitle": "每个被替换为DLSSync的 DLL 都会先被快照。随时恢复，只需一键。",
+      "subtitle": "之前更新时保存的文件。",
       "activityTab": "活动",
       "expandAll": "全部展开",
       "collapseAll": "全部崩溃",
@@ -329,7 +351,9 @@
         "newest": "最新消息",
         "oldest": "最古老的",
         "missingHint": "快照文件不再存在于磁盘上——它们被移动或删除到DLSSync之外。删除那些行以便整理。",
-        "missingCount": "{count}失踪"
+        "missingCount": "{count}失踪",
+        "unverified": "未验证",
+        "unverifiedHint": "应用尚未在磁盘上检查的备份。"
       },
       "legend": {
         "label": "计数的含义",
@@ -387,7 +411,8 @@
         "missing": "{count}失踪",
         "missing_one": "{count}失踪",
         "missing_other": "{count}失踪",
-        "latest": "最新{date}"
+        "latest": "最新{date}",
+        "unverifiedWord": "未验证"
       },
       "entry": {
         "selectHint": "选择批量恢复/删除",
@@ -408,7 +433,9 @@
         "restoreHint": "把原来的DLL重新卷回游戏文件夹",
         "restoreAgain": "再次恢复",
         "restoreAgainHint": "再次恢复这个快照——如果你在上次恢复后应用了更新的 DLL，这很有用",
-        "restoring": "修复"
+        "restoring": "修复",
+        "unverified": "未验证",
+        "unverifiedHint": "DLSSync 尚未检查此备份文件，因此还原可能成功，也可能失败。"
       },
       "cancel": "取消",
       "delete": "删除",
@@ -477,7 +504,19 @@
         "rebootSuffix": "——重启完成",
         "notifTitle": "回滚{deviceClass}驱动",
         "toastRollbackFailed": "回滚失败：{error}"
-      }
+      },
+      "eligibility": {
+        "snapshot_absent": "无法还原：备份文件已从磁盘上消失。",
+        "snapshot_unavailable": "无法还原：备份文件不可用。",
+        "already_restored": "已还原：仅当之后应用了更新的 DLL 时才需再次还原。",
+        "unverified": "尚未检查：应用无法确认此备份可以还原。",
+        "operation_in_flight": "此文件上有操作正在进行。",
+        "unspecified": "还原被阻止，且未报告原因。"
+      },
+      "toastRestoreUnverified": "{file} 的还原尚未确认，请在“活动”中查看结果。",
+      "toastRestoreUnverifiedCount_one": "{count} 项还原尚未确认",
+      "toastRestoreUnverifiedCount_other": "{count} 项还原尚未确认",
+      "fileDetails": "文件详情"
     },
     "settings": {
       "title": "背景设定",
@@ -550,6 +589,9 @@
           },
           "runAtStartup": {
             "label": "从Windows开始（最小化到托盘）",
+            "readFailed": "无法读取 Windows 启动项：{error}",
+            "notVerified": "未验证 Windows 启动项",
+            "mismatch": "Windows 报告的值与请求的值不同；显示的是从 Windows 读回的值",
             "sub": "Windows启动时，DLSSync隐藏在托盘中——打开之前不会看到窗口。"
           },
           "notifyToast": {
@@ -636,6 +678,15 @@
           "available": "v{version}可用——详见横幅。",
           "latest": "你用的是最新版本（v{version}）。",
           "checkFailed": "更新检查失败：{error}"
+        },
+        "status": {
+          "unchecked": "本次会话未检查",
+          "checking": "检查中…",
+          "available": "有可用更新：v{version}",
+          "upToDate": "已是最新（v{version}）",
+          "indeterminate": "检查未返回可用结果，因此尚未确定是否有更新",
+          "error": "更新检查失败：{error}",
+          "manualOnly": "{distribution} 构建：仅手动更新应用，不自动检查"
         },
         "manualOnly": "{distribution}构建：仅手动更新应用",
         "openReleases": "打开Nexus Mods页"
@@ -762,16 +813,22 @@
           "sub": "DLSS预设和帧生成覆盖被移到了{drivers}标签页，和你的GPU驱动更新一起。每场比赛的覆盖都会保留在每款游戏的细节抽屉里。",
           "driversTabBold": "车手",
           "openDrivers": "打开驱动程序标签页"
-        }
-      }
+        },
+        "optionsTitle": "高级选项",
+        "optionsIntro": "调整诊断和下载行为。",
+        "registryDetails": "注册表详细信息"
+      },
+      "subtitle": "管理外观、更新偏好和游戏检测。",
+      "filesAndLogs": "文件和日志"
     },
     "about": {
       "title": "关于",
-      "subtitle": "DLSSync保持DLSS、FSR和XeSS技术与供应商发布同步——经过哈希验证、供应商签名且完全可逆。",
+      "subtitle": "更新游戏组件并保留经过验证的备份记录。",
       "action": {
         "sourceTitle": "在 GitHub 上打开 DLSSync 源代码",
         "manifestTitle": "打开已签名公开目录的仓库",
         "manifest": "清单",
+        "sponsor": "赞助",
         "sponsorTitle": "GitHub 赞助商——定期或一次性支持",
         "kofiTitle": "Ko-fi——一次性小贴士",
         "nexusTitle": "DLSSync对Nexus Mods——支持它以提升能见度",
@@ -794,7 +851,8 @@
       "whatsNew": {
         "eyebrow": "有什么新动态",
         "viewChangelog": "查看完整更新日志→",
-        "openReleasesTitle": "开放GitHub发行"
+        "openReleasesTitle": "开放GitHub发行",
+        "unreleased": "未发布"
       },
       "kpi": {
         "familiesTracked": "追踪的家族",
@@ -862,6 +920,9 @@
       },
       "update": {
         "checking": "查看GitHub发布......",
+        "status": {
+          "indeterminate": "检查未返回可用结果，因此尚未确定是否有更新"
+        },
         "available": "更新可得：v{version}。请访问发行页面下载。",
         "latest": "你用的是最新版本（v{version}）。",
         "failed": "更新检查失败：{error}。端点可能无法访问，或者尚未发布任何版本。"
@@ -1034,19 +1095,27 @@
     }
   },
   "applyStage": {
-    "download": "下载",
-    "verify_sha": "验证SHA",
-    "verify_signature": "验证签名",
-    "backup_current": "倒流",
-    "install_new": "安装新设备",
-    "verify_installed": "验证已安装",
-    "done": "完成"
+    "download": "正在下载",
+    "verify_sha": "正在检查文件",
+    "verify_signature": "正在检查来源",
+    "backup_current": "正在备份",
+    "install_new": "正在更新",
+    "verify_installed": "正在完成",
+    "done": "已更新",
+    "backup": "正在备份",
+    "replace": "正在更新",
+    "verify_post": "正在完成",
+    "complete": "已更新"
   },
   "installStage": {
     "downloading": "下载中",
     "installing": "安装",
     "completed": "完成",
-    "failed": "失败"
+    "failed": "失败",
+    "launching": "启动中",
+    "cancelled": "已取消",
+    "queued": "排队中",
+    "verifying": "校验中"
   },
   "driverStatus": {
     "update_available": "更新可用",
@@ -1099,6 +1168,26 @@
       "label": "未知",
       "short": "意外错误",
       "hint": "发生了一次非机密故障。使用“复制报告”，如果问题持续，就开启一个问题。"
+    },
+    "streamline_locked": {
+      "label": "Streamline 已禁用",
+      "short": "Streamline 已禁用",
+      "hint": "Streamline 更新已禁用。请检查设置 → 高级，并更新完整的兼容组件集。"
+    },
+    "driver_too_old": {
+      "label": "需要更新驱动程序",
+      "short": "需要更新驱动程序",
+      "hint": "已安装的驱动程序不满足此库的要求。请先检查驱动程序。"
+    },
+    "game_running": {
+      "label": "游戏正在运行",
+      "short": "游戏正在运行",
+      "hint": "更改游戏文件前，请关闭游戏后重试。"
+    },
+    "architecture": {
+      "label": "架构",
+      "short": "架构",
+      "hint": "DLL 架构与游戏不匹配。请刷新目录并检查兼容的文件。"
     }
   },
   "notifKind": {
@@ -1285,14 +1374,15 @@
   },
   "component": {
     "updatePlan": {
-      "eyebrow": "包含来源信息的试运行",
-      "title": "审查更新计划",
-      "subtitle": "确认此精确的签名计划前不会进行任何更改。",
-      "loading": "正在加载信任证据…",
+      "eyebrow": "更新详情",
+      "title": "可以开始更新",
+      "subtitle": "更新前会备份你的文件，之后可以随时恢复。",
+      "loading": "正在检查更新…",
       "files": "文件",
       "signerPending": "正在检查发布者…",
-      "export": "复制计划 JSON",
-      "apply": "应用所选项目"
+      "export": "复制详情",
+      "apply": "更新",
+      "dependencies": "还需要"
     },
     "applyModal": {
       "eyebrow": {
@@ -1302,11 +1392,11 @@
       },
       "headline": {
         "someUpdated": "{done} {total}更新",
-        "allUpdated_one": "{count}功能更新",
-        "allUpdated_other": "{count}功能更新",
+        "allUpdated_one": "更新已安装",
+        "allUpdated_other": "已安装 {count} 项更新",
         "updating": "更新{running} {total}",
-        "queued_one": "{count}功能排队",
-        "queued_other": "{count}排队功能"
+        "queued_one": "正在准备更新",
+        "queued_other": "正在准备 {count} 项更新"
       },
       "stat": {
         "done": "完成",
@@ -1471,7 +1561,7 @@
       "topbar": {
         "searchPlaceholder": "搜索游戏",
         "commandPaletteTitle": "指令调色板（{mod}K）",
-        "commandPaletteAria": "打开命令调色板",
+        "commandPaletteAria": "搜索游戏和命令",
         "notifications": "通知",
         "unreadNotifications_one": "{count}未读通知",
         "unreadNotifications_other": "{count}未读通知",
@@ -1535,6 +1625,8 @@
       },
       "status": {
         "notInCatalog": "目录里没有",
+        "externallyManaged": "由 DLSSync 之外管理",
+        "incompatible": "报告为不兼容",
         "disabled": "已失效",
         "updatesReady": "更新准备就绪",
         "updateReady": "更新准备好了",
@@ -1587,7 +1679,7 @@
         "pickDifferent": "选一个不同的版本",
         "choose": "选择一个版本",
         "chooseVersion": "选择版本",
-        "catalogAside": "·目录 v{version}",
+        "catalogAside": "软件包 v{version}",
         "pinned": "被钉住",
         "pinnedTitle": "被你压制"
       },
@@ -1750,10 +1842,33 @@
       "grdRequired": "DLSS 4 次覆盖需要 Game Ready 驱动 572.16 或更高版本。",
       "superResolution": "超分辨率",
       "frameGeneration": "帧生成",
+      "capabilityUnknown": "未获得能力查询结果，因此不提供写入操作。",
+      "blocked": {
+        "host_not_windows": "此主机不是 Windows，因此未使用驱动配置文件 API。",
+        "nvapi_unavailable": "本系统未加载 NVIDIA 驱动 API。",
+        "nvapi_version_unknown": "NVIDIA 驱动 API 已加载，但未报告经过验证的版本。",
+        "adapter_not_nvidia": "此显卡不是 NVIDIA 适配器。",
+        "nvidia_driver_version_unknown": "未观察到已安装的 NVIDIA 驱动版本。",
+        "adapter_class_unknown": "未观察到显卡类别。",
+        "hardware_unrecognized": "此硬件未匹配到已知的显卡记录。",
+        "provider_applicability_unknown": "未观察到该提供方是否适用于此处。",
+        "provider_incompatible": "提供方报告此组合不兼容。",
+        "game_integration_unknown": "未观察到游戏的集成情况。",
+        "game_integration_incompatible": "观察到游戏的集成不兼容。",
+        "runtime_stack_unknown": "未观察到运行时组件栈。",
+        "runtime_stack_incompatible": "观察到运行时组件栈不兼容。",
+        "preset_runtime_mapping_unknown": "未观察到预设与运行时的对应关系。",
+        "preset_runtime_mapping_incompatible": "观察到预设与运行时的对应关系不兼容。"
+      },
+      "neuralRendering": "神经渲染",
+      "writeUnavailable": "无法更改驱动配置文件：未确认所需的能力证据。",
+      "rayReconstruction": "光线重构",
+      "forceLatestRrDll": "强制使用已安装的最新光线重构 DLL",
       "forceLatestSrDll": "强制安装最新安装的DLSS DLL",
       "forceLatestFgDll": "强制安装最新安装的帧生成DLL",
       "modelPreset": "模型预设",
       "modelPresetAria": "DLSS模型预设",
+      "rrPresetAria": "光线重构模型预设",
       "noPresetOverride": "没有预设覆盖",
       "mode": "模式",
       "modeAria": "帧生成模式",
@@ -1768,7 +1883,8 @@
       "learnMore": "了解更多 ↗",
       "working": "工作......",
       "resetToDefault": "重置为默认",
-      "note": "编写NVIDIA驱动应用配置文件——这和NVIDIA应用使用的机制相同。用重置完全可逆。带有反作弊功能的多人游戏可能会被标记为强制配置文件;先查看游戏政策。",
+      "note": "修改 NVIDIA 配置文件。支持情况与效果取决于游戏和 GPU。重置会移除这些本地设置。",
+      "rrNote": "光线重构使用独立的驱动设置（0x10E41DF7），与超分辨率分开。需要 RTX GPU 和支持的游戏。",
       "toast": {
         "openLinkFailed": "打开链接失败：{error}",
         "needsElevation": "已应用超分辨率。帧生成覆盖需要管理员——重新DLSSync管理员身份应用。",
@@ -1776,11 +1892,14 @@
         "applyFailed": "申请失败：{error}",
         "reset": "DLSS覆盖重置为驱动默认值。",
         "resetFailed": "重置失败：{error}"
-      }
+      },
+      "profileSaved": "已保存到 NVIDIA 配置文件并通过重新读取验证。",
+      "profileUnverified": "驱动未确认所请求的值。请刷新配置文件后重试。",
+      "profileAccess": "NVIDIA 驱动 {version} 提供这些配置设置。保存设置不代表游戏会使用它。"
     },
     "palette": {
       "aria": "命令调色板",
-      "placeholder": "搜索命令或跳转到视图",
+      "placeholder": "搜索游戏和命令",
       "tabToCycle": "从Tab到循环",
       "recent": "近期",
       "empty": {
@@ -1803,6 +1922,177 @@
         "drawer": "游戏抽屉",
         "modal": "模态",
         "palette": "命令调色板"
+      },
+      "games": "游戏"
+    },
+    "cover": {
+      "unavailable": "封面不可用"
+    },
+    "recipes": {
+      "heading": "模组",
+      "sub": "安装本地模组文件，并保留经过验证的恢复记录。",
+      "empty": {
+        "catalog": "目录中没有经过审核的模组。"
+      },
+      "installed": {
+        "heading": "已安装的模组",
+        "empty": "DLSSync 尚未为此游戏安装模组。"
+      },
+      "add": {
+        "heading": "添加本地模组",
+        "recipeFile": "选择模组文件",
+        "recipeFileLabel": "模组配方",
+        "sourceFolder": "选择源文件夹",
+        "sourceFolderLabel": "已解压的文件",
+        "sourceFolderHint": "请选择存放已下载文件的文件夹。",
+        "nothingChosen": "未选择",
+        "clear": "清除"
+      },
+      "intent": {
+        "label": "操作",
+        "apply": "安装文件",
+        "configure": "更改设置"
+      },
+      "check": "检查文件",
+      "checking": "正在检查文件…",
+      "apply": "安装模组",
+      "configure": "保存模组设置",
+      "working": "正在处理…",
+      "remove": "移除模组",
+      "removing": "正在移除…",
+      "preview": {
+        "heading": "文件和设置",
+        "filesLabel": "文件",
+        "settingsLabel": "设置",
+        "recheck": "如果游戏或源文件发生变化，请重新检查。",
+        "action": {
+          "create": "创建",
+          "replace": "替换",
+          "remove": "移除",
+          "configure": "配置"
+        }
+      },
+      "conflicts": {
+        "heading": "文件冲突",
+        "blocked": "请先解决冲突再继续。"
+      },
+      "issues": {
+        "heading": "详情"
+      },
+      "error": {
+        "actionFailed": "模组操作失败。",
+        "listFailed": "无法读取已安装的模组。"
+      },
+      "import": {
+        "unverified": "本地来源。兼容性尚未验证。"
+      },
+      "state": {
+        "note": "归属、检测到的文件和兼容性是不同的结果。",
+        "ownership": {
+          "none": "未归属",
+          "installed_by_dlssync": "由 DLSSync 安装",
+          "owned_modified": "已被外部修改",
+          "owned_missing": "文件缺失",
+          "partially_removed": "已部分移除",
+          "removed": "已移除"
+        },
+        "observation": {
+          "not_observed": "未观测",
+          "files_detected": "检测到文件",
+          "runtime_detected": "检测到运行时",
+          "unknown_or_inaccessible": "无法检查"
+        },
+        "compatibility": {
+          "unknown": "兼容性未知",
+          "documented_only": "仅有文档",
+          "tested_pass": "测试通过",
+          "tested_fail": "测试失败",
+          "stale": "证据已过时"
+        },
+        "support": {
+          "unknown": "支持情况未知",
+          "experimental": "实验性",
+          "official": "官方",
+          "local_import": "本地导入"
+        }
+      },
+      "result": {
+        "completed": "更改已验证",
+        "failed": "更改失败",
+        "changedLabel": "已更改",
+        "retainedLabel": "已保留",
+        "retainedHint": "保留的文件未被移除。重试前请阅读详情。"
+      },
+      "blocked": {
+        "no_selection": "选择模组文件",
+        "not_checked": "请先检查文件",
+        "expired": "检查已过期。请重新检查。",
+        "conflicts": "解决文件冲突",
+        "not_allowed": "此操作不可用",
+        "busy": "请等待当前操作完成"
+      },
+      "role": {
+        "proxy": "代理",
+        "addon": "附加组件",
+        "shader": "着色器",
+        "data": "数据",
+        "notice": "声明"
+      }
+    },
+    "hardware": {
+      "otherTechnologies": "其他技术",
+      "otherHelp": "还检测到了这些库。可以在此查看；它们不包含在针对当前硬件的默认选择中。",
+      "supportLibraries": "辅助库",
+      "otherUpdates": "其他更新",
+      "forThisPc": "适用于此电脑",
+      "selectRecommended": "选择推荐项（{count}）",
+      "supportHelp": "主要技术使用的插件和共享文件。每个文件都有独立版本。",
+      "catalogOtherHelp": "浏览其他厂商。这些条目不表示与当前硬件兼容。",
+      "unknown": "无法获取硬件信息。选择更新前，请检查检测到的库。",
+      "noRecommended": "没有待处理的推荐更新。其他技术仍可在游戏详情中查看。",
+      "reviewUpdates": "查看更新"
+    },
+    "detail": {
+      "updates": "更新",
+      "advanced": "高级",
+      "installLocation": "安装位置",
+      "localPackages": "本地软件包",
+      "localPackagesHelp": "管理您自行提供的文件。这些软件包与目录更新分开。",
+      "installedIn": "已安装于 {games}",
+      "catalogMatchHelp": "已安装标签需要在最近的游戏扫描中精确匹配文件。",
+      "installedFile": "已安装文件",
+      "catalogVersion": "目录版本",
+      "noExactMatch": "目录中无精确匹配",
+      "availableVersions": "可用版本"
+    },
+    "devices": {
+      "heading": "已安装设备",
+      "localHelp": "Windows 本地设备清单。展开类别可查看版本和详情。",
+      "search": "搜索设备",
+      "attention": "需要关注",
+      "noMatches": "没有匹配的设备。",
+      "details": "详情",
+      "identity": "设备标识",
+      "date": "驱动日期",
+      "problem": "Windows 报告设备错误 {code}。",
+      "classes": {
+        "audio": "音频",
+        "display": "显卡",
+        "monitor": "显示器",
+        "network": "网络",
+        "bluetooth": "Bluetooth",
+        "input": "键盘和鼠标",
+        "storage": "存储",
+        "printer": "打印机",
+        "camera": "摄像头",
+        "sensor": "传感器",
+        "battery": "电池和电源",
+        "smart_card": "智能卡读卡器",
+        "firmware": "固件",
+        "chipset": "芯片组",
+        "system": "系统",
+        "usb": "USB 控制器",
+        "other": "其他设备"
       }
     }
   },
@@ -1823,8 +2113,8 @@
     "settingsSaveFailed": "无法保存设置：{msg}",
     "saveFailed": "无法保存：{msg}",
     "nothingSelected": "没有选择",
-    "updatePlanStale": "此计划打开期间目录已更改。应用前请审查新的计划。",
-    "applyInProgress": "申请已经在进行中——等它先完成",
+    "updatePlanStale": "游戏文件或更新列表已更改，请重新检查更新。",
+    "applyInProgress": "已有更新正在进行。",
     "cancelFailed": "取消失败：{msg}",
     "queuedAcross": "排队{updates}横跨{games}",
     "queuedUpdates_one": "{count}更新",

@@ -27,6 +27,8 @@ fn dlss_overrides_apply_read_reset_round_trip_on_global_profile() {
     let cfg = DlssOverrideConfig {
         enable_sr_dll_override: true,
         sr_preset: Some(DlssPreset::K),
+        enable_rr_dll_override: true,
+        rr_preset: Some(DlssPreset::O),
         enable_fg_dll_override: false,
         fg_preset: None,
         fg_mode: Some(FrameGenMode::Fixed),
@@ -77,6 +79,8 @@ fn dlss_overrides_apply_read_reset_round_trip_on_global_profile() {
             "SR preset must apply + reconstruct even when FG writes are privilege-denied"
         );
         assert!(reconstructed.enable_sr_dll_override);
+        assert_eq!(reconstructed.rr_preset, cfg.rr_preset);
+        assert!(reconstructed.enable_rr_dll_override);
     }
 
     reset_overrides(&scope, RESETTABLE_IDS).expect("reset_overrides should succeed");
@@ -115,6 +119,8 @@ fn recommended_sentinel_round_trips_on_a_synthetic_per_game_profile() {
     let cfg = DlssOverrideConfig {
         enable_sr_dll_override: true,
         sr_preset: Some(DlssPreset::Recommended),
+        enable_rr_dll_override: true,
+        rr_preset: Some(DlssPreset::Recommended),
         enable_fg_dll_override: false,
         fg_preset: None,
         fg_mode: None,
@@ -161,6 +167,8 @@ fn apply_is_resilient_to_privilege_gated_frame_gen_settings() {
     let cfg = DlssOverrideConfig {
         enable_sr_dll_override: true,
         sr_preset: Some(DlssPreset::K),
+        enable_rr_dll_override: false,
+        rr_preset: None,
         enable_fg_dll_override: false,
         fg_preset: None,
         fg_mode: Some(FrameGenMode::Fixed),

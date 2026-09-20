@@ -19,7 +19,7 @@ pub const DEFAULT_SCAN_DEPTH: usize = 5;
 
 /// One detected protection with its risk category and where the evidence came
 /// from. `name` is the canonical engine/protector name.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ProtectionHit {
     pub name: String,
     pub kind: ProtectionKind,

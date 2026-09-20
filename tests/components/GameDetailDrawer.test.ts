@@ -27,20 +27,21 @@ function ruleBody(css: string, selector: string): string {
   return re.exec(css)?.[1] ?? "";
 }
 
-describe("GameDetailView — full-page detail, not an overlay drawer", () => {
-  it("renders in-flow (no scrim, no fixed/overlay drawer, no modal attrs)", () => {
+describe("GameDetailView — centered game dialog", () => {
+  it("owns modal semantics and the shared focus trap", () => {
     expect(drawerSource).not.toContain("drawer-scrim");
     expect(drawerSource).not.toMatch(/\.drawer\s*\{[^}]*position:\s*fixed/);
-    expect(drawerSource).not.toMatch(/role="dialog"/);
-    expect(drawerSource).not.toMatch(/aria-modal/);
+    expect(drawerSource).toMatch(/role="dialog"/);
+    expect(drawerSource).toMatch(/aria-modal="true"/);
+    expect(drawerSource).toContain("use:focusTrap");
     expect(drawerSource).not.toMatch(/function trapFocus/);
     expect(drawerSource).not.toMatch(/matchMedia/);
   });
 
-  it("has a Back-to-Library affordance wired to onClose, and Escape closes", () => {
+  it("has a close affordance and respects handled Escape from nested dialogs", () => {
     expect(heroSource).toMatch(/class="detail-back"[\s\S]*?onclick=\{onClose\}/);
     expect(enCatalog).toMatch(/Back to Library/);
-    expect(drawerSource).toMatch(/e\.key === "Escape"\) onClose\(\)/);
+    expect(drawerSource).toContain('e.key === "Escape" && !e.defaultPrevented');
   });
 
   it("uses a compact hero banner (fixed height, not a 16:9 art block) with the launcher-accent stripe", () => {
@@ -67,14 +68,14 @@ describe("GameDetailView — full-page detail, not an overlay drawer", () => {
   });
 });
 
-describe("GameDetailView — wired at the app level (master-detail right rail)", () => {
-  it("App renders the detail in a persistent right rail beside the library, not replacing it", () => {
+describe("GameDetailView — wired above the app without resizing the library", () => {
+  it("App portals the dialog outside containing blocks", () => {
     expect(appSource).toMatch(/import GameDetailDrawer from "\.\/components\/GameDetailDrawer\.svelte"/);
     expect(appSource).toMatch(/railGameId = \$derived\(\$currentView === "library" \? \$drawerGameId : null\)/);
     expect(appSource).toMatch(/\{#if railGameId\}/);
-    expect(appSource).toMatch(/class="detail-rail"/);
-    expect(appSource).toMatch(/class:has-rail=\{!!railGameId\}/);
-    expect(appSource).toMatch(/var\(--rail-width\)/);
+    expect(appSource).toContain('class="game-detail-dialog" use:portal');
+    expect(appSource).not.toContain("class:rail-open");
+    expect(appSource).toContain("calc(100dvh - 48px)");
     expect(appSource).toContain("<GameDetailDrawer");
   });
 

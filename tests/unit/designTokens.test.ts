@@ -46,27 +46,25 @@ describe("design tokens — spacing scale, density, tactile + glass-dialog utili
     expect(ruleBody(css, ".press:active")).toMatch(/scale\(0\.98\)/);
   });
 
-  it("provides one centralized .glass-dialog util (blur + shadow + 3px stripe + 32px close)", () => {
+  it("provides opaque dialogs with a shared close affordance", () => {
     const dialog = ruleBody(css, ".glass-dialog");
-    expect(dialog).toMatch(/backdrop-filter:\s*var\(--glass-blur\)/);
+    expect(dialog).toMatch(/backdrop-filter:\s*none/);
     expect(dialog).toMatch(/box-shadow:[^;]*var\(--shadow-lg\)/);
-    expect(css).toMatch(/\.glass-dialog::before\s*\{[^}]*width:\s*3px/);
+    expect(dialog).toContain("background: var(--bg-card)");
     const close = ruleBody(css, ".dialog-close");
     expect(close).toMatch(/width:\s*32px/);
     expect(close).toMatch(/height:\s*32px/);
   });
 
-  it("keeps a backdrop-filter fallback for .glass-dialog", () => {
-    expect(css).toMatch(
-      /\.glass-dialog\s*\{\s*background:\s*var\(--glass-fallback\)/,
-    );
+  it("does not require blur support to render a solid dialog", () => {
+    expect(ruleBody(css, ".glass-dialog")).not.toContain("var(--glass-strong)");
   });
 
-  it("centralizes tokenized scrollbar styling with forced-colors fallback", () => {
-    expect(css).toMatch(/--scrollbar-thumb:\s*rgba\(/);
-    expect(css).toMatch(/--scrollbar-thumb-hover:\s*rgba\(/);
-    expect(css).toMatch(/::-webkit-scrollbar-thumb\s*\{[^}]*var\(--scrollbar-thumb\)/);
-    expect(css).toMatch(/@supports not selector\(::-webkit-scrollbar\)/);
-    expect(css).toMatch(/@media \(forced-colors:\s*active\)/);
+  it("uses restrained scrollbars with a system high-contrast fallback", () => {
+    expect(css).toContain("scrollbar-width: thin");
+    expect(css).toContain("forced-colors: active");
+    expect(css).toContain("scrollbar-color: auto");
+    expect(css).toMatch(/color-scheme:\s*dark/);
+    expect(css).toMatch(/color-scheme:\s*light/);
   });
 });

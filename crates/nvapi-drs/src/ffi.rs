@@ -4,13 +4,21 @@ use std::mem::{size_of, transmute, zeroed};
 use std::os::windows::ffi::OsStrExt;
 use std::ptr::null_mut;
 use windows_sys::Win32::Foundation::{FreeLibrary, HMODULE};
-use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+use windows_sys::Win32::System::LibraryLoader::{
+    GetProcAddress, LoadLibraryExW, LOAD_LIBRARY_SEARCH_SYSTEM32,
+};
 
 type Status = i32;
 const NVAPI_OK: Status = 0;
 const NVAPI_INVALID_USER_PRIVILEGE: Status = -137;
 type NvHandle = *mut c_void;
 
+const ID_UNLOAD: u32 = 0xD22B_DD7E;
+const ID_VERSION: u32 = 0x0105_3FA5;
+const ID_DRIVER_VERSION: u32 = 0x2926_AAAD;
+const ID_SETTING_IDS: u32 = 0xF020_614A;
+const ID_FIND_PROFILE: u32 = 0x7E4A_9A0B;
+const ID_DELETE_PROFILE: u32 = 0x1709_3206;
 const ID_INITIALIZE: u32 = 0x0150_E828;
 const ID_DRS_CREATE_SESSION: u32 = 0x0694_D52E;
 const ID_DRS_LOAD_SETTINGS: u32 = 0x375D_BD6B;
@@ -33,6 +41,11 @@ const NVDRS_SETTING_VER_NUMBER: u32 = 1;
 const NVDRS_APPLICATION_VER_NUMBER: u32 = 4;
 
 type QueryInterfaceFn = unsafe extern "C" fn(u32) -> *const c_void;
+type VersionFn = unsafe extern "C" fn(*mut u8) -> Status;
+type DriverVersionFn = unsafe extern "C" fn(*mut u32, *mut u8) -> Status;
+type SettingIdsFn = unsafe extern "C" fn(*mut u32, *mut u32) -> Status;
+type FindProfileFn = unsafe extern "C" fn(NvHandle, *const u16, *mut NvHandle) -> Status;
+type DeleteProfileFn = unsafe extern "C" fn(NvHandle, NvHandle) -> Status;
 type InitializeFn = unsafe extern "C" fn() -> Status;
 type CreateSessionFn = unsafe extern "C" fn(*mut NvHandle) -> Status;
 type LoadSettingsFn = unsafe extern "C" fn(NvHandle) -> Status;
@@ -149,6 +162,12 @@ fn app_lookup_candidates(exe_path: &str) -> Vec<String> {
 }
 
 struct DrsFns {
+    unload: InitializeFn,
+    version: VersionFn,
+    driver_version: DriverVersionFn,
+    setting_ids: SettingIdsFn,
+    find_profile: FindProfileFn,
+    delete_profile: DeleteProfileFn,
     get_base_profile: GetBaseProfileFn,
     get_profile_info: GetProfileInfoFn,
     set_setting: SetSettingFn,
@@ -170,7 +189,11 @@ struct Drs {
 impl Drs {
     fn open() -> Result<Self, String> {
         unsafe {
-            let lib = LoadLibraryW(wide("nvapi64.dll").as_ptr());
+            let lib = LoadLibraryExW(
+                wide("nvapi64.dll").as_ptr(),
+                std::ptr::null_mut(),
+                LOAD_LIBRARY_SEARCH_SYSTEM32,
+            );
             if lib.is_null() {
                 return Err("nvapi64.dll failed to load — NVIDIA driver not present".to_string());
             }
@@ -208,6 +231,27 @@ impl Drs {
             "DRS_LoadSettings",
         )?);
         let fns = DrsFns {
+            unload: transmute::<*const c_void, InitializeFn>(resolve(ID_UNLOAD, "Unload")?),
+            version: transmute::<*const c_void, VersionFn>(resolve(
+                ID_VERSION,
+                "GetInterfaceVersionString",
+            )?),
+            driver_version: transmute::<*const c_void, DriverVersionFn>(resolve(
+                ID_DRIVER_VERSION,
+                "SYS_GetDriverAndBranchVersion",
+            )?),
+            setting_ids: transmute::<*const c_void, SettingIdsFn>(resolve(
+                ID_SETTING_IDS,
+                "DRS_EnumAvailableSettingIds",
+            )?),
+            find_profile: transmute::<*const c_void, FindProfileFn>(resolve(
+                ID_FIND_PROFILE,
+                "DRS_FindProfileByName",
+            )?),
+            delete_profile: transmute::<*const c_void, DeleteProfileFn>(resolve(
+                ID_DELETE_PROFILE,
+                "DRS_DeleteProfile",
+            )?),
             get_base_profile: transmute::<*const c_void, GetBaseProfileFn>(resolve(
                 ID_DRS_GET_BASE_PROFILE,
                 "DRS_GetBaseProfile",
@@ -257,11 +301,13 @@ impl Drs {
         let mut session: NvHandle = null_mut();
         let status = create_session(&mut session);
         if status != NVAPI_OK {
+            (fns.unload)();
             return Err(format!("NvAPI_DRS_CreateSession -> {status}"));
         }
         let status = load_settings(session);
         if status != NVAPI_OK {
             (fns.destroy_session)(session);
+            (fns.unload)();
             return Err(format!("NvAPI_DRS_LoadSettings -> {status}"));
         }
         Ok(Self { lib, session, fns })
@@ -293,7 +339,7 @@ impl Drs {
         }
     }
 
-    unsafe fn find_app_by_name(&self, name: &str) -> Option<NvHandle> {
+    unsafe fn find_app_by_name(&self, name: &str) -> Result<Option<NvHandle>, String> {
         let name_wide = wide(name);
         let mut profile: NvHandle = null_mut();
         let mut app: NvdrsApplicationV4 = zeroed();
@@ -304,16 +350,23 @@ impl Drs {
             &mut profile,
             &mut app,
         );
-        (status == NVAPI_OK && !profile.is_null()).then_some(profile)
+        match status {
+            NVAPI_OK if !profile.is_null() => Ok(Some(profile)),
+            -166 => Ok(None),
+            _ => Err(format!("NvAPI_DRS_FindApplicationByName -> {status}")),
+        }
     }
 
     /// Resolves the per-game profile for an executable, preferring a full-path
     /// match and falling back to the bare basename. See [`app_lookup_candidates`]
     /// for why the full path wins (basename collisions between distinct games).
     unsafe fn find_app(&self, exe_path: &str) -> Result<Option<NvHandle>, String> {
-        Ok(app_lookup_candidates(exe_path)
-            .iter()
-            .find_map(|name| self.find_app_by_name(name)))
+        for name in app_lookup_candidates(exe_path) {
+            if let Some(profile) = self.find_app_by_name(&name)? {
+                return Ok(Some(profile));
+            }
+        }
+        Ok(None)
     }
 
     unsafe fn find_or_create_app(&self, exe_path: &str) -> Result<NvHandle, String> {
@@ -358,14 +411,28 @@ impl Drs {
         }
     }
 
-    unsafe fn get_dword(&self, profile: NvHandle, id: u32) -> Option<u32> {
+    unsafe fn get_setting(
+        &self,
+        profile: NvHandle,
+        id: u32,
+    ) -> Result<Option<NvdrsSetting>, String> {
         let mut setting: NvdrsSetting = zeroed();
         setting.version = struct_version::<NvdrsSetting>(NVDRS_SETTING_VER_NUMBER);
         let status = (self.fns.get_setting)(self.session, profile, id, &mut setting);
-        if status == NVAPI_OK && setting.setting_type == NVDRS_DWORD_TYPE {
-            Some(setting.current_value.u32_value)
-        } else {
-            None
+        match status {
+            NVAPI_OK => Ok(Some(setting)),
+            -160 => Ok(None),
+            _ => Err(format!("NvAPI_DRS_GetSetting(0x{id:08X}) -> {status}")),
+        }
+    }
+
+    unsafe fn get_dword(&self, profile: NvHandle, id: u32) -> Result<Option<u32>, String> {
+        match self.get_setting(profile, id)? {
+            Some(setting) if setting.setting_type == NVDRS_DWORD_TYPE => {
+                Ok(Some(setting.current_value.u32_value))
+            }
+            Some(_) => Err(format!("Setting 0x{id:08X} is not a DWORD")),
+            None => Ok(None),
         }
     }
 
@@ -382,6 +449,7 @@ impl Drop for Drs {
     fn drop(&mut self) {
         unsafe {
             (self.fns.destroy_session)(self.session);
+            (self.fns.unload)();
             let _ = FreeLibrary(self.lib);
         }
     }
@@ -415,7 +483,7 @@ pub fn roundtrip_dword(setting_id: u32, value: u32) -> Result<u32, String> {
         let profile = drs.base_profile()?;
         drs.set_dword(profile, setting_id, value)
             .map_err(|status| format!("NvAPI_DRS_SetSetting(0x{setting_id:08X}) -> {status}"))?;
-        drs.get_dword(profile, setting_id)
+        drs.get_dword(profile, setting_id)?
             .ok_or_else(|| "GetSetting returned no value after SetSetting".to_string())
     }
 }
@@ -441,7 +509,9 @@ pub fn apply_overrides(scope: &OverrideScope, settings: &[DrsSetting]) -> Result
                 }
             }
         }
-        drs.save()?;
+        if needs_elevation.is_empty() {
+            drs.save()?;
+        }
         Ok(needs_elevation)
     }
 }
@@ -455,10 +525,9 @@ pub fn read_overrides(
         let Some(profile) = drs.profile_for_read(scope)? else {
             return Ok(ids.iter().map(|&id| (id, None)).collect());
         };
-        Ok(ids
-            .iter()
-            .map(|&id| (id, drs.get_dword(profile, id)))
-            .collect())
+        ids.iter()
+            .map(|&id| Ok((id, drs.get_dword(profile, id)?)))
+            .collect()
     }
 }
 
@@ -469,10 +538,288 @@ pub fn reset_overrides(scope: &OverrideScope, ids: &[u32]) -> Result<(), String>
             return Ok(());
         };
         for &id in ids {
-            let _ = (drs.fns.restore_default_setting)(drs.session, profile, id);
+            let status = (drs.fns.restore_default_setting)(drs.session, profile, id);
+            if status != NVAPI_OK && status != -160 {
+                return Err(format!(
+                    "NvAPI_DRS_RestoreProfileDefaultSetting(0x{id:08X}) -> {status}"
+                ));
+            }
         }
         drs.save()
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct ProfileRuntime {
+    pub interface_version: String,
+    pub driver_version: u32,
+    pub driver_branch: String,
+    pub supported_setting_ids: Vec<u32>,
+}
+
+/// Read the installed driver's API and setting namespace, without writing a profile.
+pub fn profile_runtime() -> Result<ProfileRuntime, String> {
+    let drs = Drs::open()?;
+    let mut interface = [0u8; 64];
+    let mut branch = [0u8; 64];
+    let mut driver_version = 0;
+    let mut setting_ids = vec![0u32; 16_384];
+    let mut count = setting_ids.len() as u32;
+    unsafe {
+        for (label, status) in [
+            (
+                "GetInterfaceVersionString",
+                (drs.fns.version)(interface.as_mut_ptr()),
+            ),
+            (
+                "SYS_GetDriverAndBranchVersion",
+                (drs.fns.driver_version)(&mut driver_version, branch.as_mut_ptr()),
+            ),
+            (
+                "DRS_EnumAvailableSettingIds",
+                (drs.fns.setting_ids)(setting_ids.as_mut_ptr(), &mut count),
+            ),
+        ] {
+            if status != NVAPI_OK {
+                return Err(format!("NvAPI_{label} -> {status}"));
+            }
+        }
+    }
+    if count as usize > setting_ids.len() || driver_version == 0 {
+        return Err("NVAPI returned an invalid driver version or setting count".into());
+    }
+    setting_ids.truncate(count as usize);
+    let text = |bytes: &[u8]| {
+        String::from_utf8_lossy(bytes.split(|byte| *byte == 0).next().unwrap_or_default())
+            .into_owned()
+    };
+    let interface_version = text(&interface);
+    if interface_version.trim().is_empty() {
+        return Err("NVAPI returned an empty interface version".into());
+    }
+    Ok(ProfileRuntime {
+        interface_version,
+        driver_version,
+        driver_branch: text(&branch),
+        supported_setting_ids: setting_ids,
+    })
+}
+
+pub fn read_observations(
+    scope: &OverrideScope,
+    ids: &[u32],
+) -> Result<Vec<crate::DrsSettingObservation>, String> {
+    use crate::{DrsSettingLocation as Location, LocalSettingState, RawDrsValue};
+    let drs = Drs::open()?;
+    unsafe {
+        let requested = drs.profile_for_read(scope)?;
+        let profile = match requested {
+            Some(value) => value,
+            None => drs.base_profile()?,
+        };
+        let mut info: NvdrsProfile = zeroed();
+        info.version = struct_version::<NvdrsProfile>(NVDRS_PROFILE_VER_NUMBER);
+        let status = (drs.fns.get_profile_info)(drs.session, profile, &mut info);
+        if status != NVAPI_OK {
+            return Err(format!("NvAPI_DRS_GetProfileInfo -> {status}"));
+        }
+        ids.iter()
+            .map(|&id| {
+                let setting = drs.get_setting(profile, id)?;
+                let local = setting.as_ref().is_some_and(|value| {
+                    requested.is_some()
+                        && value.setting_location == 0
+                        && value.is_current_predefined == 0
+                });
+                let raw = |value: &NvdrsSettingValue, kind: u32| {
+                    if kind == NVDRS_DWORD_TYPE {
+                        RawDrsValue::Dword(value.u32_value)
+                    } else {
+                        RawDrsValue::Unknown {
+                            setting_type: kind,
+                            bytes: value
+                                .u32_value
+                                .to_le_bytes()
+                                .into_iter()
+                                .chain(value._binary_tail.iter().copied())
+                                .collect(),
+                        }
+                    }
+                };
+                let effective_value = setting
+                    .as_ref()
+                    .map(|value| raw(&value.current_value, value.setting_type));
+                let location = setting.as_ref().map_or(Location::Unknown, |value| {
+                    match value.setting_location {
+                        0 if requested.is_none() => Location::BaseProfile,
+                        0 if matches!(scope, OverrideScope::Global) => Location::CurrentGlobal,
+                        0 => Location::CurrentApplication,
+                        1 => Location::CurrentGlobal,
+                        2 => Location::BaseProfile,
+                        3 => Location::DriverDefault,
+                        _ => Location::Unknown,
+                    }
+                });
+                Ok(crate::DrsSettingObservation {
+                    setting_id: id,
+                    local: if local {
+                        LocalSettingState::Present {
+                            value: effective_value.clone().expect("local setting exists"),
+                        }
+                    } else {
+                        LocalSettingState::Absent
+                    },
+                    effective_value,
+                    predefined: setting
+                        .as_ref()
+                        .is_some_and(|value| value.is_current_predefined != 0),
+                    predefined_value: setting
+                        .as_ref()
+                        .filter(|value| value.is_predefined_valid != 0)
+                        .map(|value| raw(&value.predefined_value, value.setting_type)),
+                    location,
+                    resolved_profile: Some(utf16_until_nul(&info.profile_name)),
+                    // A basename fallback is not proof of an exact application match.
+                    matched_application: None,
+                })
+            })
+            .collect()
+    }
+}
+
+/// Edit one loaded session and save only if every requested operation succeeds.
+pub fn apply_profile_patch(
+    scope: &OverrideScope,
+    settings: &[DrsSetting],
+    remove: &[u32],
+) -> Result<Vec<u32>, String> {
+    if settings.is_empty() && remove.is_empty() {
+        return Ok(Vec::new());
+    }
+    let drs = Drs::open()?;
+    unsafe {
+        let profile = if settings.is_empty() {
+            match drs.profile_for_read(scope)? {
+                Some(value) => value,
+                None => return Ok(Vec::new()),
+            }
+        } else {
+            drs.profile_for(scope)?
+        };
+        let mut denied = Vec::new();
+        for (&id, result) in settings
+            .iter()
+            .map(|value| (&value.id, drs.set_dword(profile, value.id, value.value)))
+            .chain(remove.iter().map(|id| {
+                let status = (drs.fns.restore_default_setting)(drs.session, profile, *id);
+                (
+                    id,
+                    if status == NVAPI_OK || status == -160 {
+                        Ok(())
+                    } else {
+                        Err(status)
+                    },
+                )
+            }))
+        {
+            match result {
+                Ok(()) => {}
+                Err(NVAPI_INVALID_USER_PRIVILEGE) => denied.push(id),
+                Err(status) => return Err(format!("NVAPI profile patch 0x{id:08X} -> {status}")),
+            }
+        }
+        if denied.is_empty() {
+            drs.save()?;
+        }
+        Ok(denied)
+    }
+}
+
+/// Explicit validation only: an unbound, unique profile, a fresh-session read, then deletion.
+/// It cannot select a global profile or a profile associated with a real executable.
+pub fn validate_isolated_profile(
+    nonce: &str,
+    settings: &[DrsSetting],
+) -> Result<Vec<(u32, Option<u32>)>, String> {
+    if !(24..=64).contains(&nonce.len()) || !nonce.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(
+            "Validation requires a unique hexadecimal nonce of at least 24 characters".into(),
+        );
+    }
+    let name = format!("DLSSync Validation {nonce}");
+    let find = |drs: &Drs| -> Result<Option<NvHandle>, String> {
+        unsafe {
+            let mut profile = null_mut();
+            match (drs.fns.find_profile)(drs.session, wide(&name).as_ptr(), &mut profile) {
+                NVAPI_OK => Ok(Some(profile)),
+                -163 => Ok(None),
+                status => Err(format!("Find validation profile -> {status}")),
+            }
+        }
+    };
+    {
+        let drs = Drs::open()?;
+        if find(&drs)?.is_some() {
+            return Err("Validation profile already exists; not touched".into());
+        }
+    }
+    let result = (|| unsafe {
+        let drs = Drs::open()?;
+        let mut info: NvdrsProfile = zeroed();
+        info.version = struct_version::<NvdrsProfile>(NVDRS_PROFILE_VER_NUMBER);
+        wide_into(&mut info.profile_name, &name);
+        let mut profile = null_mut();
+        let status = (drs.fns.create_profile)(drs.session, &info, &mut profile);
+        if status != NVAPI_OK {
+            return Err(format!("Create validation profile -> {status}"));
+        }
+        for setting in settings {
+            drs.set_dword(profile, setting.id, setting.value)
+                .map_err(|status| format!("Set validation 0x{:08X} -> {status}", setting.id))?;
+        }
+        drs.save()?;
+        drop(drs);
+        let verify = Drs::open()?;
+        let profile = find(&verify)?.ok_or("Saved validation profile not found")?;
+        let observed: Vec<_> = settings
+            .iter()
+            .map(|value| Ok((value.id, verify.get_dword(profile, value.id)?)))
+            .collect::<Result<_, String>>()?;
+        if settings
+            .iter()
+            .zip(&observed)
+            .any(|(expected, (_, actual))| *actual != Some(expected.value))
+        {
+            return Err(format!("Validation readback mismatch: {observed:?}"));
+        }
+        Ok(observed)
+    })();
+    // Always clean a persisted validation profile, including after readback failure.
+    {
+        let cleanup = Drs::open()?;
+        if let Some(profile) = find(&cleanup)? {
+            unsafe {
+                let mut info: NvdrsProfile = zeroed();
+                info.version = struct_version::<NvdrsProfile>(NVDRS_PROFILE_VER_NUMBER);
+                let status = (cleanup.fns.get_profile_info)(cleanup.session, profile, &mut info);
+                if status != NVAPI_OK
+                    || info.num_of_apps != 0
+                    || utf16_until_nul(&info.profile_name) != name
+                {
+                    return Err("Validation cleanup identity check failed".into());
+                }
+                let status = (cleanup.fns.delete_profile)(cleanup.session, profile);
+                if status != NVAPI_OK {
+                    return Err(format!("Delete validation profile -> {status}"));
+                }
+                cleanup.save()?;
+            }
+        }
+    }
+    if find(&Drs::open()?)?.is_some() {
+        return Err("Validation profile cleanup did not persist".into());
+    }
+    result.map_err(|error| format!("{error}; validation profile absence verified"))
 }
 
 #[cfg(test)]

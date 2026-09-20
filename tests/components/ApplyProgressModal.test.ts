@@ -92,3 +92,59 @@ describe("ApplyProgressModal (rendered)", () => {
     expect(toggle.textContent?.trim()).toBe("Show detail");
   });
 });
+
+describe("ApplyProgressModal indeterminate aggregate", () => {
+  it("omits aria-valuenow and marks the bar indeterminate while a running item has no byte total", async () => {
+    activeApplies.set({
+      "ap-done": tracker({ apply_id: "ap-done", group_id: "grp-1", stage: "complete", ended_at: Date.now() }),
+      "ap-run": tracker({
+        apply_id: "ap-run",
+        group_id: "grp-2",
+        stage: "download",
+        message: "downloading",
+        progress: 0,
+        bytes_downloaded: 4096,
+        // The backend has not published a total for this transfer, so the aggregate is unmeasured.
+        bytes_total: null,
+        ended_at: null,
+      }),
+    });
+    const { container } = render(ApplyProgressModal, { props: { onClose: vi.fn() } });
+    await settle();
+    const track = container.querySelector('[role="progressbar"]');
+    expect(track).not.toBeNull();
+    expect(track?.getAttribute("aria-valuenow")).toBeNull();
+    expect(track?.getAttribute("aria-busy")).toBe("true");
+    expect(container.querySelector(".progress-fill.is-indeterminate")).not.toBeNull();
+  });
+
+  it("reports the drawn percentage once every running transfer has a known total", async () => {
+    // Byte totals are published per download group, so a known total must come from that store.
+    downloadProgressByGroup.set({
+      "grp-2": {
+        group_id: "grp-2",
+        bytes_downloaded: 50,
+        bytes_total: 100,
+        bytes_per_sec: 10,
+      } as unknown as (typeof downloadProgressByGroup extends { set: (value: infer V) => void } ? V : never)[string],
+    });
+    activeApplies.set({
+      "ap-run": tracker({
+        apply_id: "ap-run",
+        group_id: "grp-2",
+        stage: "download",
+        message: "downloading",
+        progress: 0,
+        bytes_downloaded: 50,
+        bytes_total: 100,
+        ended_at: null,
+      }),
+    });
+    const { container } = render(ApplyProgressModal, { props: { onClose: vi.fn() } });
+    await settle();
+    const track = container.querySelector('[role="progressbar"]');
+    expect(track?.getAttribute("aria-valuenow")).toBe("50");
+    expect(track?.getAttribute("aria-busy")).toBeNull();
+    expect(container.querySelector(".progress-fill.is-indeterminate")).toBeNull();
+  });
+});

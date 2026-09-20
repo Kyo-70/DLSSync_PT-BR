@@ -8,12 +8,13 @@
 
 use windows::core::{Interface, BSTR};
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
+    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+    COINIT_APARTMENTTHREADED,
 };
 use windows::Win32::System::Ole::VarUI8FromDec;
 use windows::Win32::System::UpdateAgent::{
-    orcSucceeded, orcSucceededWithErrors, ssOthers, ssWindowsUpdate, IUpdateCollection,
-    IUpdateSession, IWindowsDriverUpdate, ServerSelection, UpdateCollection, UpdateSession,
+    orcSucceeded, ssOthers, ssWindowsUpdate, IUpdateCollection, IUpdateSession,
+    IWindowsDriverUpdate, ServerSelection, UpdateCollection, UpdateSession,
 };
 
 use crate::{
@@ -46,12 +47,26 @@ impl UpdateSource for WuaSource {
     }
 }
 
-unsafe fn init_com() {
-    let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+struct ComApartment(bool);
+impl Drop for ComApartment {
+    fn drop(&mut self) {
+        if self.0 {
+            unsafe {
+                CoUninitialize();
+            }
+        }
+    }
+}
+unsafe fn init_com() -> windows::core::Result<ComApartment> {
+    let result = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+    if result.0 == 0x80010106u32 as i32 {
+        return Ok(ComApartment(false));
+    }
+    result.ok()?;
+    Ok(ComApartment(true))
 }
 
 unsafe fn make_session() -> windows::core::Result<IUpdateSession> {
-    init_com();
     CoCreateInstance(&UpdateSession, None, CLSCTX_INPROC_SERVER)
 }
 
@@ -59,6 +74,7 @@ unsafe fn search_with(
     server: ServerSelection,
     service_id: Option<&str>,
 ) -> windows::core::Result<Vec<DriverUpdate>> {
+    let _com = init_com()?;
     let session = make_session()?;
     let searcher = session.CreateUpdateSearcher()?;
     searcher.SetServerSelection(server)?;
@@ -135,6 +151,7 @@ unsafe fn install_impl(
     on_progress: &mut dyn FnMut(InstallProgress),
 ) -> Result<InstallReport, DriverError> {
     let map_err = |e: windows::core::Error| DriverError::Install(e.to_string());
+    let _com = init_com().map_err(map_err)?;
 
     let session = make_session().map_err(map_err)?;
     let searcher = session.CreateUpdateSearcher().map_err(map_err)?;
@@ -142,6 +159,10 @@ unsafe fn install_impl(
     let _ = searcher.SetServiceID(&BSTR::from(MICROSOFT_UPDATE_SERVICE_ID));
     let result = searcher
         .Search(&BSTR::from(DRIVER_CRITERIA))
+        .or_else(|_| {
+            searcher.SetServerSelection(ssWindowsUpdate)?;
+            searcher.Search(&BSTR::from(DRIVER_CRITERIA))
+        })
         .map_err(map_err)?;
     let found = result.Updates().map_err(map_err)?;
     let count = found.Count().map_err(map_err)?;
@@ -161,7 +182,7 @@ unsafe fn install_impl(
         }
     }
     let update = target.ok_or_else(|| DriverError::NotFound(update_id.to_string()))?;
-    let _ = update.AcceptEula();
+    update.AcceptEula().map_err(map_err)?;
 
     let coll: IUpdateCollection =
         CoCreateInstance(&UpdateCollection, None, CLSCTX_INPROC_SERVER).map_err(map_err)?;
@@ -174,7 +195,16 @@ unsafe fn install_impl(
     });
     let downloader = session.CreateUpdateDownloader().map_err(map_err)?;
     downloader.SetUpdates(&coll).map_err(map_err)?;
-    downloader.Download().map_err(map_err)?;
+    let downloaded = downloader.Download().map_err(map_err)?;
+    let download_item = downloaded.GetUpdateResult(0).map_err(map_err)?;
+    let download_code = download_item.ResultCode().map_err(map_err)?;
+    let download_error = download_item.HResult().map_err(map_err)?;
+    if download_code != orcSucceeded || download_error < 0 {
+        return Err(DriverError::Install(format!(
+            "Driver download failed: result {}, HRESULT 0x{:08X}",
+            download_code.0, download_error as u32
+        )));
+    }
 
     on_progress(InstallProgress {
         stage: InstallStage::Installing,
@@ -185,18 +215,24 @@ unsafe fn install_impl(
     installer.SetUpdates(&coll).map_err(map_err)?;
     let res = installer.Install().map_err(map_err)?;
 
-    let code = res.ResultCode().map_err(map_err)?;
+    let item = res.GetUpdateResult(0).map_err(map_err)?;
+    let code = item.ResultCode().map_err(map_err)?;
+    let hresult = item.HResult().map_err(map_err)?;
     let reboot_required = res.RebootRequired().map(|b| b.0 != 0).unwrap_or(false);
-    let success = code == orcSucceeded || code == orcSucceededWithErrors;
+    let success = code == orcSucceeded && hresult >= 0;
 
     Ok(InstallReport {
         success,
         reboot_required,
         result_code: code.0,
         message: if success {
-            "Driver installed successfully.".to_string()
+            "Windows accepted the driver package. Active-version verification is pending."
+                .to_string()
         } else {
-            format!("Windows Update returned result code {}.", code.0)
+            format!(
+                "Windows Update returned result code {}, HRESULT 0x{:08X}.",
+                code.0, hresult as u32
+            )
         },
     })
 }

@@ -4,11 +4,12 @@ import { svelteTesting } from "@testing-library/svelte/vite";
 import path from "node:path";
 
 export default defineConfig({
-  plugins: [svelte({ hot: false }), svelteTesting()],
+  plugins: [svelte(), svelteTesting()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "src"),
-      "@testing-library/svelte": path.resolve(__dirname, "node_modules/@testing-library/svelte"),
+      "@": path.resolve(import.meta.dirname, "src"),
+      "@tauri-apps/api": path.resolve(import.meta.dirname, "node_modules/@tauri-apps/api"),
+      "@testing-library/svelte": path.resolve(import.meta.dirname, "node_modules/@testing-library/svelte"),
     },
   },
   test: {

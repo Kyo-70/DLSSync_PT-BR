@@ -1,25 +1,14 @@
 <p align="center">
   <a href="https://github.com/xt0n1-t3ch/DLSSync">
-    <img src="./.github/assets/nexus/banner-2560x720.png" alt="DLSSync — one trusted sync layer for DLSS, FSR, XeSS and drivers" width="100%"/>
+    <img src="./.github/assets/nexus/banner-2560x720.png" alt="DLSSync for Windows" width="100%"/>
   </a>
 </p>
 
-<p align="center">
-  <b>Auto-update DLSS, FSR, XeSS &amp; Streamline across all your games — plus GPU and Windows drivers — from one place.</b><br/>
-  DLSSync sits in the tray, starts with Windows, and keeps NVIDIA DLSS, AMD FSR, Intel XeSS, Frame Generation, Reflex, Streamline, Ray Reconstruction and Microsoft DirectStorage DLLs current across every launcher you use. It detects your games, checks for newer vendor releases, and applies updates with signature verification and a one-click rollback if anything goes wrong. GPU and Windows device drivers too. Zero telemetry, open-source, no admin required.
-</p>
+# DLSSync: a DLSS, FSR and XeSS updater for Windows
 
-<p align="center">
-  <sub>Also useful if you searched for: DLSS updater, DLSS swapper alternative, FSR updater, XeSS updater, Streamline updater, NVIDIA/AMD/Intel GPU driver updater for Windows.</sub>
-</p>
+DLSSync is a free, open-source DLSS updater for Windows 10/11 x64. It also works as an FSR updater and XeSS updater for supported DLLs already present in game folders, manages Streamline and DirectStorage sets, and includes a GPU driver updater for NVIDIA, AMD and Intel. Local SHA-256-verified backups and an operation journal help you inspect changes and restore retained DLL snapshots.
 
-<p align="center">
-  <b>⭐ If DLSSync keeps your games sharp, a star helps other gamers find it.</b>
-</p>
-
-<p align="center">
-  <sub><b>New in v1.7.0:</b> signed Trust Center, reviewable Update Plans, Operation Journal, CLI, real portable data isolation, and a Nexus-safe manual catalog refresh. See <a href="CHANGELOG.md#170---2026-07-10">CHANGELOG</a>.</sub>
-</p>
+**Release status:** version 1.7.0 is released for Windows 10/11 x64 as Standard and NexusBuild packages from one source commit. See the [1.7.0 changelog](CHANGELOG.md#170---unreleased) and read the signature statement in the release notes before running an installer.
 
 <p align="center">
   <a href="https://github.com/xt0n1-t3ch/DLSSync/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/xt0n1-t3ch/DLSSync?style=flat&color=0a0a0a&logo=github&logoColor=white"></a>
@@ -34,379 +23,142 @@
   <img alt="Rust" src="https://img.shields.io/badge/Rust-0a0a0a?style=flat&logo=rust&logoColor=white">
   <img alt="Tauri 2" src="https://img.shields.io/badge/Tauri%202-0a0a0a?style=flat&logo=tauri&logoColor=white">
   <img alt="Svelte 5" src="https://img.shields.io/badge/Svelte%205-0a0a0a?style=flat&logo=svelte&logoColor=white">
-  <img alt="Vite 6" src="https://img.shields.io/badge/Vite%206-0a0a0a?style=flat&logo=vite&logoColor=white">
+  <img alt="Vite" src="https://img.shields.io/badge/Vite-0a0a0a?style=flat&logo=vite&logoColor=white">
   <img alt="TypeScript 5" src="https://img.shields.io/badge/TypeScript%205-0a0a0a?style=flat&logo=typescript&logoColor=white">
   <img alt="Windows 10 / 11" src="https://img.shields.io/badge/Windows%2010%20%7C%2011-0a0a0a?style=flat&logo=windows11&logoColor=white">
 </p>
 
-<p align="center">
-  <a href="#what-is-dlssync">What is DLSSync</a>
-  &nbsp;·&nbsp;
-  <a href="#why">Why DLSSync</a>
-  &nbsp;·&nbsp;
-  <a href="#safety">Safety &amp; trust</a>
-  &nbsp;·&nbsp;
-  <a href="#features">Features</a>
-  &nbsp;·&nbsp;
-  <a href="#security">Security</a>
-  &nbsp;·&nbsp;
-  <a href="#download">Download</a>
-  &nbsp;·&nbsp;
-  <a href="#faq">FAQ</a>
-  &nbsp;·&nbsp;
-  <a href="#sponsor">Sponsor</a>
-  &nbsp;·&nbsp;
-  <a href="#license">License</a>
-</p>
+[Install](#download) · [Update a game](#update-a-game-in-one-click) · [Restore](#restore-a-backup) · [Drivers](#use-the-gpu-driver-updater) · [Fix errors](#fix-common-errors) · [Privacy](#privacy-and-network-behavior) · [All guides](docs/index.md)
 
----
+<h2 id="download">Choose and install a build</h2>
 
-<h2 id="what-is-dlssync"><img src="./.github/assets/icons/info.svg" width="26" align="center" alt=""/> &nbsp;What is DLSSync</h2>
-
-**DLSSync is a free, open-source app for Windows that updates everything making your PC games run and look better — from one place.** It keeps your upscaling and frame-generation libraries (NVIDIA DLSS, AMD FSR, Intel XeSS), plus NVIDIA Reflex, Streamline, Ray Reconstruction and Microsoft DirectStorage, in sync with each vendor's latest release — **and it updates your NVIDIA, AMD and Intel GPU drivers and other Windows device drivers too.**
-
-DLSSync detects every game installed via Steam, Epic Games, GOG Galaxy, Ubisoft Connect, EA Desktop, Xbox / Microsoft Store and Battle.net, then keeps the following DLL families synchronized with each vendor's latest publisher release.
-
-<table>
-  <thead>
-    <tr><th align="left">Vendor</th><th align="left">Family</th><th align="left">DLLs</th></tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td rowspan="5"><img src="https://cdn.simpleicons.org/nvidia/76b900" height="14" align="center" alt=""/>&nbsp;<b>NVIDIA</b></td>
-      <td>DLSS Super Resolution</td>
-      <td><code>nvngx_dlss.dll</code></td>
-    </tr>
-    <tr><td>DLSS Frame Generation</td><td><code>nvngx_dlssg.dll</code>, <code>sl.dlss_g.dll</code></td></tr>
-    <tr><td>DLSS Ray Reconstruction</td><td><code>nvngx_dlssd.dll</code>, <code>sl.dlss_d.dll</code></td></tr>
-    <tr><td>NVIDIA Streamline</td><td><code>sl.interposer.dll</code>, <code>sl.common.dll</code>, <code>sl.pcl.dll</code>, <code>sl.nis.dll</code></td></tr>
-    <tr><td>NVIDIA Reflex</td><td><code>sl.reflex.dll</code></td></tr>
-    <tr>
-      <td rowspan="3"><img src="https://cdn.simpleicons.org/intel/0071c5" height="14" align="center" alt=""/>&nbsp;<b>Intel</b></td>
-      <td>XeSS Super Resolution</td>
-      <td><code>libxess.dll</code>, <code>libxess_dx11.dll</code></td>
-    </tr>
-    <tr><td>XeSS Frame Generation</td><td><code>libxess_fg.dll</code></td></tr>
-    <tr><td>XeLL</td><td><code>libxell.dll</code></td></tr>
-    <tr>
-      <td rowspan="2"><img src="https://cdn.simpleicons.org/amd/ed1c24" height="14" align="center" alt=""/>&nbsp;<b>AMD</b></td>
-      <td>FidelityFX Super Resolution</td>
-      <td><code>amd_fidelityfx_*.dll</code>, <code>ffx_fsr3upscaler_x64.dll</code></td>
-    </tr>
-    <tr><td>FSR Frame Generation</td><td><code>ffx_frameinterpolation_x64.dll</code></td></tr>
-    <tr>
-      <td><img src="https://cdn.simpleicons.org/dotnet/512BD4" height="14" align="center" alt=""/>&nbsp;<b>Microsoft</b></td>
-      <td>DirectStorage</td>
-      <td><code>dstorage.dll</code>, <code>dstoragecore.dll</code></td>
-    </tr>
-  </tbody>
-</table>
-
-Replacements pass two independent signature checks. A hash mismatch against the signed catalog — or an Authenticode publisher mismatch — refuses the write. Every replaced DLL goes into a local SQLite snapshot store, so any change reverts in one click.
-
-**Beyond DLLs, DLSSync keeps the whole rig current.** The Drivers tab updates your NVIDIA, AMD and Intel GPU drivers — with per-card version history and signature-verified installs — and other Windows device drivers (audio, network, Bluetooth, chipset, storage and more) through the Windows Update Agent, with an anti-downgrade guard and a System Restore checkpoint before each install. It can also apply reversible NVIDIA DLSS preset and frame-generation overrides through the driver profile.
-
----
-
-<h2 id="why"><img src="./.github/assets/icons/sparkles.svg" width="26" align="center" alt=""/> &nbsp;Why DLSSync</h2>
-
-Most tools swap one DLL family. DLSSync keeps your whole graphics stack — and your drivers — current, with signature verification and one-click rollback built in.
-
-<table>
-  <thead>
-    <tr>
-      <th align="left">Capability</th>
-      <th align="center">DLSSync</th>
-      <th align="center">DLSS&nbsp;Swapper</th>
-      <th align="center">DLSS&nbsp;Updater</th>
-      <th align="center">Recol</th>
-      <th align="center">DLSS&nbsp;Enabler</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr><td>Update DLSS, FSR &amp; XeSS DLLs</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">➖</td></tr>
-    <tr><td>Frame Generation &amp; Ray Reconstruction DLLs</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">➖</td></tr>
-    <tr><td>NVIDIA Streamline set (<code>sl.*</code>) as one atomic, version-locked update</td><td align="center">✅</td><td align="center">❌</td><td align="center">➖</td><td align="center">❌</td><td align="center">➖</td></tr>
-    <tr><td>Auto-detect all launchers (Steam, Epic, GOG, Ubisoft, EA, Xbox, Battle.net)</td><td align="center">✅</td><td align="center">✅</td><td align="center">➖</td><td align="center">➖</td><td align="center">❌</td></tr>
-    <tr><td>Background daemon — tray, autostart, updates without opening the app</td><td align="center">✅</td><td align="center">❌</td><td align="center">➖</td><td align="center">❌</td><td align="center">❌</td></tr>
-    <tr><td>Update NVIDIA / AMD / Intel <b>GPU drivers</b></td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td><td align="center">❌</td><td align="center">❌</td></tr>
-    <tr><td>Update other <b>Windows device drivers</b> (audio, network, chipset…)</td><td align="center">✅</td><td align="center">❌</td><td align="center">❌</td><td align="center">❌</td><td align="center">❌</td></tr>
-    <tr><td>Signed-catalog hash <b>+ Authenticode</b> publisher gate before every write</td><td align="center">✅</td><td align="center">➖</td><td align="center">➖</td><td align="center">➖</td><td align="center">➖</td></tr>
-    <tr><td>Automatic backup + one-click rollback</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">➖</td><td align="center">❌</td></tr>
-    <tr><td>Single signed native binary — no Python or .NET runtime</td><td align="center">✅ <sub>(Rust)</sub></td><td align="center">❌ <sub>(.NET)</sub></td><td align="center">❌ <sub>(Python)</sub></td><td align="center">➖</td><td align="center">➖</td></tr>
-    <tr><td>Per-user install, no admin required</td><td align="center">✅</td><td align="center">✅</td><td align="center">➖</td><td align="center">✅</td><td align="center">➖</td></tr>
-    <tr><td>Zero telemetry · open-source</td><td align="center">✅</td><td align="center">✅</td><td align="center">✅</td><td align="center">➖</td><td align="center">❌</td></tr>
-  </tbody>
-</table>
-
-<sub>✅ yes · ➖ partial / varies · ❌ no. Competitor columns reflect publicly documented features as of June 2026 — corrections welcome via an <a href="https://github.com/xt0n1-t3ch/DLSSync/issues">issue</a>. DLSS Swapper and DLSS Updater are excellent, focused tools; Recol is a newer DLL manager worth watching; DLSS Enabler hooks the loader to unlock DLSS in unsupported titles — a different job that pairs well with DLSSync. <a href="https://github.com/optiscaler/OptiScaler">OptiScaler</a> solves yet another problem (injecting and translating upscalers across GPUs) and works alongside DLSSync too.</sub>
-
----
-
-<h2 id="safety"><img src="./.github/assets/icons/shield.svg" width="26" align="center" alt=""/> &nbsp;Safety &amp; trust</h2>
-
-Every catalog entry records its exact upstream asset and provenance. Current Streamline, Reflex, DirectStorage and the newest vendor builds come from first-party GitHub and NuGet releases (SHA-256); historical NVIDIA DLSS and much of the AMD FSR and Intel XeSS back-catalog use the established DLSS Swapper community archive (MD5), because those redistributables are not all exposed as stable first-party assets. DLSSync and its catalog repository never re-host, patch, or silently replace those binaries. Nothing goes into your game folder until it matches the hash recorded in the Ed25519-signed catalog and passes an Authenticode publisher check for NVIDIA, AMD, Intel, or Microsoft.
-
-The catalog itself is a public, auditable JSON file tracked in its own Git repository. Every entry carries its expected hash and the algorithm that produced it; verify any entry manually with `certutil -hashfile <dll> SHA256` for vendor-direct assets, or `certutil -hashfile <dll> MD5` for entries sourced from the DLSS Swapper archive. The app ships as an Apache 2.0 open-source project — every line of the update logic is readable in this repository.
-
----
-
-<h2 id="features"><img src="./.github/assets/icons/sparkles.svg" width="26" align="center" alt=""/> &nbsp;Features</h2>
-
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <h4>Hash-verified DLLs</h4>
-      Every DLL is hash-checked against the public CDN-hosted catalog before it lands in your game folder — SHA-256 for vendor-direct assets, MD5 for DLSS Swapper-archived history.
-    </td>
-    <td width="50%" valign="top">
-      <h4>Authenticode publisher gate</h4>
-      The signer subject is verified against the known NVIDIA, AMD, Intel and Microsoft publisher certificates. The app never re-signs or repackages.
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <h4>One-click rollback</h4>
-      Every replaced DLL goes into a local SQLite snapshot store. The Backups tab restores any snapshot in a single click.
-    </td>
-    <td valign="top">
-      <h4>Ed25519-signed auto-update</h4>
-      The app checks GitHub Releases on a 6 hour cadence. The bottom-left banner downloads, verifies and restarts. Tampered payloads are rejected.
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <h4>Under 100 MB idle RAM</h4>
-      Windows EcoQoS Efficiency Mode stays active while the toggle is enabled, keeping idle CPU near 0 percent. Task Manager shows the green leaf badge.
-    </td>
-    <td valign="top">
-      <h4>Zero telemetry</h4>
-      No analytics, accounts, inventory upload, or tracking. Network access is limited to app/catalog checks allowed by the distribution, the exact upstream asset you choose, optional cover-art lookup, and explicit driver operations.
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <h4>Per-user install, no admin</h4>
-      NSIS installer in <code>currentUser</code> mode. Installs to <code>%LOCALAPPDATA%\DLSSync\</code>. No UAC prompt, no driver, no kernel hook.
-    </td>
-    <td valign="top">
-      <h4>Every Windows launcher</h4>
-      Steam, Epic, GOG, Ubisoft, EA, Xbox, Battle.net, plus arbitrary custom folders for portable installs.
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
-      <h4>GPU &amp; system driver updates</h4>
-      Update NVIDIA, AMD and Intel GPU drivers with per-card version history and signature-verified installs, plus other Windows device drivers via the Windows Update Agent — with an anti-downgrade guard and a System Restore checkpoint.
-    </td>
-    <td valign="top">
-      <h4>DLSS presets &amp; frame-gen overrides</h4>
-      Apply reversible DLSS preset and frame-generation overrides through the NVIDIA driver profile (NVAPI) — the same mechanism the NVIDIA App uses, never injection.
-    </td>
-  </tr>
-</table>
-
----
-
-<h2 id="security"><img src="./.github/assets/icons/shield.svg" width="26" align="center" alt=""/> &nbsp;Security</h2>
-
-The app gates every DLL replacement behind two independent signature checks.
-
-| Layer | Mechanism | Refuses |
-|---|---|---|
-| Update payload | Ed25519 signature over the NSIS bundle | An update whose signature does not verify against the embedded public key |
-| DLL replacement | Catalog hash (SHA-256, or MD5 for archived history) plus Authenticode publisher subject match | A DLL not signed by NVIDIA, AMD, Intel or Microsoft |
-| Rollback | Local SQLite snapshot of every replaced file before the write | Nothing. Restore is offline and instant |
-
-The DLL-sync path has no driver, no kernel-mode hook, no in-process injection — it reads and writes DLL files inside the game's own install directory. Two opt-in features reach beyond that path and are documented separately: the GPU driver updater downloads and launches the vendor's own signed installer (which self-elevates through UAC; DLSSync never elevates itself — see [docs/drivers.md](docs/drivers.md)), and the DLSS preset / frame-generation overrides write a reversible NVIDIA driver application profile through NVAPI, the same mechanism the NVIDIA app uses, not injection (see [docs/dlss-overrides.md](docs/dlss-overrides.md)). Every network call is unauthenticated and visible from `Settings > Detection`.
-
----
-
-<h2 id="download"><img src="./.github/assets/icons/download.svg" width="26" align="center" alt=""/> &nbsp;Download</h2>
+Download Standard from [GitHub Releases](https://github.com/xt0n1-t3ch/DLSSync/releases/latest), or choose the Nexus channel from [Nexus Mods, mod 1922](https://www.nexusmods.com/site/mods/1922). Check the channel as well as the version before installing.
 
 <p align="center">
   <a href="https://github.com/xt0n1-t3ch/DLSSync/releases/latest">
-    <img src="./.github/assets/download-button.svg" alt="Download DLSSync v1.7.0 for Windows 10 / 11" width="520"/>
+    <img src="./.github/assets/download-button.svg" alt="Download available DLSSync releases for Windows" width="520"/>
   </a>
 </p>
 
-Each release ships three formats:
-
-- **`*-setup.exe` (NSIS, recommended)** — per-user install to `%LOCALAPPDATA%\DLSSync\`, no admin prompt, Add/Remove Programs entry, and silent in-app auto-update.
-- **`*.msi` (Windows Installer)** — a standard MSI for users and IT who prefer `msiexec` / Group Policy deployment (per-machine; smoke-installed in CI on every release).
-- **`*-portable.zip`** — no installer; lowest friction.
-
-**First run — the "unknown publisher" prompt.** DLSSync is not yet code-signed, so Windows SmartScreen may show *"Windows protected your PC"* once per version. This is **not** a virus warning — it appears for any new publisher without an established reputation. Click **More info → Run anyway**. Full, sourced explanation (and the real fixes we keep on file) in [docs/signing-reality.md](docs/signing-reality.md).
-
-CLI alternative:
-
-```pwsh
-gh release download --repo xt0n1-t3ch/DLSSync --pattern "*setup.exe"
-.\DLSSync_*_x64-setup.exe
-```
-
----
-
-<h2 id="build"><img src="./.github/assets/icons/terminal.svg" width="26" align="center" alt=""/> &nbsp;Build from source</h2>
-
-Prerequisites: Rust stable (`rust-toolchain.toml` pins the version), Node 22 LTS, pnpm 9.
-
-```pwsh
-git clone https://github.com/xt0n1-t3ch/DLSSync.git
-cd DLSSync
-pnpm install
-pnpm tauri dev
-```
-
-Release build:
-
-```pwsh
-pnpm tauri build
-```
-
-CI validators (run before opening a PR):
-
-```pwsh
-pnpm fmt:rust:check
-pnpm lint:rust
-pnpm --filter dlssync-frontend check
-pnpm --filter dlssync-frontend build
-cargo check --workspace
-```
-
----
-
-<h2 id="footprint"><img src="./.github/assets/icons/gauge.svg" width="26" align="center" alt=""/> &nbsp;Footprint</h2>
-
-| Metric | Target | Measured |
+| Channel policy | Standard | Nexus (`NexusBuild-` assets) |
 |---|---|---|
-| Installer | under 10 MB | 4.5 MB |
-| Cold start | under 500 ms | yes |
-| Idle RAM | under 100 MB | yes |
-| Idle CPU with Efficiency Mode enabled | about 0 percent | yes (EcoQoS active) |
+| App self-updater | Included for installed mode | Absent; install app updates manually |
+| Automatic catalog refresh | Allowed | Disabled |
+| Catalog refresh button | Available | Explicit manual refresh only |
+| Other network actions | See the network section below | Must be explicit and manual |
+| v1.7.0 release rule | One `v1.7.0` tag | Same tag and source commit; distinct `NexusBuild-` names |
 
----
+These are the v1.7.0 channel requirements, not a certification of published packages. The current checkout still needs packaged network and artifact verification described in [Nexus build rules and verification](docs/nexus-build.md). Do not assume an arbitrary development build satisfies the full manual-only network rule.
 
-<h2 id="roadmap"><img src="./.github/assets/icons/map.svg" width="26" align="center" alt=""/> &nbsp;Roadmap</h2>
+Choose an available Windows x64 format:
 
-- [x] v1.0: Windows portable, NSIS installer, auto-update banner, tray, EcoQoS Efficiency Mode, all 7 launchers, hash and Authenticode gates, Apache 2.0.
-- [x] v1.2: Apply pipeline hardening — shared per-URL download cache, streaming downloads with retry ladder, per-apply cancellation, failure-centric apply modal, tray inflight badge.
-- [x] v1.5: GPU driver updater for NVIDIA, AMD and Intel with per-card version history and signature-verified installs; DLSS preset and frame-generation overrides through the NVIDIA driver profile; per-game anti-cheat and anti-tamper detection; broader FSR and XeSS coverage; redesigned Library, Drivers tab and game drawer.
-- [x] v1.6: NVIDIA Streamline set updater with version-scheme awareness, a background-update daemon (scheduled scans, system tray, one-click Apply All, run-at-startup), apply-time anti-cheat ban-risk warnings, Ed25519-signed manifests, and English/Spanish localization.
-- [ ] Next: SignPath OSS Authenticode signing to remove the SmartScreen warning on first run.
-- [ ] Later: per-DLL changelog viewer with a diff against the installed build, and custom catalog sources for community-maintained DLL trees.
+- **NSIS `*-setup.exe`:** current-user installation, configured for `%LOCALAPPDATA%\DLSSync\`. This is the normal Standard self-update route.
+- **MSI `*.msi`:** Windows Installer package for MSI-based deployment. Check your deployment permissions; the app updater is not an MSI deployment mechanism.
+- **Portable `*-portable.zip`:** extract the whole archive to a writable folder. Keep `portable.flag` beside the executable. State lives in its `data` folder and in-app app updates are disabled. Nexus portable mode retains the stricter Nexus network policy.
 
----
+The desktop UI uses Microsoft WebView2. Installation, driver work and writes to protected game folders can have different permission requirements. If Windows warns about the download, stop and verify the source and the exact file; do not disable Windows protection to make it run. Windows code signing is optional in the release workflow, so this repository does not establish that a downloaded installer is signed. See [download verification and Windows warnings](docs/signing-reality.md).
 
-<h2 id="faq"><img src="./.github/assets/icons/help-circle.svg" width="26" align="center" alt=""/> &nbsp;FAQ</h2>
+## Update a game in one click
 
-<details>
-<summary><b>How is this different from DLSS Updater or DLSS Swapper?</b></summary>
+Close the game before changing its DLLs. Updating an existing integration does not add DLSS, FSR, XeSS or frame generation to a game that lacks it.
 
-<br/>
+1. Open **Library** and scan. Discovery supports Steam, Epic Games, GOG Galaxy, Ubisoft Connect, EA Desktop, Xbox/Microsoft Store and Battle.net. It is not exhaustive.
+2. If a game is missing, add its install folder through Settings and scan again. Use the actual game directory, not a drive root or Windows folder.
+3. Open the game details to inspect detected components, versions and warnings. Check the game's policy before changing files in a protected or online game. An absent warning does not prove safety.
+4. Choose the game's update action to start a one-click update using the selected components. The app prepares and validates the operation; routine updates do not need a separate confirmation. Integrity, compatibility, running-game or stale-file checks can still stop it.
+5. Read the per-file result, then launch and test the game. A completed file operation does not prove the game works correctly.
 
-DLSSync writes the new DLL into the game's own folder. It does not symlink, hook the loader or proxy load. The whole project ships as a single signed binary. No Python runtime, no .NET dependency. The hash and Authenticode gates are mandatory by default and configurable in `Settings > Advanced` for development builds. Apache 2.0 and you can read every line in this repository.
+Use **Refresh Catalog** when you explicitly want newer catalog information, particularly on Nexus. Version pins and feature switches affect which candidates are offered. [Versions and compatibility](docs/versions-and-compatibility.md) explains why a component can have no update target even when a newer-looking number exists.
 
-</details>
+The [DLSS/FSR/XeSS family map](docs/dll-families.md) identifies DLLs by role. [Streamline sets](docs/streamline.md) explains why related `sl.*.dll` members move together. DirectStorage's `dstorage.dll` and `dstoragecore.dll` also belong to a matched package; do not substitute one unrelated DLL manually.
 
-<details>
-<summary><b>Does it work with anti-cheat?</b></summary>
+## Restore a backup
 
-<br/>
+Close the game, open **Backups**, locate the snapshot for the affected game and choose **Restore**. This is a one-click restore action for a retained snapshot, not an unconditional recovery guarantee.
 
-The app writes a DLL into the game's own install directory. That is the same operation a manual file swap performs. Anti-cheat systems that detect modified game files (Easy Anti-Cheat, BattlEye, Riot Vanguard, Denuvo Anti-Tamper) treat a swapped DLL — and, in online titles, a forced DLSS driver-profile override — as a tampered file, which can lead to a kick or ban. There are confirmed reports of bans after both.
+DLL restoration uses local snapshot files and validates their SHA-256. Missing or damaged snapshots, file locks, invalid paths, permissions and disk errors can prevent restoration. Inspect the operation result and journal before retrying. Do not delete backup data while investigating a failed rollback. See [restore a backup](docs/restoring-backups.md), including separate limits for driver recovery.
 
-DLSSync detects anti-cheat per game (a local scan of the install folder for known anti-cheat binaries, plus a community dataset bundled into the manifest, matched by Steam app id or name) and shows a warning before any DLL swap or DLSS override. It never blocks the action — it surfaces the risk so the choice is yours. Check the policy of your specific title before applying.
+## Use the GPU driver updater
 
-</details>
+Open **Drivers**, check the detected GPU and installed version, and review the available package and release notes. Start the install action when a verified direct package is available. The AMD source does not synthesize an installer URL. It uses an observed official AMD page, so the AMD action opens that page for package selection.
 
-<details>
-<summary><b>Does the app phone home?</b></summary>
+The app downloads the selected GPU installer, verifies its Authenticode publisher and launches it. Windows may request administrator approval. Follow any vendor UI and reboot request, then recheck the active driver version: a successful installer exit is not proof that Windows loaded the intended version.
 
-<br/>
+Windows device-driver updates use Windows Update Agent through a separate system-driver path. That path can attempt a driver export and System Restore checkpoint when snapshot inputs are supplied; neither is guaranteed to succeed. Do not treat GPU or Windows driver installation as universally reversible. Read the [GPU and Windows driver guide](docs/drivers.md).
 
-DLSSync has no telemetry endpoint. Its functional network traffic is:
+## Understand versions, presets and optional mods
 
-- `api.github.com` for the release update check, capped at one request every 6 hours.
-- `cdn.jsdelivr.net` for the DLL catalog manifest.
-- `cdn.cloudflare.steamstatic.com` and `cdn2.steamgriddb.com` for game cover art, only if the art is not already cached locally.
-- The exact `cdn_url` recorded in the signed catalog when you download a selected DLL. Most current rows use vendor GitHub/NuGet assets; labeled historical rows can use the DLSS Swapper community archive.
-- For the GPU driver updater, only when you open the Drivers tab or install a driver: `gfwsl.geforce.com` and `raw.githubusercontent.com/ZenitH-AT/nvidia-data` (NVIDIA), `dsadata.intel.com` (Intel), and the AMD driver host (AMD).
+A catalog package version and a DLL's internal file version can differ. **Unknown**, experimental, ahead-of-catalog and incompatible states are not interchangeable. A correct hash proves a match to expected bytes, not game or hardware compatibility. Read [versions and compatibility](docs/versions-and-compatibility.md) before forcing a historical or experimental candidate.
 
-Requests are unauthenticated. DLSSync never uploads the library as a batch or sends a tracking identifier. Optional artwork lookup sends the individual game title being resolved, and vendor driver endpoints receive the compatibility parameters required to identify a matching package.
+NVIDIA profile overrides are separate from copying DLLs. Use [DLSS presets and frame-generation overrides](docs/dlss-overrides.md) for per-game versus global scope, reset behavior and capability limits. [Optional mods](docs/optional-mods.md) explains why detecting DLSS Enabler or OptiScaler is not a promise that arbitrary mod combinations work.
 
-</details>
+## Fix common errors
 
-<details>
-<summary><b>Why Windows only?</b></summary>
+| Problem | First action |
+|---|---|
+| Game missing or no supported DLLs | Check the install folder and rescan; discovery does not add absent integrations. |
+| Game running or DLL locked | Close the game normally, wait for it to exit, then retry. |
+| Hash or publisher mismatch | Stop. Refresh the catalog explicitly and inspect the source; do not bypass verification. |
+| Permission or backup failure | Check write access and free space; preserve backups and the journal. |
+| Missing asset or incompatible architecture | Do not substitute a similarly named DLL. Record the family, version and error. |
+| Rollback failed | Open Backups and inspect recovery evidence before another update. |
 
-<br/>
+Use the [error-message reference](docs/error-messages.md) for exact classes and [diagnostics guide](docs/troubleshooting.md) for logs. Review and redact diagnostics **before** opening a prefilled GitHub issue URL: its encoded contents are sent to GitHub when the browser opens it, before you submit an issue.
 
-Linux support is coming soon as more testing is needed.
+## Verification layers
 
-</details>
+These checks answer different questions:
 
-<details>
-<summary><b>How do I roll back if an update breaks a game?</b></summary>
+- **Catalog signature:** Ed25519 verifies the signed metadata. The [catalog repository](https://github.com/xt0n1-t3ch/DLSSync-Manifest) is separate from the app.
+- **Artifact digest:** the catalog records the expected algorithm and hash. Historical entries can use MD5; other entries use SHA-256. Do not relabel an MD5 check as SHA-256.
+- **Publisher verification:** Authenticode checks publisher identity and Windows trust separately from the digest. Publisher subject allowlisting is not certificate pinning. Do not use advanced unsigned-file settings as a routine error fix.
+- **Backup integrity:** SHA-256 verifies retained snapshot bytes for restore.
+- **Standard app-update signature:** Tauri verifies its signed update payload. This is not the same as Windows Authenticode signing of the installer.
 
-<br/>
+Catalog sources include first-party releases and labeled DLSS Swapper community-archive history. An original vendor signature does not make an archive a first-party distribution source. None of these checks proves that a particular game, GPU or mod combination works.
 
-Open the Backups tab. Every DLL the app has replaced is listed with the timestamp, original version, SHA-256 and a Restore button. Snapshots live at `%USERPROFILE%\DLSSync\Backups\` as plain files and you can copy them out manually.
+## Privacy and network behavior
 
-</details>
+The repository has no telemetry endpoint. Functional network requests still disclose information to their destinations, and enabled features can contact more than one host:
 
-<details>
-<summary><b>Can I pin a specific DLL version?</b></summary>
+- **App and catalog checks:** Standard allows automatic checks; Nexus disables app self-update and automatic catalog refresh. Catalog requests retrieve the manifest and detached signature through the configured CDN.
+- **DLL downloads:** the exact source URL recorded for the selected artifact can point to vendor GitHub/NuGet assets or community history.
+- **Artwork:** Steam artwork and optional SteamGridDB lookup can fetch images. SteamGridDB searches send an individual game title and use bearer authentication with the configured API key.
+- **GPU checks and downloads:** vendor services receive compatibility parameters used to resolve a package. The current Drivers, Catalog and Settings code can initiate driver checks; this is not limited to clicking Install or opening Drivers. See the unresolved Nexus scope in [the channel guide](docs/nexus-build.md).
+- **Windows drivers:** Windows Update Agent uses Windows update services for applicable device-driver operations.
+- **Public links and diagnostics:** opening release notes, source, support or a prefilled issue contacts the destination in your browser. Standard's community star-count lookup can also contact GitHub; Nexus disables that lookup.
 
-<br/>
+The app does not batch-upload the game library. This does not mean all requests are unauthenticated or contain no device/game information. No channel-specific packet capture was performed for this documentation review.
 
-Yes. In the game detail drawer, every DLL family has a version picker covering every release tracked in the catalog, including historical and experimental builds. Pinned versions are stored in `settings.json` and survive rescans.
+## Where your data lives
 
-</details>
+| Mode | Data root |
+|---|---|
+| Installed, Standard or Nexus | `%USERPROFILE%\DLSSync\` |
+| Portable, with `portable.flag` beside the executable | `data\` beside that executable |
 
-<details>
-<summary><b>Does it touch DRM, Denuvo or anti-cheat binaries?</b></summary>
+Within that root, `Backups\` contains snapshot files and `backups.db`; `Settings\settings.json` stores preferences; `Logs\` holds logs; and `Cache\` includes catalog data, `notifications.db` and the durable `operations.db` journal. Despite its directory name, do not delete the entire Cache folder as a generic troubleshooting step: it contains operation history. Use the app's folder-opening actions to find the active paths.
 
-<br/>
+## Build from source and contribute
 
-No. The app reads and writes DLL files inside the game directory. It never patches executables, never touches DRM binaries, never alters anti-cheat files.
+The stack is Tauri v2, Svelte and Rust. Use the Node and pnpm versions declared in [package.json](package.json), the Rust toolchain in [rust-toolchain.toml](rust-toolchain.toml), and Windows native build prerequisites described in [CONTRIBUTING.md](CONTRIBUTING.md). From a prepared checkout:
 
-</details>
+```powershell
+pnpm install
+pnpm dev
+```
 
----
+`pnpm build` packages the Standard app. See [repository instructions and validation gates](AGENTS.md), [architecture](docs/architecture-1.7.md) and the [test index](tests/index.md). Current installer size, startup time, RAM and CPU measurements are not verified; no footprint numbers are promised here. Windows 10/11 x64 is the supported platform; no Linux release date is promised.
 
-<h2 id="contributing"><img src="./.github/assets/icons/git-pull-request.svg" width="26" align="center" alt=""/> &nbsp;Contributing</h2>
+For alternatives, use the [dated comparison matrix](docs/competitive-comparison.md). Unverified competitor capabilities are labeled as such; DLSSync does not claim to be another project's successor.
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). Branch off `main`, keep commits focused, run the validator chain before opening a PR.
+<h2 id="author">Author and support</h2>
 
----
-
-<h2 id="author"><img src="./.github/assets/icons/user.svg" width="26" align="center" alt=""/> &nbsp;Author</h2>
-
-<p>
-  <a href="https://github.com/xt0n1-t3ch">
-    <img src="https://cdn.simpleicons.org/github/ffffff" height="18" align="center" alt=""/>
-    &nbsp;github.com/xt0n1-t3ch
-  </a>
-  &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="https://discord.com/users/211189703641268224">
-    <img src="https://cdn.simpleicons.org/discord/ffffff" height="18" align="center" alt=""/>
-    &nbsp;Discord
-  </a>
-  &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="https://xt0n1.com">
-    <img src="./.github/assets/icons/globe.svg" height="18" align="center" alt=""/>
-    &nbsp;xt0n1.com
-  </a>
-</p>
-
-If DLSSync saved you a manual DLL swap, a star on the repository helps other gamers find it.
-
----
+[GitHub](https://github.com/xt0n1-t3ch) · [Discord](https://discord.com/users/211189703641268224) · [Author website](https://xt0n1.com) · [Report an issue](https://github.com/xt0n1-t3ch/DLSSync/issues)
 
 <h2 id="sponsor">Sponsor</h2>
 
-DLSSync is built and maintained on free time. Zero telemetry, no paid tier, no upsell. If the app saves you time or you want it to keep tracking new releases, a sponsorship covers the manifest CI, the auto-update signing, and the hours that keep the catalog fresh.
+You can support maintenance through the existing sponsorship links.
 
 <p>
   <a href="https://ko-fi.com/xt0n1"><img alt="Ko-fi" src="https://img.shields.io/badge/Ko--fi-ff5e5b?style=flat&logo=kofi&logoColor=white"></a>
@@ -414,10 +166,6 @@ DLSSync is built and maintained on free time. Zero telemetry, no paid tier, no u
   <a href="https://www.paypal.me/xt0n1"><img alt="PayPal" src="https://img.shields.io/badge/PayPal-003087?style=flat&logo=paypal&logoColor=white"></a>
 </p>
 
----
+<h2 id="license">License and attribution</h2>
 
-<h2 id="license"><img src="./.github/assets/icons/scale.svg" width="26" align="center" alt=""/> &nbsp;License</h2>
-
-Apache 2.0. See [`LICENSE`](LICENSE) and the attribution in [`NOTICE`](NOTICE).
-
-DLSSync is an independent open-source project. It is not endorsed by, sponsored by or affiliated with NVIDIA, Intel, AMD or Microsoft. DLSS, NVIDIA, GeForce, RTX, Reflex and Streamline are trademarks of NVIDIA Corporation. XeSS, Xe and Arc are trademarks of Intel Corporation. FidelityFX, FSR and Radeon are trademarks of Advanced Micro Devices, Inc. DirectStorage, DirectX and Windows are trademarks of Microsoft Corporation. Every redistributed vendor DLL retains its original Authenticode signature.
+DLSSync uses Apache 2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE). It is an independent project, not endorsed by, sponsored by or affiliated with NVIDIA, Intel, AMD or Microsoft. Their product names and trademarks belong to their respective owners. See the [documentation index](docs/index.md) for user and contributor references.

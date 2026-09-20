@@ -1,9 +1,11 @@
 import { get, writable } from "svelte/store";
 import type { ApplyTarget } from "../../lib/applyController";
+import type { UpdatePlan } from "../../lib/api";
 
 export interface ReviewedUpdatePlan {
   targets: ApplyTarget[];
   catalogGeneratedAt: string;
+  plan?: UpdatePlan;
 }
 
 interface PendingPlan {
@@ -12,11 +14,6 @@ interface PendingPlan {
 }
 
 export const pendingUpdatePlan = writable<PendingPlan | null>(null);
-
-export function reviewUpdatePlan(targets: ApplyTarget[]): Promise<ReviewedUpdatePlan | null> {
-  if (get(pendingUpdatePlan)) return Promise.resolve(null);
-  return new Promise((resolve) => pendingUpdatePlan.set({ targets, resolve }));
-}
 
 export function completeUpdatePlan(result: ReviewedUpdatePlan | null): void {
   const pending = get(pendingUpdatePlan);

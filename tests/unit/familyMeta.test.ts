@@ -73,10 +73,10 @@ describe("vendor resolution is consistent across all three tables", () => {
 });
 
 describe("the formerly-disagreeing families resolve one way now", () => {
-  it("streamline_direct_sr is microsoft everywhere (DirectSR wrapped in Streamline)", () => {
-    expect(vendorForFamily("streamline_direct_sr")).toBe("microsoft");
-    expect(FAMILY_TO_VENDOR["streamline_direct_sr"]).toBe("microsoft");
-    expect(FAMILY_META.streamline_direct_sr.vendor).toBe("microsoft");
+  it("streamline_direct_sr is nvidia everywhere (DirectSR wrapped in Streamline)", () => {
+    expect(vendorForFamily("streamline_direct_sr")).toBe("nvidia");
+    expect(FAMILY_TO_VENDOR["streamline_direct_sr"]).toBe("nvidia");
+    expect(FAMILY_META.streamline_direct_sr.vendor).toBe("nvidia");
   });
 
   it("direct_storage_core is microsoft everywhere", () => {

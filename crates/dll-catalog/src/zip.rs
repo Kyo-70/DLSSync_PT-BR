@@ -22,6 +22,9 @@ pub fn extract_dll_from_bytes(
     release: &Release,
     dest_dir: &Path,
 ) -> Result<PathBuf, CatalogError> {
+    if !crate::v3::safe_filename(&release.filename) {
+        return Err(CatalogError::Unsafe("invalid target DLL filename".into()));
+    }
     let algo =
         HashAlgo::from_hex_len(&release.sha256).ok_or_else(|| CatalogError::BadCatalogSha {
             filename: release.filename.clone(),
@@ -30,6 +33,15 @@ pub fn extract_dll_from_bytes(
                 release.sha256.len()
             ),
         })?;
+    if !matches!(
+        (algo, release.hash_algorithm.as_str()),
+        (HashAlgo::Sha256, "sha256") | (HashAlgo::Md5, "md5")
+    ) {
+        return Err(CatalogError::BadCatalogSha {
+            filename: release.filename.clone(),
+            reason: "digest and declared algorithm disagree".into(),
+        });
+    }
     std::fs::create_dir_all(dest_dir)?;
     let out_path = dest_dir.join(&release.filename);
 
@@ -78,6 +90,7 @@ pub fn extract_dll_from_bytes(
             ))
         })?;
         let mut entry = zip.by_index(target)?;
+        crate::ensure_available_space(dest_dir, entry.size())?;
         let out = std::fs::File::create(&out_path)?;
         let mut limited = LimitedWriter::new(out, MAX_UNCOMPRESSED_ENTRY_BYTES);
         if let Err(e) = std::io::copy(&mut entry, &mut limited) {
@@ -93,6 +106,10 @@ pub fn extract_dll_from_bytes(
             return Err(CatalogError::Io(e));
         }
     } else {
+        if bytes.len() as u64 > MAX_UNCOMPRESSED_ENTRY_BYTES {
+            return Err(CatalogError::Unsafe("DLL exceeds the size limit".into()));
+        }
+        crate::ensure_available_space(dest_dir, bytes.len() as u64)?;
         std::fs::write(&out_path, bytes)?;
     }
 
@@ -160,6 +177,9 @@ fn normalize_zip_path(p: &Path) -> String {
 fn select_zip_entry(candidates: &[(usize, String)], release: &Release) -> Option<usize> {
     if let Some(want) = &release.zip_entry {
         let want = want.replace('\\', "/");
+        if !crate::v3::safe_archive_entry(&want, &release.filename) {
+            return None;
+        }
         return candidates
             .iter()
             .find(|(_, path)| path.eq_ignore_ascii_case(&want))
@@ -174,11 +194,14 @@ fn select_zip_entry(candidates: &[(usize, String)], release: &Release) -> Option
                 .eq_ignore_ascii_case(&release.filename)
         })
         .collect();
-    basename_matches
+    let production: Vec<_> = basename_matches
         .iter()
-        .find(|(_, path)| !path.to_ascii_lowercase().contains("/development/"))
-        .or_else(|| basename_matches.first())
-        .map(|(i, _)| *i)
+        .filter(|(_, path)| {
+            !path.to_ascii_lowercase().contains("/development/")
+                && crate::v3::safe_archive_entry(path, &release.filename)
+        })
+        .collect();
+    (production.len() == 1).then(|| production[0].0)
 }
 
 fn reject_unsafe_components(path: &Path, raw_name: &str) -> Result<(), CatalogError> {
@@ -232,6 +255,7 @@ mod tests {
 
     fn make_release(filename: &str, cdn_url: &str, dll_sha: &str, size: u64) -> Release {
         Release {
+            artifact: None,
             version: "1.0.0".into(),
             version_packed: 0,
             filename: filename.into(),
@@ -246,7 +270,11 @@ mod tests {
             channel: "stable".into(),
             is_dev: false,
             min_driver: None,
-            hash_algorithm: "sha256".into(),
+            hash_algorithm: if dll_sha.len() == 32 {
+                "md5".into()
+            } else {
+                "sha256".into()
+            },
             zip_entry: None,
         }
     }

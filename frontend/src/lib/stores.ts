@@ -35,6 +35,7 @@ import {
   type AppSettings,
   type DllRecord,
   type GameArt,
+  type ArtResolveTrigger,
   type DriverStatusReport,
   type DriverReleaseDto,
   type DriverInstallProgress,
@@ -46,7 +47,9 @@ import {
   type BackgroundConfig,
   DEFAULT_BACKGROUND_CONFIG,
 } from "./api";
-import { sortDriverReports, hasDriverUpdate, driverPageUrl } from "./drivers";
+import { sortDriverReports, hasDriverUpdate, driverPageUrl, driverPrimaryAction } from "./drivers";
+import { authoritativeState } from "./stateSync";
+import { artSrc, needsArtResolution } from "./gameArt";
 import { vendorLabel, familyLabel, familyShort, type UpdateStatus } from "./labels";
 import { vendorForFamily } from "./ux";
 import {
@@ -65,6 +68,8 @@ import {
   type NotificationKind,
 } from "./notifications";
 import { detectRevertedSwaps, type RevertedSwap } from "./revertDetect";
+import { createUiPreferenceWriter } from "./uiPreferences";
+import { hardwarePreferenceFor, preferredFamily, defaultUpdateFamily } from "./hardwarePreference";
 
 const CATALOG_UPDATE_NOTIFICATION_CAP = 5;
 
@@ -184,6 +189,29 @@ function emitSystemDriverUpdateNotification(groups: SystemDeviceGroup[]): void {
 }
 
 export const currentView: Writable<string> = writable("library");
+
+export const systemInfo: Writable<SystemInfo | null> = writable(null);
+let systemInfoPromise: Promise<SystemInfo> | null = null;
+
+export function ensureSystemInfo(): Promise<SystemInfo> {
+  if (!systemInfoPromise) {
+    systemInfoPromise = getSystemInfo().then((si) => {
+      systemInfo.set(si);
+      return si;
+    });
+    systemInfoPromise.catch(() => {
+      systemInfoPromise = null;
+    });
+  }
+  return systemInfoPromise;
+}
+
+export const fsr4Capable: Readable<boolean> = derived(systemInfo, ($si) =>
+  ($si?.gpus ?? []).some((g) => g.fsr4_capable),
+);
+
+export const driverReports: Writable<DriverStatusReport[]> = writable([]);
+export const hardwarePreference = derived([systemInfo, driverReports], ([$info, $reports]) => hardwarePreferenceFor($info, $reports));
 
 export const games: Writable<DetectedGame[]> = writable([]);
 export const scanInProgress: Writable<boolean> = writable(false);
@@ -318,7 +346,7 @@ export interface ApplyTracker {
   attempt: number | null;
   bytes_downloaded: number;
   bytes_total: number | null;
-  bytes_per_sec: number;
+  bytes_per_sec: number | null;
   started_at: number;
   ended_at: number | null;
 }
@@ -331,7 +359,7 @@ export interface GroupDownloadState {
   url: string;
   bytes_downloaded: number;
   bytes_total: number | null;
-  bytes_per_sec: number;
+  bytes_per_sec: number | null;
   attempt: number;
   last_update: number;
 }
@@ -352,9 +380,17 @@ export const relationContext: Readable<RelationContext> = derived(
 );
 
 export const gameStatuses: Readable<GameStatusMap> = derived(
-  [games, gameDlls, gameDllErrors, relationContext, settings],
-  ([$games, $dlls, $errs, $ctx, $settings]) => {
+  [games, gameDlls, gameDllErrors, relationContext, settings, authoritativeState],
+  ([$games, $dlls, $errs, $ctx, $settings, $authoritative]) => {
     const out: GameStatusMap = {};
+    if ($authoritative.emitterId !== null) {
+      for (const game of $games) {
+        const state = $authoritative.games.find((entry) => entry.id === game.id)?.status;
+        out[game.id] = state === "update_available" ? "outdated"
+          : state === "current" ? "up_to_date" : state === "no_components" ? "no_dlls" : "unknown";
+      }
+      return out;
+    }
     const prefs = $settings?.update_prefs ?? null;
     for (const g of $games) {
       const gamePrefs = $settings?.game_preferences[g.id];
@@ -480,9 +516,23 @@ export const libraryZones: Readable<LibraryZones> = derived(
 );
 
 export const outdatedGameCount: Readable<number> = derived(
-  [games, gameStatuses, hiddenIds],
-  ([$games, $statuses, $hidden]) =>
-    $games.reduce((n, g) => (!$hidden.has(g.id) && $statuses[g.id] === "outdated" ? n + 1 : n), 0),
+  [games, gameStatuses, hiddenIds, authoritativeState, hardwarePreference, gameDlls, settings, relationContext],
+  ([$games, $statuses, $hidden, $authoritative, $preference]) => {
+    // Whether a game has an applicable update is a Rust decision: `update_available` is published
+    // per game and keeps `unchecked`, `unknown`, `no_components` and `non_actionable` distinct.
+    // Hiding a game is a local presentation preference, so that filter stays here.
+    if ($authoritative.emitterId !== null) {
+      return $authoritative.games.reduce(
+        (n, game) => (!$hidden.has(game.id) && game.status === "update_available" && (!$preference.known || (game.components ?? []).some(component => component.status === "update_available" && component.candidate && component.applicability !== "not_applicable" && preferredFamily(component.identity.family, $preference))) ? n + 1 : n),
+        0,
+      );
+    }
+    if ($preference.known) return new Set(outdatedDllItems().map(item => item.game.id)).size;
+    return $games.reduce(
+      (n, g) => (!$hidden.has(g.id) && $statuses[g.id] === "outdated" ? n + 1 : n),
+      0,
+    );
+  },
 );
 
 /** One outdated, updatable, pinned-aware DLL record with a resolved target
@@ -492,15 +542,40 @@ export interface OutdatedDllItem {
   game: DetectedGame;
   record: DllRecord;
   target: string;
+  catalogFamily?: string;
 }
 
 /** Every outdated DLL across the visible library that is eligible to apply —
  *  honoring hidden games, per-game disabled families, update-pref gating, and
  *  pins. Centralized here so the Library view, the digest, and the background
  *  scheduler all derive the Apply-All batch identically. */
-export function outdatedDllItems(): OutdatedDllItem[] {
+export function outdatedDllItems(scope: "recommended" | "all" = "recommended"): OutdatedDllItem[] {
+  const preference = get(hardwarePreference);
+  const included = (family: string) => scope === "all" || defaultUpdateFamily(family, preference);
   const $games = get(games);
   const $hidden = get(hiddenIds);
+  const authoritative = get(authoritativeState);
+  if (authoritative.emitterId !== null) {
+    const out: OutdatedDllItem[] = [];
+    for (const snapshot of authoritative.games) {
+      const game = $games.find((entry) => entry.id === snapshot.id);
+      if (!game || $hidden.has(game.id) || snapshot.status !== "update_available") continue;
+      for (const component of snapshot.components ?? []) {
+        if (component.status !== "update_available" || !component.candidate || component.applicability === "not_applicable" || !included(component.identity.family)) continue;
+        out.push({
+          game, target: component.candidate.package_version, catalogFamily: component.candidate.family,
+          record: {
+            family: component.identity.family as DllRecord["family"],
+            path: `${snapshot.install_dir.replace(/[\\/]+$/, "")}\\${component.identity.relative_path.replaceAll("/", "\\")}`,
+            current_version: component.observed_version,
+            sha256: component.observed_hash?.algorithm === "sha256" ? component.observed_hash.digest : null,
+            file_description: null,
+          },
+        });
+      }
+    }
+    return out;
+  }
   const $statuses = get(gameStatuses);
   const $dlls = get(gameDlls);
   const $ctx = get(relationContext);
@@ -514,7 +589,7 @@ export function outdatedDllItems(): OutdatedDllItem[] {
     const disabled = $settings?.game_preferences[game.id]?.disabled_families ?? [];
     const pinned = $settings?.game_preferences[game.id]?.pinned_versions ?? {};
     for (const r of records) {
-      if (disabled.includes(r.family)) continue;
+      if (disabled.includes(r.family) || !included(r.family)) continue;
       if (!recordUpdatable(r, prefs)) continue;
       const pin = pinned[`${r.family}|${r.path}`] ?? null;
       if (dllRelation(r, $ctx, pin) !== "outdated") continue;
@@ -597,8 +672,14 @@ export async function emitRevertedSwapNotifications(): Promise<void> {
 }
 
 export const restorableBackupCount: Readable<number> = derived(
-  backups,
-  ($entries) => $entries.reduce((n, b) => (b.restored_at == null ? n + 1 : n), 0),
+  [backups, authoritativeState],
+  ([$entries, $authoritative]) => {
+    // Rust owns restore eligibility: it accounts for verified availability of the stored bytes,
+    // which a `restored_at == null` check cannot see. The local count stays only as the fallback
+    // used before the first authoritative snapshot is installed.
+    if ($authoritative.counts !== null) return $authoritative.counts.eligible_restorable_backups;
+    return $entries.reduce((n, b) => (b.restored_at == null ? n + 1 : n), 0);
+  },
 );
 
 export interface SidebarCounts {
@@ -637,7 +718,11 @@ export interface QuietableOptions {
   silent?: boolean;
 }
 
-export async function scanGames(opts: QuietableOptions = {}): Promise<void> {
+export interface ScanOptions extends QuietableOptions {
+  trigger?: ArtResolveTrigger;
+}
+
+export async function scanGames(opts: ScanOptions = {}): Promise<void> {
   if (get(scanInProgress)) return;
   scanInProgress.set(true);
   try {
@@ -648,7 +733,8 @@ export async function scanGames(opts: QuietableOptions = {}): Promise<void> {
     }
     void loadAllDlls(result);
     void refreshAntiCheat(result);
-    void enrichManualArt(result);
+    // Toast visibility is not user consent. Only explicit action handlers pass user_scan.
+    void enrichManualArt(result, opts.trigger ?? "automatic");
   } catch (err: unknown) {
     const message = formatError(err);
     if (!opts.silent) {
@@ -666,30 +752,49 @@ export async function scanGames(opts: QuietableOptions = {}): Promise<void> {
 
 const ART_PACING_MS = 150;
 
-function firstArtUrl(art: GameArt): string | null {
-  return art.grid_url ?? art.hero_url ?? art.capsule_url ?? null;
-}
-
-async function enrichManualArt(list: DetectedGame[]): Promise<void> {
+/** Resolve missing cover art.
+ *
+ *  Rust owns where a cover comes from and whether it verified the asset. This pass only decides
+ *  which games still deserve an attempt and carries the consent trigger. A game whose art state is
+ *  `unavailable` may still use a configured fallback that was not consulted by the launcher.
+ *  A failed source is retried only when Rust marked it retryable. */
+async function enrichManualArt(
+  list: DetectedGame[],
+  trigger: ArtResolveTrigger = "automatic",
+): Promise<void> {
   const apiKey = (get(settings)?.steamgriddb.api_key ?? "").trim();
-  const targets = list.filter((g) => !g.image_url);
+  const targets = list.filter((g) => needsArtResolution(g, apiKey.length > 0 || g.launcher === "epic"));
   for (const g of targets) {
-    let url: string | null = null;
-    try {
-      url = firstArtUrl(await fetchSteamArt(g.name));
-    } catch {
-      url = null;
-    }
-    if (!url && apiKey) {
+    let art: GameArt | null = null;
+    // Steam publishes art per application id, so the id is used when the launcher knows it.
+    if (g.launcher === "steam" && g.app_id) {
       try {
-        url = firstArtUrl(await enrichGameArt(g.name, apiKey));
+        art = await fetchSteamArt(g.app_id, trigger);
       } catch {
-        url = null;
+        art = null;
       }
     }
-    if (url) {
-      const resolved = url;
-      games.update((arr) => arr.map((x) => (x.id === g.id ? { ...x, image_url: resolved } : x)));
+    if ((art === null || art.state !== "resolved") && (apiKey || g.launcher === "epic")) {
+      try {
+        art = await enrichGameArt(g, apiKey, trigger);
+      } catch {
+        // Keep the previous state: a transport failure is not proof that no cover exists.
+      }
+    }
+    if (art !== null) {
+      const resolved = art;
+      games.update((arr) =>
+        arr.map((x) =>
+          x.id === g.id
+            ? {
+                ...x,
+                art: resolved,
+                // Legacy projection kept in step for any consumer still reading it.
+                image_url: artSrc(resolved.landscape ?? resolved.portrait) ?? x.image_url,
+              }
+            : x,
+        ),
+      );
     }
     await new Promise((r) => setTimeout(r, ART_PACING_MS));
   }
@@ -836,33 +941,10 @@ export async function loadBackups(): Promise<void> {
   }
 }
 
-export const systemInfo: Writable<SystemInfo | null> = writable(null);
-let systemInfoPromise: Promise<SystemInfo> | null = null;
-
-export function ensureSystemInfo(): Promise<SystemInfo> {
-  if (!systemInfoPromise) {
-    systemInfoPromise = getSystemInfo().then((si) => {
-      systemInfo.set(si);
-      return si;
-    });
-    systemInfoPromise.catch(() => {
-      systemInfoPromise = null;
-    });
-  }
-  return systemInfoPromise;
-}
-
-export const fsr4Capable: Readable<boolean> = derived(systemInfo, ($si) =>
-  ($si?.gpus ?? []).some((g) => g.fsr4_capable),
-);
-
-export const driverReports: Writable<DriverStatusReport[]> = writable([]);
 export const driverCheckInProgress: Writable<boolean> = writable(false);
 export const driverCheckError: Writable<string | null> = writable(null);
 
-/** GPU vendor -> version display whose install finished with reboot_required and
- *  is staged but not yet active. Drives the "Restart to finish" card state until
- *  the user reboots (process restart resets this) or the driver shows up_to_date. */
+/** Compatibility projection of backend reboot observations. No frontend install inference. */
 export const driverRebootPending: Writable<Record<string, string>> = writable({});
 
 export async function loadDriverUpdates(): Promise<void> {
@@ -871,13 +953,12 @@ export async function loadDriverUpdates(): Promise<void> {
   try {
     const reports = await checkDriverUpdates();
     driverReports.set(sortDriverReports(reports));
-    driverRebootPending.update((m) => {
-      const next = { ...m };
-      for (const r of reports) {
-        if (r.status === "up_to_date") delete next[r.device.vendor];
-      }
-      return next;
-    });
+    const previousPending = get(driverRebootPending);
+    const nextPending = Object.fromEntries(reports.flatMap((report) => {
+      const pending = report.reboot_pending ?? (report.reboot_pending === undefined && report.status === "update_available" ? previousPending[report.device.vendor] : undefined);
+      return pending ? [[report.device.vendor, pending]] : [];
+    }));
+    driverRebootPending.set(reports.length === 0 ? previousPending : nextPending);
     emitDriverUpdateNotifications(reports);
   } catch (err: unknown) {
     const message = formatError(err);
@@ -919,8 +1000,9 @@ export function applyDriverInstallProgress(p: DriverInstallProgress): void {
 /** Drive a driver install end-to-end. One install at a time; progress is
  *  reflected in the shared `driverInstall` store and cleared on completion. */
 export async function startDriverInstall(report: DriverStatusReport): Promise<void> {
-  const url = report.latest?.download_url;
-  if (!url || get(driverInstall).vendor) return;
+  const action = driverPrimaryAction(report);
+  if (action.kind !== "install" || get(driverInstall).vendor) return;
+  const url = action.download_url;
   driverInstall.set({
     vendor: report.device.vendor,
     stage: "downloading",
@@ -930,12 +1012,11 @@ export async function startDriverInstall(report: DriverStatusReport): Promise<vo
   try {
     const outcome = await installDriver(report.device.vendor, url);
     if (outcome.stage === "completed") {
-      if (outcome.reboot_required) {
-        const pending = report.latest?.version.display ?? "";
-        driverRebootPending.update((m) => ({ ...m, [report.device.vendor]: pending }));
+      if (outcome.reboot_required && report.latest?.version.display) {
+        driverRebootPending.update((pending) => ({ ...pending, [report.device.vendor]: report.latest?.version.display ?? "" }));
       } else {
-        driverRebootPending.update((m) => {
-          const next = { ...m };
+        driverRebootPending.update((pending) => {
+          const next = { ...pending };
           delete next[report.device.vendor];
           return next;
         });
@@ -1062,7 +1143,11 @@ export async function startSystemDriverInstall(
     if (outcome.success) {
       const loc = get(locale);
       const reboot = outcome.reboot_required ? translate(loc, "toast.systemDriverInstalledReboot") : "";
-      showToast("success", translate(loc, "toast.systemDriverInstalled", { title: update.title, reboot }));
+      if (outcome.verification === "active_version_verified") {
+        showToast("success", translate(loc, "toast.systemDriverInstalled", { title: update.title, reboot }));
+      } else {
+        showToast("warning", outcome.message);
+      }
       systemDriverInstall.set({ ...SYSTEM_DRIVER_IDLE });
       await loadSystemDrivers();
     } else {
@@ -1079,7 +1164,9 @@ export async function startSystemDriverInstall(
 /** Park the card in a VISIBLE terminal 'failed' state (instead of silently
  *  snapping back to idle), then auto-clear after a grace period. */
 function failSystemDriverInstall(id: string, message: string): void {
-  systemDriverInstall.set({ updateId: id, stage: "failed", message, fraction: 1 });
+  // A failure is not completed work: a full bar would read as success in the dock. The fraction is
+  // dropped so every consumer renders the failure as a failure.
+  systemDriverInstall.set({ updateId: id, stage: "failed", message, fraction: null });
   setTimeout(() => {
     const s = get(systemDriverInstall);
     if (s.updateId === id && s.stage === "failed") {
@@ -1147,7 +1234,7 @@ function withBackgroundDefaults(s: AppSettings): AppSettings {
 export async function loadSettings(): Promise<void> {
   try {
     const result = await getSettings();
-    settings.set(withBackgroundDefaults(result));
+    settings.set(uiPreferenceWriter.project(withBackgroundDefaults(result)));
   } catch (err: unknown) {
     showToast("danger", translate(get(locale), "toast.settingsLoadFailed", { msg: formatError(err) }));
   }
@@ -1168,6 +1255,16 @@ export async function persistSettings(next: AppSettings): Promise<void> {
     showToast("danger", translate(get(locale), "toast.settingsSaveFailed", { msg: formatError(err) }));
   }
 }
+
+const uiPreferenceWriter = createUiPreferenceWriter({
+  current: () => get(settings),
+  publish: (next) => settings.set(next),
+  read: getSettings,
+  save: saveSettings,
+  failed: (error) => showToast("danger", translate(get(locale), "toast.settingsSaveFailed", { msg: formatError(error) })),
+});
+
+export const persistUiPreferences = uiPreferenceWriter.update;
 
 export function formatError(err: unknown): string {
   if (err && typeof err === "object" && "message" in err) {

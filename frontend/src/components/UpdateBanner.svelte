@@ -53,7 +53,7 @@
 
   async function startUpdaterChecks(): Promise<void> {
     await loadRuntimeMode();
-    if (runtime?.portable) return;
+    if (!runtime || runtime.portable) return;
     await checkForUpdates();
     timer = setInterval(() => { void checkForUpdates(); }, POLL_INTERVAL_MS);
     window.addEventListener("dlssync:check-updates", handleExternalCheck);
@@ -61,14 +61,14 @@
 
   async function loadRuntimeMode(): Promise<void> {
     try {
-      runtime = await transport<RuntimeMode>(COMMANDS.runtime_mode);
+      runtime = await transport(COMMANDS.runtime_mode);
     } catch {
       runtime = null;
     }
   }
 
   function handleExternalCheck(e: Event): void {
-    if (!appUpdaterEnabled || runtime?.portable) return;
+    if (!appUpdaterEnabled || !runtime || runtime.portable) return;
     const detail = (e as CustomEvent<{ force?: boolean }>).detail;
     if (detail?.force) {
       try { localStorage.removeItem(DISMISS_KEY); } catch {}
@@ -88,6 +88,7 @@
   });
 
   function devFakeUpdate(): UpdateInfo | null {
+    if (!import.meta.env.DEV) return null;
     const params = new URLSearchParams(window.location.search);
     const fake = params.get("fakeUpdate");
     if (!fake) return null;
@@ -146,7 +147,7 @@
   }
 
   async function checkForUpdates(): Promise<void> {
-    if (!appUpdaterEnabled || runtime?.portable) return;
+    if (!appUpdaterEnabled || !runtime || runtime.portable) return;
     if (stage === "downloading" || stage === "installing") return;
     const fake = devFakeUpdate();
     if (fake) {
@@ -205,7 +206,7 @@
   }
 
   async function applyUpdate(): Promise<void> {
-    if (!appUpdaterEnabled) return;
+    if (!appUpdaterEnabled || !runtime) return;
     if (!available || stage === "downloading" || stage === "installing") return;
     if (runtime?.portable) {
       await openReleasePage();
@@ -481,7 +482,7 @@
   .banner-progress-fill {
     height: 100%;
     background: var(--accent);
-    transition: width var(--dur-normal) var(--ease-out);
+    transition: none;
   }
 
   .changelog-toggle {

@@ -120,6 +120,7 @@ export function translate(loc: Locale, path: string, vars?: TranslationVars): st
     (pluralPath !== null ? lookup(fallback, pluralPath) : undefined) ??
     lookup(active, path) ??
     lookup(fallback, path) ??
+    (path.startsWith("errorClass.") ? lookup(active, `errorClass.other.${path.split(".").at(-1)}`) ?? lookup(fallback, "errorClass.other.label") : undefined) ??
     path;
   return interpolate(raw, vars);
 }

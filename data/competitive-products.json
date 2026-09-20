@@ -1,18 +1,191 @@
 {
-  "as_of": "2026-07-10",
+  "as_of": "2026-09-13",
   "corrections": "Open a sourced issue when a capability or trust claim changes.",
   "features": [
-    { "label": "DLSS / FSR / XeSS / DirectStorage", "dlssync": "yes", "renderpilot": "yes" },
-    { "label": "CLI", "dlssync": "yes", "renderpilot": "yes" },
-    { "label": "Operation journal", "dlssync": "yes", "renderpilot": "yes" },
-    { "label": "GPU driver updates", "dlssync": "yes", "renderpilot": "no" },
-    { "label": "Windows device drivers", "dlssync": "yes", "renderpilot": "no" },
-    { "label": "Detached cryptographic catalog signature", "dlssync": "yes", "renderpilot": "no" },
-    { "label": "Authenticode publisher enforcement", "dlssync": "yes", "renderpilot": "no" },
-    { "label": "No binary hosting in catalog repository", "dlssync": "yes", "renderpilot": "no" },
-    { "label": "RenoDX / Luma installation", "dlssync": "no", "renderpilot": "yes" },
-    { "label": "Nexus Mods distribution", "dlssync": "yes", "renderpilot": "no" },
-    { "label": "GUI update plan with provenance", "dlssync": "yes", "renderpilot": "no" }
+    {
+      "label": "DLSS / FSR / XeSS / DirectStorage recognition",
+      "dlssync": {
+        "value": "Implemented filename/family mapping; not universal game coverage",
+        "source": "Source: [scanner][scanner]",
+        "observed_on": "2026-09-13"
+      },
+      "renderpilot": {
+        "value": "not verified",
+        "source": "Source available: [local registry assertion][registry], insufficient implementation evidence",
+        "observed_on": "2026-09-13",
+        "qualification": ""
+      }
+    },
+    {
+      "label": "Streamline matched-set workflow",
+      "dlssync": {
+        "value": "Set command and validation exist; runtime outcomes not tested here",
+        "source": "Source: [set adapter][sets]",
+        "observed_on": "2026-09-13"
+      },
+      "renderpilot": {
+        "value": "not verified",
+        "source": "Source: no captured implementation evidence",
+        "observed_on": "2026-09-13",
+        "qualification": ""
+      }
+    },
+    {
+      "label": "CLI",
+      "dlssync": {
+        "value": "CLI adapter exists",
+        "source": "Source: [CLI entrypoint][cli]",
+        "observed_on": "2026-09-13"
+      },
+      "renderpilot": {
+        "value": "not verified",
+        "source": "Source available: [local registry assertion][registry], insufficient implementation evidence",
+        "observed_on": "2026-09-13",
+        "qualification": ""
+      }
+    },
+    {
+      "label": "Operation journal",
+      "dlssync": {
+        "value": "Durable journal implementation exists",
+        "source": "Source: [journal][journal]",
+        "observed_on": "2026-09-13"
+      },
+      "renderpilot": {
+        "value": "not verified",
+        "source": "Source available: [local registry assertion][registry], insufficient implementation evidence",
+        "observed_on": "2026-09-13",
+        "qualification": ""
+      }
+    },
+    {
+      "label": "GPU driver updates",
+      "dlssync": {
+        "value": "Vendor resolution and installer orchestration exist; no hardware test here",
+        "source": "Sources: [driver catalog][drivers], [installer][installer]",
+        "observed_on": "2026-09-13"
+      },
+      "renderpilot": {
+        "value": "not verified",
+        "source": "Source available: [local registry assertion][registry], not proof of absence",
+        "observed_on": "2026-09-13",
+        "qualification": ""
+      }
+    },
+    {
+      "label": "Windows device-driver updates",
+      "dlssync": {
+        "value": "WUA path exists",
+        "source": "Source: [Windows Update Agent][wua]",
+        "observed_on": "2026-09-13"
+      },
+      "renderpilot": {
+        "value": "not verified",
+        "source": "Source available: [local registry assertion][registry], not proof of absence",
+        "observed_on": "2026-09-13",
+        "qualification": ""
+      }
+    },
+    {
+      "label": "Detached catalog signature",
+      "dlssync": {
+        "value": "Ed25519 verification is implemented",
+        "source": "Source: [catalog][catalog]",
+        "observed_on": "2026-09-13"
+      },
+      "renderpilot": {
+        "value": "not verified",
+        "source": "Source available: [local registry assertion][registry], not proof of absence",
+        "observed_on": "2026-09-13",
+        "qualification": ""
+      }
+    },
+    {
+      "label": "Artifact hash and publisher checks",
+      "dlssync": {
+        "value": "Per-entry hashes include historical MD5; publisher checks are separate. Do not generalize strict service checks to every advanced/legacy configuration",
+        "source": "Sources: [hash algorithms][hash], [execution][execution]",
+        "observed_on": "2026-09-13"
+      },
+      "renderpilot": {
+        "value": "not verified",
+        "source": "Source available: [local registry assertion][registry], insufficient trust-path evidence",
+        "observed_on": "2026-09-13",
+        "qualification": ""
+      }
+    },
+    {
+      "label": "Local backup restore",
+      "dlssync": {
+        "value": "SHA-256-verified snapshots and restore implementation exist; restore can fail",
+        "source": "Sources: [backup index][backups], [verified recovery][recovery]",
+        "observed_on": "2026-09-13"
+      },
+      "renderpilot": {
+        "value": "not verified",
+        "source": "Source: no captured recovery implementation evidence",
+        "observed_on": "2026-09-13",
+        "qualification": ""
+      }
+    },
+    {
+      "label": "No binary hosting in separate catalog repository",
+      "dlssync": {
+        "value": "not verified",
+        "source": "Source available: [catalog source metadata][catalog], not a remote hosting inventory",
+        "observed_on": "2026-09-13",
+        "qualification": " as an exhaustive external-repository claim"
+      },
+      "renderpilot": {
+        "value": "not verified",
+        "source": "Source available: [local registry assertion][registry], not a hosting inventory",
+        "observed_on": "2026-09-13",
+        "qualification": ""
+      }
+    },
+    {
+      "label": "RenoDX / Luma installation",
+      "dlssync": {
+        "value": "not verified",
+        "source": "Source available: [local registry assertion][registry], insufficient feature proof",
+        "observed_on": "2026-09-13",
+        "qualification": " as an exhaustive presence/absence claim"
+      },
+      "renderpilot": {
+        "value": "not verified",
+        "source": "Source available: [local registry assertion][registry], insufficient implementation evidence",
+        "observed_on": "2026-09-13",
+        "qualification": ""
+      }
+    },
+    {
+      "label": "Nexus channel",
+      "dlssync": {
+        "value": "Product policy exists; manual-only network and packaging gaps remain",
+        "source": "Sources: [product policy][product], [channel review][nexus]",
+        "observed_on": "2026-09-13"
+      },
+      "renderpilot": {
+        "value": "not verified",
+        "source": "Source available: [local registry assertion][registry], not publication evidence",
+        "observed_on": "2026-09-13",
+        "qualification": ""
+      }
+    },
+    {
+      "label": "GUI update preparation and source details",
+      "dlssync": {
+        "value": "Internal preparation and optional detail surfaces exist; no routine review requirement implied",
+        "source": "Sources: [controller][controller], [update detail widget][widget]",
+        "observed_on": "2026-09-13"
+      },
+      "renderpilot": {
+        "value": "not verified",
+        "source": "Source available: [local registry assertion][registry], insufficient UI evidence",
+        "observed_on": "2026-09-13",
+        "qualification": ""
+      }
+    }
   ],
   "products": [
     {
@@ -23,7 +196,8 @@
         "https://github.com/xt0n1-t3ch/DLSSync",
         "https://github.com/xt0n1-t3ch/DLSSync-Manifest",
         "https://www.nexusmods.com/site/mods/1922"
-      ]
+      ],
+      "column": "DLSSync, local 1.7.0 source"
     },
     {
       "name": "RenderPilot",
@@ -34,7 +208,27 @@
         "https://github.com/osyka-yuri/renderpilot/releases/tag/v1.4.1",
         "https://github.com/osyka-yuri/renderpilot/blob/main/crates/renderpilot-orchestration/src/libraries/manifest.rs",
         "https://github.com/osyka-yuri/renderpilot/blob/main/crates/renderpilot-orchestration/src/libraries/validate.rs"
-      ]
+      ],
+      "column": "RenderPilot, version not independently verified"
     }
-  ]
+  ],
+  "references": {
+    "scanner": "../crates/dll-scanner/src/lib.rs",
+    "sets": "../src-tauri/src/commands/streamline_set.rs",
+    "cli": "../crates/dlssync-cli/src/main.rs",
+    "journal": "../crates/operation-journal/src/lib.rs",
+    "drivers": "../crates/driver-catalog/src/lib.rs",
+    "installer": "../crates/driver-install/src/lib.rs",
+    "wua": "../crates/system-drivers/src/wua.rs",
+    "catalog": "../crates/dll-catalog/src/lib.rs",
+    "hash": "../crates/dll-catalog/src/hash.rs",
+    "execution": "../crates/dlssync-application/src/execution.rs",
+    "backups": "../crates/backup-store/src/lib.rs",
+    "recovery": "../crates/dlssync-application/src/transaction.rs",
+    "product": "../product.toml",
+    "nexus": "nexus-build.md",
+    "controller": "../frontend/src/lib/applyController.ts",
+    "widget": "../frontend/src/widgets/UpdatePlanModal.svelte",
+    "registry": "../data/competitive-products.json"
+  }
 }

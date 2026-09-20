@@ -1,7 +1,8 @@
 import { get } from "svelte/store";
+import { classifyApplyError } from "./applyErrorClass";
 import {
   applyUpdateBatch,
-  applyUpdate,
+  previewUpdatePlan,
   applyStreamlineSet,
   applyDllSet,
   cancelApply as cancelApplyApi,
@@ -10,21 +11,23 @@ import {
   type ApplyBatchResult,
   type StreamlineSetResult,
   type DllRecord,
+  type UpdatePlan,
 } from "./api";
+import { familyMeta } from "./familyMeta";
 import {
   activeApplies,
+  games,
   downloadProgressByGroup,
   formatError,
   showToast,
   type ApplyTracker,
   type Toast,
 } from "./stores";
-import { familyVendor, familyCatalogKey, launcherLabel } from "./labels";
+import { familyVendor, familyCatalogKey } from "./labels";
 import { translate, locale } from "./i18n/index";
 import { notifyApplySuccess } from "./community";
 import type { LauncherKind } from "./api";
 import { getCatalogStatus } from "./api";
-import { reviewUpdatePlan } from "../features/update-plan/model";
 import type { ReviewedUpdatePlan } from "../features/update-plan/model";
 
 export interface ApplyTarget {
@@ -32,9 +35,14 @@ export interface ApplyTarget {
   game_label: string;
   record: DllRecord;
   target_version: string;
+  /** Exact catalog family returned by a verified Rust plan. */
+  catalog_family?: string;
 }
 
 export interface DispatchOptions {
+  actor?: "gui" | "background";
+  /** Ended attempts to replace only after a validated preview is ready to start. */
+  supersedes?: ApplyTracker[];
   showModal?: () => void;
   toast?: (kind: Toast["kind"], message: string) => void;
   reviewPlan?: (targets: ApplyTarget[]) => Promise<ReviewedUpdatePlan | null>;
@@ -42,12 +50,13 @@ export interface DispatchOptions {
 
 const DEFAULT_TOAST = (kind: Toast["kind"], message: string): void => showToast(kind, message);
 const ENDED_TRACKER_TTL_MS = 5 * 60 * 1000;
+let preparingDispatch = false;
 
 /// True when any tracker in the store is still running (no `ended_at`). Mirrors the
 /// `isApplyInflight` guard used by the background daemon so a second dispatch never
 /// clobbers an in-flight batch's trackers.
 export function isApplyInflight(): boolean {
-  return Object.values(get(activeApplies)).some((t) => t.ended_at === null);
+  return preparingDispatch || Object.values(get(activeApplies)).some((t) => t.ended_at === null);
 }
 
 /// Drops trackers that finished more than `ENDED_TRACKER_TTL_MS` ago plus any
@@ -90,17 +99,43 @@ export async function dispatchApply(
     (opts.toast ?? DEFAULT_TOAST)("warning", translate(loc, "toast.applyInProgress"));
     return null;
   }
-  const reviewed = await (opts.reviewPlan ?? reviewUpdatePlan)(targets);
-  if (!reviewed) return null;
-  const currentCatalog = await getCatalogStatus();
-  if (currentCatalog.provenance.generated_at !== reviewed.catalogGeneratedAt) {
-    (opts.toast ?? DEFAULT_TOAST)("warning", translate(loc, "toast.updatePlanStale"));
+  targets = [...new Map(targets.map((target) => [targetIdentity(target.game_id, target.record.path), target])).values()];
+  let reviewed: ReviewedUpdatePlan | null;
+  preparingDispatch = true;
+  try {
+    if (opts.reviewPlan) {
+      reviewed = await opts.reviewPlan(targets);
+    } else {
+      const plan = await previewUpdatePlan(buildApplyRequests(targets));
+      reviewed = { targets, catalogGeneratedAt: plan.catalog_generated_at, plan };
+    }
+    if (!reviewed) return null;
+    if (reviewed.plan) reviewed.targets = targetsFromPlan(reviewed.plan);
+    const currentCatalog = await getCatalogStatus();
+    if (currentCatalog.provenance.generated_at !== reviewed.catalogGeneratedAt) {
+      (opts.toast ?? DEFAULT_TOAST)("warning", translate(loc, "toast.updatePlanStale"));
+      return null;
+    }
+  } catch (error) {
+    (opts.toast ?? DEFAULT_TOAST)("danger", friendlyApplyError(error));
     return null;
+  } finally {
+    preparingDispatch = false;
   }
   targets = reviewed.targets;
   pruneEndedApplyState();
   const { trackers, requests } = prepareApply(targets);
-  activeApplies.update((m) => ({ ...m, ...trackers }));
+  activeApplies.update((m) => {
+    const next = { ...m };
+    const started = new Set(targets.map((t) => targetIdentity(t.game_id, t.record.path)));
+    const retried = new Set((opts.supersedes ?? []).map((t) => targetIdentity(t.game_id, t.dll_path)));
+    for (const [id, tracker] of Object.entries(next)) {
+      const identity = targetIdentity(tracker.game_id, tracker.dll_path);
+      if (tracker.ended_at !== null && started.has(identity) && retried.has(identity) &&
+          (tracker.stage === "failed" || tracker.stage === "cancelled")) delete next[id];
+    }
+    return { ...next, ...trackers };
+  });
   opts.showModal?.();
   const toast = opts.toast ?? DEFAULT_TOAST;
   const uniqueGames = new Set(targets.map((t) => t.game_id)).size;
@@ -113,16 +148,70 @@ export async function dispatchApply(
     }),
   );
   try {
-    const result = await applyUpdateBatch({ items: requests });
+    const result = await applyUpdateBatch({ items: requests, plan: reviewed.plan, actor: opts.actor });
     annotateOutcomes(result);
     notifyApplySuccess(result.outcomes.filter((o) => o.success).length);
     return result;
   } catch (err: unknown) {
-    const msg = formatError(err);
-    failAllTrackers(trackers, msg);
+    const msg = friendlyApplyError(err);
+    failAllTrackers(trackers, formatError(err));
     toast("danger", translate(loc, "toast.batchApplyFailed", { msg }));
     return null;
   }
+}
+
+function friendlyApplyError(error: unknown): string {
+  const message = formatError(error);
+  if (/plan.*stale|changed since review|catalog revision changed|installed bytes changed/i.test(message)) {
+    return translate(get(locale), "toast.updatePlanStale");
+  }
+  return message;
+}
+
+/** Rust supplies the complete set, including required members the user did not select. */
+function targetsFromPlan(plan: UpdatePlan): ApplyTarget[] {
+  return plan.items.filter((item) => item.selected).map((item) => {
+    if (!familyMeta(item.family)) throw new Error(`Unknown component family: ${item.family}`);
+    return {
+      game_id: item.game_id,
+      game_label: item.game_name,
+      target_version: item.target_version,
+      catalog_family: item.family,
+      record: {
+        path: item.dll_path,
+        family: item.family as DllRecord["family"],
+        current_version: item.current_version,
+        sha256: item.trust.observed_sha256,
+        file_description: null,
+      },
+    };
+  });
+}
+
+async function prepareSetTargets(targets: ApplyTarget[], toast: typeof DEFAULT_TOAST): Promise<ApplyTarget[] | null> {
+  preparingDispatch = true;
+  try {
+    return targetsFromPlan(await previewUpdatePlan(buildApplyRequests(targets)));
+  } catch (error) {
+    toast("danger", friendlyApplyError(error));
+    return null;
+  } finally {
+    preparingDispatch = false;
+  }
+}
+
+export function buildApplyRequests(targets: ApplyTarget[]): ApplyRequest[] {
+  return targets.map((t) => ({
+      apply_id: crypto.randomUUID(),
+      game_id: t.game_id,
+      install_dir: get(games).find((game) => game.id === t.game_id)?.install_dir ?? null,
+      game_label: t.game_label,
+      dll_path: t.record.path,
+      vendor: familyVendor(t.record.family),
+      family: t.catalog_family ?? familyCatalogKey(t.record.family),
+      target_version: t.target_version,
+      observed_sha256: t.record.sha256 ?? null,
+  }));
 }
 
 function prepareApply(targets: ApplyTarget[]): {
@@ -131,9 +220,9 @@ function prepareApply(targets: ApplyTarget[]): {
 } {
   const loc = get(locale);
   const trackers: Record<string, ApplyTracker> = {};
-  const requests: ApplyRequest[] = [];
-  for (const t of targets) {
-    const apply_id = crypto.randomUUID();
+  const requests = buildApplyRequests(targets);
+  for (const [index, t] of targets.entries()) {
+    const apply_id = requests[index].apply_id;
     trackers[apply_id] = {
       apply_id,
       group_id: "",
@@ -155,15 +244,7 @@ function prepareApply(targets: ApplyTarget[]): {
       started_at: Date.now(),
       ended_at: null,
     };
-    requests.push({
-      apply_id,
-      game_id: t.game_id,
-      game_label: t.game_label,
-      dll_path: t.record.path,
-      vendor: familyVendor(t.record.family),
-      family: familyCatalogKey(t.record.family),
-      target_version: t.target_version,
-    });
+
   }
   return { trackers, requests };
 }
@@ -204,6 +285,9 @@ export async function dispatchStreamlineSet(
     toast("warning", translate(loc, "toast.applyInProgress"));
     return null;
   }
+  const completeTargets = await prepareSetTargets(targets, toast);
+  if (!completeTargets) return null;
+  targets = completeTargets;
   pruneEndedApplyState();
   const { trackers, requests } = prepareApply(targets);
   activeApplies.update((m) => ({ ...m, ...trackers }));
@@ -256,6 +340,9 @@ export async function dispatchDllSet(
     toast("warning", translate(loc, "toast.applyInProgress"));
     return null;
   }
+  const completeTargets = await prepareSetTargets(targets, toast);
+  if (!completeTargets) return null;
+  targets = completeTargets;
   pruneEndedApplyState();
   const { trackers, requests } = prepareApply(targets);
   activeApplies.update((m) => ({ ...m, ...trackers }));
@@ -290,120 +377,51 @@ export async function dispatchDllSet(
   }
 }
 
+/** Windows paths are case-insensitive; normalize separators and lexical dot segments.
+ * Game IDs stay opaque unless the store supplies a shared install directory.
+ */
+function targetIdentity(gameId: string, path: string): string {
+  const normalize = (value: string): string => {
+    const parts: string[] = [];
+    for (const part of value.replaceAll("\\", "/").toLowerCase().split("/")) {
+      if (part === ".") continue;
+      if (part === ".." && parts.length > 0) parts.pop();
+      else parts.push(part);
+    }
+    return parts.join("/").replace(/\/$/, "");
+  };
+  const installDir = get(games).find((game) => game.id === gameId)?.install_dir;
+  return JSON.stringify([installDir ? normalize(installDir) : gameId, normalize(path)]);
+}
+
+function targetFromTracker(tracker: ApplyTracker): ApplyTarget {
+  return {
+    game_id: tracker.game_id,
+    game_label: tracker.game_label ?? tracker.game_id,
+    target_version: tracker.target_version,
+    record: {
+      family: tracker.family as DllRecord["family"],
+      path: tracker.dll_path,
+      current_version: null,
+      sha256: null,
+      file_description: null,
+    },
+  };
+}
+
 export async function retrySingleApply(tracker: ApplyTracker): Promise<void> {
-  if (isApplyInflight()) {
-    showToast("warning", translate(get(locale), "toast.applyInProgress"));
-    return;
-  }
-  const retrying = translate(get(locale), "toast.trackerRetrying");
-  activeApplies.update((m) => {
-    const cur = m[tracker.apply_id];
-    if (!cur) return m;
-    return {
-      ...m,
-      [tracker.apply_id]: {
-        ...cur,
-        stage: "download",
-        failed_at_stage: null,
-        message: retrying,
-        error: null,
-        error_class: null,
-        progress: 0,
-        ended_at: null,
-        bytes_downloaded: 0,
-      },
-    };
-  });
-  try {
-    await applyUpdate({
-      apply_id: tracker.apply_id,
-      game_id: tracker.game_id,
-      game_label: tracker.game_label,
-      dll_path: tracker.dll_path,
-      vendor: familyVendor(tracker.family as DllRecord["family"]),
-      family: familyCatalogKey(tracker.family as DllRecord["family"]),
-      target_version: tracker.target_version,
-    });
-  } catch (err: unknown) {
-    const msg = formatError(err);
-    activeApplies.update((m) => {
-      const cur = m[tracker.apply_id];
-      if (!cur) return m;
-      return {
-        ...m,
-        [tracker.apply_id]: {
-          ...cur,
-          stage: "failed",
-          failed_at_stage: cur.failed_at_stage ?? cur.stage,
-          error: msg,
-          message: msg,
-          ended_at: Date.now(),
-        },
-      };
-    });
-  }
+  if (!classifyApplyError(tracker.error, tracker.error_class).retryable) return;
+  await dispatchApply([targetFromTracker(tracker)], { supersedes: [tracker] });
 }
 
 export async function retryFailedTrackers(trackers: ApplyTracker[]): Promise<void> {
-  const failed = trackers.filter((t) => t.stage === "failed" || t.stage === "cancelled");
+  const failed = trackers.filter((tracker) =>
+    (tracker.stage === "failed" || tracker.stage === "cancelled") &&
+    classifyApplyError(tracker.error, tracker.error_class).retryable,
+  );
   if (failed.length === 0) return;
-  if (isApplyInflight()) {
-    showToast("warning", translate(get(locale), "toast.applyInProgress"));
-    return;
-  }
-  const items: ApplyRequest[] = failed.map((t) => ({
-    apply_id: t.apply_id,
-    game_id: t.game_id,
-    game_label: t.game_label,
-    dll_path: t.dll_path,
-    vendor: familyVendor(t.family as DllRecord["family"]),
-    family: familyCatalogKey(t.family as DllRecord["family"]),
-    target_version: t.target_version,
-  }));
-  const retrying = translate(get(locale), "toast.trackerRetrying");
-  activeApplies.update((m) => {
-    const next = { ...m };
-    for (const t of failed) {
-      const cur = next[t.apply_id];
-      if (!cur) continue;
-      next[t.apply_id] = {
-        ...cur,
-        stage: "download",
-        failed_at_stage: null,
-        message: retrying,
-        error: null,
-        error_class: null,
-        progress: 0,
-        ended_at: null,
-        bytes_downloaded: 0,
-      };
-    }
-    return next;
-  });
-  try {
-    const result = await applyUpdateBatch({ items });
-    annotateOutcomes(result);
-  } catch (err: unknown) {
-    const msg = formatError(err);
-    activeApplies.update((m) => {
-      const next = { ...m };
-      for (const t of failed) {
-        const cur = next[t.apply_id];
-        if (!cur) continue;
-        next[t.apply_id] = {
-          ...cur,
-          stage: "failed",
-          failed_at_stage: cur.failed_at_stage ?? cur.stage,
-          error: msg,
-          message: msg,
-          ended_at: Date.now(),
-        };
-      }
-      return next;
-    });
-  }
+  await dispatchApply(failed.map(targetFromTracker), { supersedes: failed });
 }
-
 export async function cancelOne(applyId: string): Promise<void> {
   try {
     await cancelApplyApi(applyId);
@@ -431,7 +449,7 @@ export function buildTargetFromRecord(
 ): ApplyTarget {
   return {
     game_id: game.id,
-    game_label: `${launcherLabel(game.launcher as LauncherKind)} - ${game.name}`,
+    game_label: game.name,
     record,
     target_version,
   };
@@ -457,7 +475,7 @@ function annotateOutcomes(result: ApplyBatchResult): void {
       } else if (!cur.error && o.error) {
         next[o.apply_id] = {
           ...cur,
-          stage: "failed",
+          stage: classifyApplyError(o.error).kind === "cancelled" ? "cancelled" : "failed",
           failed_at_stage: cur.failed_at_stage ?? cur.stage,
           error: o.error,
           message: o.error,

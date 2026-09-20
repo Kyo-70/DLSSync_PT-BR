@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "kind": "recipe",
+  "id": "renodx/example-game",
+  "revision": 1,
+  "upstream_version": "v1.0.0",
+  "experimental": true,
+  "origin": {
+    "project_home": "https://example.com/project",
+    "source_repository": "https://example.com/source",
+    "release_channel": "https://example.com/releases",
+    "author_identity": "example author",
+    "observed_at": "2026-09-17T00:00:00Z"
+  },
+  "license": {
+    "license_id": "MIT",
+    "text_url": "https://example.com/license",
+    "text_revision": "1",
+    "observed_at": "2026-09-17T00:00:00Z",
+    "redistribution": "permitted_with_conditions",
+    "conditions": [],
+    "permission_evidence": [],
+    "acquisition_policy": "explicit_original_only"
+  },
+  "target": {
+    "game_ids": ["example-game"],
+    "executable_relative_path": "game.exe",
+    "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "game_build": "1.0",
+    "architecture": "x64",
+    "graphics_api": "dx12",
+    "launch_mode": "standard",
+    "required_capabilities": []
+  },
+  "artifacts": [{
+    "id": "addon",
+    "upstream_release_id": "release-1",
+    "source_url": "https://example.com/addon.zip",
+    "allowed_redirect_hosts": [],
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "size_bytes": 1,
+    "format": "zip",
+    "max_expanded_bytes": 1,
+    "license_evidence": "license"
+  }],
+  "dependencies": [],
+  "conflicts": [],
+  "installed_files": [{
+    "artifact_id": "addon",
+    "archive_entry": "addon.dll",
+    "destination": "nvngx_dlssd.dll",
+    "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "size_bytes": 1,
+    "role": "data",
+    "architecture": "x64",
+    "install_rule": "create_only",
+    "remove_rule": "undo_owned_if_hash_matches"
+  }],
+  "config_keys": [],
+  "removal": {
+    "require_committed_receipt": true,
+    "require_current_hash": true,
+    "retain_modified": true,
+    "recursive_delete": false,
+    "retain_undo_backups": true,
+    "shared_dependency": "retain_while_referenced",
+    "config_policy": "three_way_key_restore"
+  },
+  "evidence": [{
+    "id": "game-test",
+    "url": "https://example.com/test",
+    "observed_at": "2026-09-17T00:00:00Z",
+    "source_revision": "1",
+    "claim": "fixture passed",
+    "kind": "game_test",
+    "environment": "fixture",
+    "result": "pass"
+  }],
+  "compatibility_evidence": ["game-test"]
+}

@@ -50,7 +50,7 @@ describe("DriverHistoryFlyout WHQL toggle honesty", () => {
     );
     driverHistory.set({ [MODEL]: releases });
 
-    const { container } = render(DriverHistoryFlyout, { props: baseProps });
+    const { baseElement: container } = render(DriverHistoryFlyout, { props: baseProps });
     await tick();
 
     const toggle = container.querySelector('[role="checkbox"]') as HTMLButtonElement | null;
@@ -65,7 +65,7 @@ describe("DriverHistoryFlyout WHQL toggle honesty", () => {
     const beta = Array.from({ length: 3 }, (_, i) => release(`611.${3 - i}b`, 61103 - i, true));
     driverHistory.set({ [MODEL]: [...beta, ...whql] });
 
-    const { container, getByRole } = render(DriverHistoryFlyout, { props: baseProps });
+    const { baseElement: container, getByRole } = render(DriverHistoryFlyout, { props: baseProps });
     await tick();
 
     const toggle = getByRole("checkbox") as HTMLButtonElement;

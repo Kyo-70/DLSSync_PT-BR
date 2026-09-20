@@ -3,24 +3,26 @@
   import { slide } from "svelte/transition";
   import { get } from "svelte/store";
   import { openUrl, systemDriverVersions, type DriverStatusReport, type GpuVendor } from "../lib/api";
+  import { isNexusBuild } from "../lib/distribution";
   import { t, locale, translate } from "../lib/i18n/index";
   import {
     driverStatusTone,
     sortDriverReports,
-    canInstall,
-    isOpenPageOnly,
     driverPageUrl,
-    vendorHelpUrl,
-    dlssPresetHint,
+    driverHealth,
+    driverCardState,
+    installProgressView,
   } from "../lib/drivers";
   import {
     driverReports,
+    systemInfo,
+    ensureSystemInfo,
+    driverRebootPending,
     driverCheckInProgress,
     driverCheckError,
     loadDriverUpdates,
     startDriverInstall,
     driverInstall,
-    driverRebootPending,
     showToast,
     systemDriverGroups,
     systemScanInProgress,
@@ -34,10 +36,16 @@
   import type { SystemDriverUpdate, SystemDeviceClass, DriverStoreVersion } from "../lib/api";
   import { formatBytes } from "../lib/formatHuman";
   import DlssOverridePanel from "../components/DlssOverridePanel.svelte";
+  import DeviceInventory from "../components/DeviceInventory.svelte";
   import DriverHistoryFlyout from "../components/DriverHistoryFlyout.svelte";
   import BrandMark from "../components/BrandMark.svelte";
   import { BRANDS } from "../lib/brands";
 
+  let activeSection = $state<"graphics" | "system" | "profiles">("graphics");
+  function goToSection(section: "graphics" | "system" | "profiles"): void {
+    activeSection = section;
+    document.getElementById(`drivers-${section}`)?.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+  }
   let expandedModel = $state<string | null>(null);
   let systemDetailsOpen = $state(false);
   let historyTarget = $state<{ vendor: GpuVendor; model: string; accent: string } | null>(null);
@@ -50,22 +58,16 @@
   };
 
   let reports = $derived(sortDriverReports($driverReports));
+  let pendingReboots = $derived($driverRebootPending);
   let installBusy = $derived($driverInstall.vendor !== null);
   let nvidiaPacked = $derived(
     $driverReports.find((r) => r.device.vendor === "nvidia")?.installed.packed ?? 0,
   );
-  let hasNvidia = $derived($driverReports.some((r) => r.device.vendor === "nvidia"));
-  let nvidiaModel = $derived(
-    $driverReports.find((r) => r.device.vendor === "nvidia")?.device.model ?? null,
-  );
-  let presetHint = $derived(nvidiaModel ? dlssPresetHint(nvidiaModel) : null);
-  let driverUpdateTotal = $derived(reports.filter((r) => r.status === "update_available").length);
+  let hasNvidia = $derived($driverReports.some((r) => r.device.vendor === "nvidia") || ($systemInfo?.gpus ?? []).some(gpu => gpu.vendor === "nvidia"));
+  // 10.06: the update count and the health semantics are projected from the backend `UpdateStatus`
+  // enum in one place. The view no longer compares status strings or invents a state for a status
+  // it does not recognise.
 
-  function healthDotState(status: DriverStatusReport["status"]): string {
-    if (status === "up_to_date") return "current";
-    if (status === "update_available") return "outdated";
-    return "beta";
-  }
   let nonNvidia = $derived(
     $driverReports
       .map((r) => r.device.vendor)
@@ -84,7 +86,7 @@
 
   function hasChangelog(report: DriverStatusReport): boolean {
     const log = report.latest?.changelog;
-    return !!log && (log.highlights.length > 0 || log.fixed.length > 0);
+    return !!log && ((log.highlights?.length ?? 0) > 0 || (log.fixed?.length ?? 0) > 0);
   }
 
   async function open(url: string | null): Promise<void> {
@@ -176,13 +178,16 @@
   }
 
   onMount(() => {
-    void loadDriverUpdates();
-    void loadSystemDrivers();
+    void ensureSystemInfo().catch(() => undefined);
+    if (!isNexusBuild) {
+      void loadDriverUpdates();
+      void loadSystemDrivers();
+    }
   });
 </script>
 
 <section class="drivers-view">
-  <header class="view-header">
+  <header class="view-header drivers-heading">
     <div>
       <h1 class="view-title">{$t("view.drivers.title")}</h1>
       <p class="view-subtitle">
@@ -196,38 +201,34 @@
     </div>
   </header>
 
-  {#if reports.length > 0}
-    <div class="health-strip" role="status" aria-label={$t("view.drivers.health.aria")}>
-      <span class="health-chip" data-tone={driverUpdateTotal > 0 ? "warning" : "success"}>
-        <span class="state-dot" data-state={driverUpdateTotal > 0 ? "outdated" : "current"} aria-hidden="true"></span>
-        {driverUpdateTotal > 0
-          ? $t("view.drivers.health.gpuUpdates", { count: driverUpdateTotal })
-          : $t("view.drivers.health.gpusCurrent")}
-      </span>
-      {#each reports as report (report.device.model)}
-        <span class="health-chip is-device" data-vendor={report.device.vendor} title={report.device.model}>
-          <span class="state-dot" data-state={healthDotState(report.status)} aria-hidden="true"></span>
-          {#if report.device.vendor !== "other"}<BrandMark key={report.device.vendor} tone="mono" size={11} />{/if}
-          <span class="health-model">{report.device.model}</span>
-        </span>
-      {/each}
-      {#if systemUpdateCount > 0}
-        <span class="health-chip" data-tone="warning">
-          <span class="state-dot" data-state="outdated" aria-hidden="true"></span>
-          {$t("view.drivers.health.systemUpdates", { count: systemUpdateCount })}
-        </span>
-      {/if}
-    </div>
-  {/if}
+  <nav class="drivers-tabs" aria-label={$t("view.drivers.title")}>
+    <button data-testid="drivers-tab-graphics" class:active={activeSection === "graphics"} aria-pressed={activeSection === "graphics"} onclick={() => goToSection("graphics")}>{$t("view.drivers.graphics")}<span>{reports.length}</span></button>
+    <button data-testid="drivers-tab-system" class:active={activeSection === "system"} aria-pressed={activeSection === "system"} onclick={() => goToSection("system")}>{$t("view.drivers.devices")}<span>{systemUpdateCount}</span></button>
+    {#if hasNvidia}<button data-testid="drivers-tab-profiles" class:active={activeSection === "profiles"} aria-pressed={activeSection === "profiles"} onclick={() => goToSection("profiles")}>{$t("view.drivers.dlssOverrides")}</button>{/if}
+  </nav>
 
   {#if $driverCheckError}
     <p class="error-banner">{$driverCheckError}</p>
   {/if}
 
-  {#if reports.length === 0 && !$driverCheckInProgress}
+  {#if reports.length === 0 && !$driverCheckInProgress && $systemInfo && $systemInfo.gpus.length === 0}
     <p class="empty">{$t("view.drivers.noGpus")}</p>
   {/if}
 
+  <div class="driver-section" id="drivers-graphics">
+  {#if reports.length === 0 && $systemInfo && $systemInfo.gpus.length > 0}
+    <ul class="driver-list">
+      {#each $systemInfo.gpus as gpu (`${gpu.vendor}:${gpu.pci_device_id}:${gpu.model}`)}
+        <li class="driver-card" data-health="unchecked">
+          <div class="card-main">
+            <BrandMark key={gpu.vendor} fit="wordmark" size={24} />
+            <div class="model-block"><span class="model">{gpu.model}</span><span class="versions mono">{gpu.driver_version}</span></div>
+            <span class="driver-state" data-tone="neutral">{$driverCheckInProgress ? $t("view.drivers.checking") : $t("view.drivers.notChecked")}</span>
+          </div>
+        </li>
+      {/each}
+    </ul>
+  {/if}
   <ul class="driver-list">
     {#each reports as report (report.device.model)}
       {@const tone = driverStatusTone(report.status)}
@@ -235,18 +236,15 @@
       {@const pageUrl = driverPageUrl(report)}
       {@const showNotes = !!pageUrl}
       {@const installing = $driverInstall.vendor === report.device.vendor}
-      {@const needsHelp = report.status === "unknown" || report.status === "unsupported"}
-      {@const rebootPendingVersion = $driverRebootPending[report.device.vendor]}
-      {@const showRebootPending =
-        rebootPendingVersion !== undefined && report.status !== "up_to_date"}
-      <li class="driver-card">
+      {@const cardState = driverCardState(report, { installing, rebootPendingVersion: pendingReboots[report.device.vendor] })}
+      <li class="driver-card" data-health={driverHealth(report)}>
         <div class="card-row">
           <div class="card-main">
             <span class="vendor-pill" data-vendor={report.device.vendor}>
               {#if report.device.vendor === "other"}
                 {vendorLabel(report.device.vendor)}
               {:else}
-                <BrandMark key={report.device.vendor} tone="mono" size={12} />
+                <BrandMark key={report.device.vendor} fit="wordmark" size={24} />
               {/if}
             </span>
             <div class="model-block">
@@ -262,34 +260,62 @@
             </div>
           </div>
           <div class="card-side">
-            {#if installing}
-              <div class="install-live" role="status" aria-live="polite">
-                <span class="install-stage">{$driverInstall.stage}</span>
-                <div class="install-bar"><div class="install-fill" style:width={`${Math.round(($driverInstall.fraction ?? 0) * 100)}%`}></div></div>
-                <span class="install-msg">{$driverInstall.message}</span>
+            {#if cardState.kind === "installing"}
+              {@const progress = installProgressView(
+                $driverInstall.stage,
+                $driverInstall.fraction,
+                $driverInstall.message,
+              )}
+              <div
+                class="install-live"
+                class:is-failed={progress.kind === "failed"}
+                data-testid="gpu-install-live"
+                data-progress={progress.kind}
+                role="status"
+                aria-live="polite"
+              >
+                <span class="install-stage">
+                  {$t(`installStage.${$driverInstall.stage ?? ""}`)}
+                </span>
+                {#if progress.kind === "determinate"}
+                  <div class="install-bar" data-testid="gpu-install-bar">
+                    <div class="install-fill" style:width={`${progress.percent}%`}></div>
+                  </div>
+                {:else if progress.kind === "indeterminate"}
+                  <div class="install-bar indeterminate" data-testid="gpu-install-bar">
+                    <div class="install-fill"></div>
+                  </div>
+                {:else}
+                  <span class="install-failed-note" data-testid="gpu-install-failed">
+                    {$t("view.drivers.installFailedNote")}
+                  </span>
+                {/if}
+                <span class="install-msg">{progress.message}</span>
               </div>
             {:else}
-              {#if showRebootPending}
-                <span class="driver-state reboot-pending" data-tone="warning" title={$t("view.drivers.restartPending", { version: rebootPendingVersion })}>
+              {#if cardState.kind === "reboot_pending"}
+                <span class="driver-state reboot-pending" data-tone="warning" data-testid="gpu-reboot-pending" title={$t("view.drivers.restartPending", { version: cardState.version })}>
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
                   {$t("view.drivers.restartToFinish")}
                 </span>
-              {:else if canInstall(report)}
-                {@const size = sizeLabel(report.latest?.size_bytes ?? 0)}
-                <button class="driver-update" onclick={() => startDriverInstall(report)} disabled={installBusy}>
+              {:else if cardState.action.kind === "install"}
+                {@const size = sizeLabel(cardState.action.size_bytes)}
+                <button class="driver-update" data-testid="gpu-install-action" onclick={() => startDriverInstall(report)} disabled={installBusy}>
                   <span class="driver-update-label">{$t("view.drivers.updateTo", { version: report.latest?.version.display ?? "" })}</span>
                   {#if size}<span class="driver-update-size mono">{size}</span>{/if}
                 </button>
-              {:else if isOpenPageOnly(report)}
-                <button class="driver-update open-page" onclick={() => open(pageUrl)} disabled={installBusy}>
+              {:else if cardState.action.kind === "open_page"}
+                {@const officialPage = cardState.action.url}
+                <button class="driver-update open-page" data-testid="gpu-open-page-action" onclick={() => open(officialPage)} disabled={installBusy}>
                   <span class="driver-update-label">{$t("view.drivers.openDownloadPage")}</span>
                   <span class="ext-arrow" aria-hidden="true">↗</span>
                 </button>
               {:else}
-                <div class="state-block">
+                {@const helpUrl = cardState.action.help_url}
+                <div class="state-block" data-testid="gpu-status-only">
                   <span class="driver-state" data-tone={tone}>{$t("driverStatus." + report.status)}</span>
-                  {#if needsHelp}
-                    <button class="help-link" onclick={() => open(vendorHelpUrl(report.device.vendor))}>{$t("view.drivers.findMyDriver")}</button>
+                  {#if helpUrl}
+                    <button class="help-link" onclick={() => open(helpUrl)}>{$t("view.drivers.findMyDriver")}</button>
                   {/if}
                 </div>
               {/if}
@@ -325,15 +351,15 @@
           {#if expanded}
             <div class="changelog">
               {#if hasChangelog(report) && report.latest?.changelog}
-                {#if report.latest.changelog.highlights.length > 0}
+                {#if (report.latest.changelog.highlights?.length ?? 0) > 0}
                   <ul class="cl-highlights">
-                    {#each report.latest.changelog.highlights as h}<li>{h}</li>{/each}
+                    {#each (report.latest.changelog.highlights ?? []) as h}<li>{h}</li>{/each}
                   </ul>
                 {/if}
-                {#if report.latest.changelog.fixed.length > 0}
+                {#if (report.latest.changelog.fixed?.length ?? 0) > 0}
                   <span class="cl-label">{$t("view.drivers.changelogFixed")}</span>
                   <ul class="cl-fixed">
-                    {#each report.latest.changelog.fixed as f}<li>{f}</li>{/each}
+                    {#each (report.latest.changelog.fixed ?? []) as f}<li>{f}</li>{/each}
                   </ul>
                 {/if}
               {:else}
@@ -349,10 +375,12 @@
     {/each}
   </ul>
 
-  <section class="feature-block system-block edge-accent">
+  </div>
+
+  <section class="feature-block system-block" id="drivers-system">
     <div class="section-head feature-section-head">
       <span class="section-title">{$t("view.drivers.systemComponents")}</span>
-      <span class="beta-tag" title={$t("view.drivers.betaTagTitle")}>{$t("view.drivers.betaTag")}</span>
+      <span class="beta-tag">Windows Update</span>
       {#if systemUpdateCount > 0}
         <span class="section-count">{systemUpdateCount}</span>
       {/if}
@@ -439,20 +467,38 @@
                 </div>
                 <div class="sys-side">
                   {#if installing}
-                    {@const failed = $systemDriverInstall.stage === "failed"}
-                    <div class="install-live" class:is-failed={failed} role="status" aria-live="polite">
-                      <span class="install-stage">{DRIVER_INSTALL_STAGE_LABEL[$systemDriverInstall.stage ?? ""] ?? $t("view.drivers.installStageFallback")}</span>
-                      <div class="install-bar" class:indeterminate={$systemDriverInstall.fraction === null && !failed}>
-                        <div
-                          class="install-fill"
-                          style:width={failed
-                            ? "100%"
-                            : $systemDriverInstall.fraction === null
-                              ? undefined
-                              : `${Math.round($systemDriverInstall.fraction * 100)}%`}
-                        ></div>
-                      </div>
-                      <span class="install-msg">{$systemDriverInstall.message}</span>
+                    <!-- 10.08: a failed stage is presented as a failure. It carries no fraction, so
+                         no progress bar and no fabricated 100 % width are rendered for it. -->
+                    {@const progress = installProgressView(
+                      $systemDriverInstall.stage,
+                      $systemDriverInstall.fraction,
+                      $systemDriverInstall.message,
+                    )}
+                    <div
+                      class="install-live"
+                      class:is-failed={progress.kind === "failed"}
+                      data-testid="sys-install-live"
+                      data-progress={progress.kind}
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <span class="install-stage">
+                        {DRIVER_INSTALL_STAGE_LABEL[$systemDriverInstall.stage ?? ""] ?? $t("view.drivers.installStageFallback")}
+                      </span>
+                      {#if progress.kind === "determinate"}
+                        <div class="install-bar" data-testid="sys-install-bar">
+                          <div class="install-fill" style:width={`${progress.percent}%`}></div>
+                        </div>
+                      {:else if progress.kind === "indeterminate"}
+                        <div class="install-bar indeterminate" data-testid="sys-install-bar">
+                          <div class="install-fill"></div>
+                        </div>
+                      {:else}
+                        <span class="install-failed-note" data-testid="sys-install-failed">
+                          {$t("view.drivers.installFailedNote")}
+                        </span>
+                      {/if}
+                      <span class="install-msg">{progress.message}</span>
                     </div>
                   {:else}
                     {#if update.target_inf}
@@ -514,10 +560,11 @@
         </section>
       {/each}
     </div>
+    <DeviceInventory />
   </section>
 
   {#if hasNvidia}
-    <section class="feature-block">
+    <section class="feature-block profile-block" id="drivers-profiles">
       <div class="section-head feature-section-head">
         <span class="section-title">{$t("view.drivers.dlssOverrides")}</span>
         <span class="vendor-pill" data-vendor="nvidia">NVIDIA</span>
@@ -525,12 +572,6 @@
       <p class="feature-sub">
         {$t("view.drivers.dlssOverridesSub")}
       </p>
-      {#if presetHint && nvidiaModel}
-        <p class="preset-hint" data-testid="preset-hint">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-          <span>{$t("view.drivers.presetHint." + presetHint, { model: nvidiaModel })}</span>
-        </p>
-      {/if}
       <DlssOverridePanel scope={{ scope: "global" }} driverPacked={nvidiaPacked} />
     </section>
   {/if}
@@ -583,41 +624,14 @@
     font-variant-numeric: tabular-nums;
   }
   .empty { color: var(--text-muted); font-size: 14px; padding: 24px 0; }
-  .health-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-  .health-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    padding: 5px 12px;
-    border-radius: var(--radius-full);
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    font-size: var(--fs-xs);
-    font-weight: 600;
-    color: var(--text-secondary);
-    font-variant-numeric: tabular-nums;
-  }
-  .health-chip[data-tone="success"] { color: var(--success); background: var(--success-dim); border-color: transparent; }
-  .health-chip[data-tone="warning"] { color: var(--warning); background: var(--warning-dim); border-color: transparent; }
-  .health-chip.is-device[data-vendor="nvidia"] { color: var(--vendor-nvidia-ink); }
-  .health-chip.is-device[data-vendor="amd"] { color: var(--vendor-amd-ink); }
-  .health-chip.is-device[data-vendor="intel"] { color: var(--vendor-intel-ink); }
-  .health-model { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .preset-hint {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    margin: 0;
-    padding: 9px 12px;
-    border-radius: var(--radius-md);
-    background: var(--vendor-nvidia-dim);
-    border: 1px solid color-mix(in oklab, var(--vendor-nvidia) 30%, transparent);
-    color: var(--vendor-nvidia-ink);
-    font-size: 12px;
-    line-height: 1.5;
-    max-width: 70ch;
-  }
-  .preset-hint svg { flex-shrink: 0; margin-top: 2px; }
+
+
+
+
+
+
+
+
   .driver-list { display: flex; flex-direction: column; gap: 10px; list-style: none; padding: 0; margin: 0; }
   .driver-card {
     padding: 14px 16px;
@@ -787,13 +801,14 @@
     border-radius: inherit;
     background: linear-gradient(90deg, var(--accent-progress), color-mix(in oklab, var(--accent-progress) 60%, #ffffff));
     box-shadow: 0 0 8px color-mix(in oklab, var(--accent-progress) 55%, transparent);
-    transition: width 0.25s var(--ease);
+    transition: none;
   }
   .install-bar.indeterminate .install-fill { width: 40%; animation: installSlide 1.2s var(--ease) infinite; }
   @keyframes installSlide { 0% { transform: translateX(-130%); } 100% { transform: translateX(330%); } }
   .install-live.is-failed .install-stage { color: var(--danger); }
   .install-live.is-failed .install-fill { background: var(--danger); box-shadow: none; animation: none; }
   .install-msg { font-size: 10px; color: var(--text-muted); max-width: 220px; text-align: right; }
+  .install-failed-note { font-size: 11px; font-weight: 600; color: var(--danger); text-align: right; }
   .install-live.is-failed .install-msg { color: var(--danger); }
 
   .driver-update.open-page { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border-strong); box-shadow: none; }
@@ -991,4 +1006,45 @@
   .ver-name { color: var(--text-placeholder); margin-left: auto; }
   .ver-latest { font-size: 12px; color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; }
   .small-chip { padding: 1px 7px; font-size: var(--fs-2xs); letter-spacing: 0.04em; }
+
+  .drivers-view .drivers-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 20px; margin-bottom: 8px; }
+  .drivers-heading .header-actions { padding-top: 2px; }
+  .drivers-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border-bottom: 1px solid var(--border); margin: 8px 0 12px; }
+  .drivers-tabs button { min-height: 48px; padding: 12px 10px; display: flex; align-items: center; justify-content: center; gap: 8px; border-bottom: 2px solid transparent; color: var(--text-secondary); font-size: 13px; line-height: 1.4; }
+  .drivers-tabs button.active { border-bottom-color: var(--text-primary); color: var(--text-primary); font-weight: 600; }
+  .drivers-tabs button:hover { background: var(--bg-elevated); }
+  .drivers-tabs button > span { min-width: 18px; padding: 1px 5px; border-radius: 5px; background: var(--bg-elevated); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .driver-list { gap: 20px; }
+  .driver-card { padding: 24px; border-radius: 12px; background: var(--bg-card); }
+  .driver-card .card-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 24px; }
+  .driver-card .card-main { flex-direction: column; align-items: flex-start; gap: 20px; }
+  .driver-card .vendor-pill { padding: 0; border: 0; background: none; border-radius: 0; font-size: 20px; letter-spacing: 0; }
+  .driver-card .vendor-pill :global(.brand-mark) { gap: 10px; }
+  .driver-card .model-block { gap: 10px; }
+  .driver-card .model { font-size: 21px; line-height: 1.35; font-weight: 600; white-space: normal; overflow-wrap: anywhere; }
+  .driver-card .versions { font-size: 14px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .driver-card .card-side { display: flex; flex-direction: column; align-items: flex-end; gap: 14px; }
+  .driver-card .driver-secondary { display: flex; gap: 8px; }
+  .driver-card .driver-icon { width: 36px; height: 36px; border-radius: 8px; }
+  .driver-card .changelog-toggle { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--border); border-radius: 0; width: 100%; justify-content: flex-start; }
+  .feature-block { padding: 24px; border-radius: 12px; }
+  @container workspace (max-width: 560px) {
+    .sys-row { flex-direction: column; align-items: stretch; gap: 16px; }
+    .sys-side { justify-content: flex-end; flex-wrap: wrap; }
+    .sys-name { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.5; }
+    .sys-versions { flex-wrap: wrap; }
+    .feature-block { padding: 20px; }
+    .driver-card .card-row { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+    .driver-card .card-side { width: 100%; flex-direction: row; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+    .drivers-view .drivers-heading { gap: 16px; }
+  }
+  @container workspace (max-width: 400px) {
+    .drivers-view .drivers-heading { grid-template-columns: minmax(0, 1fr); }
+    .drivers-tabs { grid-template-columns: minmax(0, 1fr); }
+    .drivers-tabs button { justify-content: flex-start; min-height: 42px; }
+  }
+
+  .drivers-tabs { position: sticky; top: 0; z-index: 5; background: var(--bg-base); }
+  #drivers-graphics, #drivers-system, #drivers-profiles { scroll-margin-top: 80px; }
+  .drivers-view { gap: 28px; }
 </style>

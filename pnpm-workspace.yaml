@@ -1,2 +1,11 @@
 packages:
   - frontend
+
+overrides:
+  esbuild: 0.28.2
+
+allowBuilds:
+  esbuild: true
+
+minimumReleaseAgeExclude:
+  - vite@8.3.0

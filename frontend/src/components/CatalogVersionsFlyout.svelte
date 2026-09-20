@@ -4,32 +4,32 @@
   import { t, locale, translate } from "../lib/i18n/index";
   import { listReleases, type Release } from "../lib/api";
   import {
-    featureIconId,
-    featureTitle,
     familyLabel,
     familyShort,
-    featureFromFamily,
     type FeatureSlot,
   } from "../lib/labels";
   import type { CatalogFamily } from "../lib/stores";
+  import { authoritativeState } from "../lib/stateSync";
+  import { installedGameNames, observedFamilyVersions } from "../lib/catalogInstallation";
   import { showToast } from "../lib/stores";
-  import { mergeFamilyReleases } from "../lib/catalogReleases";
-  import FeatureIcon from "./FeatureIcon.svelte";
+  import { compareVersions } from "../lib/versions";
+  import BrandMark from "./BrandMark.svelte";
   import Checkbox from "./Checkbox.svelte";
   import FlyoutShell from "./FlyoutShell.svelte";
 
   let {
     vendor,
     catalogKey,
+    latestVersion = null,
     featureSlot,
     accent,
-    families,
     advancedFamilies,
     vendorLabel,
     onClose,
   }: {
     vendor: string;
     catalogKey: string;
+    latestVersion?: string | null;
     featureSlot: FeatureSlot;
     accent: string;
     families?: string[];
@@ -41,8 +41,9 @@
   type ViewMode = "modules" | "versions";
 
   let mode = $state<ViewMode>("versions");
+  let activeFamily = $state("");
+  let activeLatest = $state<string | null>(null);
   let activeFamilyLabel = $state<string>("");
-  let activeFamilyIcon = $state<string>("advanced");
 
   let releases = $state<Release[]>([]);
   let loading = $state(false);
@@ -51,29 +52,26 @@
   let stableOnly = $state(true);
 
   let modulesQuery = $state("");
+  let installedFiles = $derived(observedFamilyVersions($authoritativeState.games, activeFamily));
 
   let headerTitle = $derived.by(() => {
     if (mode === "modules") return `${vendorLabel ?? vendor} · ${$t("feature.advanced.title")}`;
-    if (featureSlot === "advanced") return activeFamilyLabel;
-    return featureTitle(featureSlot);
+    return activeFamilyLabel;
   });
   let headerSubtitle = $derived.by(() => {
     if (mode === "modules") return $t("component.flyout.modulesSubtitle");
     if (featureSlot === "advanced") return $t("component.flyout.advancedTech", { vendor: vendorLabel ?? vendor });
     return $t("feature." + featureSlot + ".blurb");
   });
-  let headerIcon = $derived.by(() => (mode === "modules" ? "advanced" : activeFamilyIcon));
 
   onMount(() => {
     if (catalogKey === "advanced") {
       mode = "modules";
       activeFamilyLabel = "";
-      activeFamilyIcon = "advanced";
     } else {
       mode = "versions";
-      activeFamilyLabel = featureTitle(featureSlot);
-      activeFamilyIcon = featureIconId(featureSlot);
-      void loadFeatureVersions(families && families.length > 0 ? families : [catalogKey]);
+      activeFamilyLabel = familyLabel(catalogKey);
+      void loadFamilyVersions(catalogKey);
     }
   });
 
@@ -84,29 +82,15 @@
   }
 
   async function loadFamilyVersions(family: string): Promise<void> {
+    activeFamily = family;
+    activeLatest = family === catalogKey ? latestVersion : advancedFamilies?.find(item => item.family === family)?.latest ?? null;
     loading = true;
     error = null;
     releases = [];
     try {
       const list = await listReleases(vendor, family);
-      list.sort((a, b) => Number(b.version_packed ?? 0) - Number(a.version_packed ?? 0));
+      list.sort((a, b) => compareVersions(b.version, a.version));
       releases = list;
-    } catch (err: unknown) {
-      error = toError(err);
-    } finally {
-      loading = false;
-    }
-  }
-
-  /// Load + merge every DLL family that maps to this feature (e.g. FSR Upscaling =
-  /// DX12 + Vulkan), de-duped by version+hash and sorted newest-first.
-  async function loadFeatureVersions(fams: string[]): Promise<void> {
-    loading = true;
-    error = null;
-    releases = [];
-    try {
-      const lists = await Promise.all(fams.map((f) => listReleases(vendor, f)));
-      releases = mergeFamilyReleases(lists);
     } catch (err: unknown) {
       error = toError(err);
     } finally {
@@ -116,7 +100,6 @@
 
   function drillIntoFamily(f: CatalogFamily): void {
     activeFamilyLabel = familyLabel(f.family);
-    activeFamilyIcon = featureIconId(featureFromFamily(f.family));
     mode = "versions";
     void loadFamilyVersions(f.family);
   }
@@ -235,7 +218,7 @@
       </button>
     {/if}
     <div class="flyout-glyph" style:color={accent} aria-hidden="true">
-      <FeatureIcon id={headerIcon} size={22} />
+      <BrandMark key={vendor} fit="wordmark" size={20} showLabel={false} />
     </div>
     <div class="flyout-title">
       <span class="title-line">{headerTitle}</span>
@@ -245,6 +228,15 @@
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
     </button>
   </header>
+
+  {#if mode === "versions" && installedFiles.length > 0}
+    <details class="installed-files" open>
+      <summary>{$t("component.detail.installedFile")}</summary>
+      <ul>{#each installedFiles as file (file.version)}
+        <li><strong class="mono">v{file.version}</strong><span>{file.games.join(", ")}</span></li>
+      {/each}</ul>
+    </details>
+  {/if}
 
   {#if mode === "modules"}
     <div class="flyout-toolbar">
@@ -273,7 +265,7 @@
                 aria-label={$t("component.flyout.viewVersionsOf", { name: familyLabel(f.family) })}
               >
                 <span class="module-glyph" style:color={accent} aria-hidden="true">
-                  <FeatureIcon id={featureIconId(featureFromFamily(f.family))} size={16} />
+                  <BrandMark key={vendor} fit="wordmark" size={12} showLabel={false} />
                 </span>
                 <div class="module-meta">
                   <span class="module-title">{familyLabel(f.family)}</span>
@@ -322,14 +314,17 @@
         </div>
       {:else}
         <ul class="version-list">
-          {#each filtered as r, i (r.version + r.sha256)}
-            <li class="version-row" class:is-first={i === 0}>
+          {#each filtered as r (r.version + r.sha256)}
+            {@const installedIn = installedGameNames($authoritativeState.games, activeFamily, r.sha256)}
+            <li class="version-row" class:is-first={r.version === activeLatest}>
               <div class="row-left">
-                {#if i === 0}<span class="latest-tag">{$t("component.flyout.latest")}</span>{/if}
+                {#if r.version === activeLatest}<span class="latest-tag">{$t("component.flyout.latest")}</span>{/if}
                 <span class="row-version mono">v{r.version}</span>
+                {#if installedIn.length}<span class="installed-tag" title={installedIn.join(", ")}>{$t("component.flyout.installed")}</span>{/if}
               </div>
               <div class="row-mid">
                 <span class="row-file mono">{r.filename}</span>
+                {#if installedIn.length}<span class="installed-context">{$t("component.detail.installedIn", { games: installedIn.join(", ") })}</span>{/if}
                 <span class="row-meta">
                   <span class="row-date">{formatDate(r.released_at)}</span>
                   <span class="row-sep">·</span>
@@ -363,22 +358,28 @@
       {/if}
     </div>
     <footer class="flyout-foot">
+      <p class="installation-note">{$t("component.detail.catalogMatchHelp")}</p>
       <span class="foot-count">{$t("component.flyout.versionCount", { shown: filtered.length, count: releases.length })}</span>
     </footer>
   {/if}
 </FlyoutShell>
 
 <style>
+  .installed-files { padding: 14px 20px; border-bottom: 1px solid var(--border); font-size: 12px; max-height: 150px; overflow-y: auto; flex-shrink: 0; }
+  .installed-files summary { cursor: pointer; font-weight: 600; color: var(--text-primary); }
+  .installed-files ul { list-style: none; padding: 8px 0 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+  .installed-files li { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--text-secondary); }
+  .installed-files strong { font-weight: 500; color: var(--text-primary); }
   .flyout-head {
     padding: 18px 52px 14px 20px;
     border-bottom: 1px solid var(--border);
     display: grid;
-    grid-template-columns: auto 44px 1fr;
+    grid-template-columns: auto minmax(0, 1fr);
     gap: 14px;
     align-items: center;
   }
-  .flyout-head:has(.flyout-back) { grid-template-columns: 30px 44px 1fr; }
-  .flyout-head:not(:has(.flyout-back)) { grid-template-columns: 44px 1fr; }
+  .flyout-head:has(.flyout-back) { grid-template-columns: 30px auto minmax(0, 1fr); }
+  .flyout-head:not(:has(.flyout-back)) { grid-template-columns: auto minmax(0, 1fr); }
   .flyout-back {
     width: 28px;
     height: 28px;
@@ -390,7 +391,9 @@
   }
   .flyout-back:hover { background: var(--bg-elevated); color: var(--text-primary); }
   .flyout-glyph {
-    width: 44px;
+    min-width: 44px;
+    padding: 0 12px;
+    flex-shrink: 0;
     height: 44px;
     border-radius: var(--radius-md);
     background: var(--bg-elevated);
@@ -413,7 +416,7 @@
   .flyout-search { flex: 1; min-width: 160px; font-size: var(--fs-sm); padding: 7px 12px; }
   .toolbar-count { font-size: var(--fs-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
-  .flyout-body { flex: 1; overflow-y: auto; }
+  .flyout-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   .flyout-state {
     padding: 50px 20px;
     text-align: center;
@@ -445,7 +448,7 @@
     transition: background 0.12s var(--ease), border-color 0.12s var(--ease);
   }
   .module-row-btn:hover { background: var(--bg-elevated); border-left-color: var(--accent); }
-  .module-glyph { display: inline-flex; }
+  .module-glyph { display: inline-flex; min-width: 52px; }
   .module-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .module-title { font-size: var(--fs-md); color: var(--text-primary); font-weight: 600; letter-spacing: var(--letter-tight); }
   .module-sub { font-size: var(--fs-xs); color: var(--text-muted); text-transform: uppercase; letter-spacing: var(--letter-wider); font-weight: 600; }
@@ -456,7 +459,7 @@
   .version-list { list-style: none; padding: 6px 0 10px; margin: 0; }
   .version-row {
     display: grid;
-    grid-template-columns: 130px 1fr auto;
+    grid-template-columns: 130px minmax(0, 1fr) auto;
     align-items: center;
     gap: 14px;
     padding: 10px 20px;
@@ -501,4 +504,17 @@
     animation: spin 0.7s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .installed-tag { color: var(--success); font-size: 12px; font-weight: 600; }
+  .installed-context { color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+  .installation-note { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; line-height: 1.5; }
+  @media (max-width: 640px) {
+    .version-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 16px; }
+    .row-left { grid-column: 1; }
+    .row-mid { grid-column: 1; }
+    .row-actions { grid-column: 2; grid-row: 1 / span 2; flex-direction: column; }
+    .row-file { overflow-wrap: anywhere; }
+    .row-meta { flex-wrap: wrap; }
+    .flyout-toolbar { flex-wrap: wrap; gap: 8px; }
+    .flyout-search { min-width: 0; flex-basis: 100%; }
+  }
 </style>

@@ -5,40 +5,89 @@ All notable changes to DLSSync are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.7.0] - Unreleased
 
-## [1.7.0] - 2026-07-10
-
-The trust-and-control release. DLSSync now shows the exact signed evidence behind a catalog and every proposed DLL change, keeps a durable operation journal, exposes the same safe plan/apply/rollback flow through a CLI, and finally makes the portable build keep all of its state beside the executable. The Nexus edition remains silent until the user explicitly refreshes the catalog.
+DLSSync 1.7.0 is a Windows 10/11 x64 release. Standard and NexusBuild packages are built from one source commit under a single `v1.7.0` tag. Standard carries the app updater; NexusBuild performs no automatic network request. Read the signature statement in the release notes before you run an installer.
 
 ### Added
 
-- A Trust Center showing Ed25519 verification, catalog generation time, distribution mode, refresh method, public-key fingerprint, and a direct link to the public manifest repository.
-- A reviewable Update Plan before DLL mutation, with exact files, current and target versions, source, expected hash, Authenticode publisher, row exclusion, JSON export, and catalog-drift rejection.
-- An append-only SQLite Operation Journal for catalog refreshes, plans, applies, rollbacks, scans, and driver actions, with filters and redacted JSON export.
-- `dlssync-cli` commands for status, scan, signed catalog status/refresh, plan, confirmed apply, confirmed rollback, journal list/export, and doctor output in human or `--json` form.
-- `dlssync-application`, `dlssync-contracts`, `operation-journal`, and `xtask` owners so GUI and CLI consume the same policies and use cases without Tauri domain logic.
-- Generated, versioned Rust-to-TypeScript contract bindings plus drift and architecture gates.
-- Feature-sliced frontend boundaries, deterministic dev-only preview fixtures, strict ESLint, a dedicated Journal view, and a restored GitHub source button in every distribution.
+- Searchable local Windows device inventory with exact PnP identities and reported device problems.
+- DLSS Ray Reconstruction profile overrides that use the NVIDIA-documented Ray Reconstruction enable and forced-preset driver settings.
+- DLSS 2, 3, 4 and 5 capability reporting by NVIDIA GPU architecture, driver version, supported presets and frame-generation multipliers.
+- Installed NVIDIA profile API and supported setting IDs are probed separately from in-game effects. Profile writes and resets are confirmed with a fresh read.
+- Local mod previews, installation, settings and removal backed by durable per-installation receipts. A preview expires after five minutes and can be used once.
+- Mod ownership, retained files and unverified compatibility appear as separate statements in game details, in all eight locales.
+- Append-only SQLite operation journal for catalog refreshes, update preparation, applies, rollbacks, scans and driver actions, with filters, a dedicated Journal view and redacted JSON export.
+- `dlssync-cli` with `status`, `scan`, `catalog status`, `catalog refresh`, `plan`, confirmed `apply`, confirmed `rollback`, `journal list`, `journal export` and `doctor`, in human-readable or `--json` output.
+- `dlssync-application`, `dlssync-contracts`, `operation-journal` and `xtask` owners, so the desktop app and the CLI use the same policies instead of Tauri-local logic.
+- Generated, versioned Rust-to-TypeScript contract bindings with drift and architecture gates.
+- Feature-sliced frontend boundaries, deterministic development-only preview fixtures and strict ESLint.
+- Nexus distribution packaging and its verification script.
 
 ### Changed
 
-- The Nexus build disables application self-updates and every automatic catalog request, but an explicit `Refresh Catalog` now fetches the current signed upstream manifest. Opening Catalog, starting the app, or restoring focus performs no network refresh.
-- Portable archives now include `portable.flag`; settings, catalog, backups, plans, logs, and journal resolve under `<exe>\data`, and automatic app updates stay disabled.
-- `product.toml` now owns product identity, repositories, URLs, distribution capabilities, and the portable marker; the workspace package version owns `1.7.0`.
-- GitHub source and signed-manifest links are visible again in the Nexus UI, while updater behavior remains disabled.
+- A game update stays one click. DLSSync resolves the exact files, target versions, source, expected hash and expected Authenticode publisher before it writes anything, and it stops the update when the catalog changes between preparation and apply.
+- Game details open in a centered, opaque, responsive dialog. Local packages moved to Advanced.
+- An installed file is labeled as a catalog release only when its scanned hash matches that release.
+- Library uses one artwork-led grid with the original game poster art, and keeps compact and list alternatives. Search opens in an opaque panel anchored to the top-bar search control.
+- Catalog is organized around the main technologies, with separately versioned support libraries and other vendors in disclosures. Package versions are separate from version counts.
+- Backups leads with the view title and an overflow menu for secondary actions. The summary dashboard, the subtitle and the counts legend are gone; search, game and date grouping, per-game groups and the missing or unverified warnings remain, and those warnings appear only when the count is not zero.
+- Narrow windows use a compact navigation rail. Scroll areas use a compact theme-aware scrollbar without stepper arrows, and fall back to the system scrollbar in forced-colors mode.
+- Settings controls are aligned, the GPU driver layout is clearer, and Windows device rows are compact while keeping the observed device data.
+- Detected GPU vendors, including hybrid systems, are prioritized in game details, catalog browsing, default update selections and background updates. Other libraries stay available for explicit selection, and nothing is auto-selected when the hardware is unknown.
+- Catalog schema version 2 or 3, freshness, future-clock and minimum-driver requirements are enforced before an update is applied.
+- The signed v3 catalog is published while the v2 endpoint keeps working for existing clients.
+- Catalog entries record actual DLL versions, package versions, exact archive entries, SHA-256 and observed signature status as separate fields, preserve historical MD5 records explicitly and keep per-source failure and freshness information.
+- Current FidelityFX runtimes resolve from immutable SDK commits, with a verified archive cache.
+- x64 vendor artifacts are selected and their PE identity is verified before any file is replaced.
+- The Nexus build compiles without the updater dependency and makes no automatic application-update or catalog request. Opening Catalog, starting the app or restoring focus performs no network refresh; an explicit `Refresh Catalog` fetches the current signed upstream manifest. Nexus assets stay out of `latest.json`.
+- Portable archives include `portable.flag`. Settings, catalog, backups, logs and journal resolve under `<exe>\data`, and automatic application updates stay disabled.
+- `product.toml` owns product identity, repositories, URLs, distribution capabilities and the portable marker. The workspace package version owns `1.7.0`.
+- GitHub source and signed-manifest links are visible in every distribution, while Nexus updater behavior stays disabled.
+- GPU driver detection prioritizes PCI identities, refreshes cached system data after an external change, and keeps AMD branch tables and Intel operating-system targeting explicit.
+- Command arguments, results, errors and events are generated from the Rust signatures.
+- Development startup works again with coordinated Vite, Svelte and Node updates.
+- The release workflow builds the Standard channel with the pinned Tauri CLI directly, so the Cargo separator survives and `--no-default-features` reaches Cargo instead of the Tauri CLI, which has no such option. Nexus already used this invocation.
+- Portable archive instructions state that settings, catalog, backups, logs and journal live under `.\data` beside the executable.
 
-### Security
+### Removed
 
-- Manual catalog refresh requires the detached Ed25519 signature in every profile, rejects empty or older catalogs, and atomically persists the verified bytes, signature, and provenance metadata.
-- CLI apply stages and verifies every download before mutation, requires a trusted Authenticode publisher, creates backups first, writes atomically, verifies post-write hashes, and restores already-written files after a partial failure.
-- Catalog downloads retain hard byte and decompression ceilings, and traversal/zip-slip coverage remains green.
+- The Trust Center screen and its supply-chain dashboard. Ed25519 catalog verification continues in the backend and still refuses an unverified catalog.
+- The unused legacy auto-apply-after-rescan control. Its serialized field stays compatible, and the background auto-apply workflow remains available.
 
 ### Fixed
 
-- Rust tests for `driver-install` now carry an `asInvoker` Windows manifest, so `cargo test --workspace` no longer triggers UAC error 740 solely because the test executable name contains `install`.
-- First-run catalog state always loads the signed embedded fallback even when no cache file exists.
-- The portable release documentation no longer claims state is stored under the user profile.
+- Vendor marks and explicit backup-row columns are restored, backup entry grid placement and responsive text width are corrected, and the game-detail grid is correct after the decorative feature icons were removed.
+- Nexus-only Cargo flags reach Cargo, and the build-time capability is derived without the Standard updater permission.
+- Windows driver updates match exact PnP hardware IDs, installation targets are revalidated, per-package Windows Update Agent outcomes are checked, and active-version verification is reported separately.
+- Driver installation stops when a requested package export fails. Exported snapshot files are verified with SHA-256 before a restore, and a restore is marked complete only after a device-version readback.
+- Notification dismiss hover is separate from the notification body, and initial focus lands on the panel close control.
+- Vendor search results survive a refresh, and Library table details wrap without clipping technology labels.
+- View and density changes apply immediately, interface preference writes are serialized, and a late save response can no longer replace a newer selection.
+- Epic artwork resolves from the official Epic catalog when a launcher manifest omits thumbnail metadata, and verified local artwork is reused without an automatic network request.
+- Recipe state writes use extended-length Windows paths, including long profile paths.
+- Concurrent scan observations are preserved when an automatic scan and an explicit scan finish together.
+- Installation capability comes from the backend driver actions instead of the presence of a download link.
+- Missing-cover labels, placeholder contrast and reduced-motion behavior are corrected in both themes.
+- `driver-install` Rust tests carry an `asInvoker` Windows manifest, so `cargo test --workspace` no longer triggers UAC error 740 because the test executable name contains `install`.
+- First-run catalog state loads the signed embedded fallback even when no cache file exists.
+- The portable release documentation no longer claims that state is stored under the user profile.
+
+### Security
+
+- Catalog cache writes use one atomic signed-manifest path. Stale, future-dated, wrong-schema, empty and downgraded catalogs are rejected.
+- Manual catalog refresh requires the detached Ed25519 signature in every profile, rejects an empty or older catalog, and atomically stores the verified bytes, the signature and the catalog metadata.
+- CLI apply stages and verifies every download before mutation, requires a trusted Authenticode publisher, creates backups first, writes atomically, verifies post-write hashes, and restores already-written files after a partial failure.
+- Catalog downloads keep hard byte and decompression ceilings, and traversal and zip-slip coverage stays in the test suite.
+- CI secret scanning receives the pull-request token that Gitleaks requires.
+- The release workflow has two explicit Windows signing lanes. With `SIGNPATH_ENABLED=true` it signs through SignPath and refuses to publish unless every exact file reports a valid Authenticode signature. Otherwise it publishes the same files unsigned, refuses any file that unexpectedly carries a signature, records the real state in `AUTHENTICODE-STATE.json`, and states in the release notes that the files are not Authenticode-signed. Publication requires a state that one of those lanes read, so a release cannot describe a signature it did not verify. The Tauri updater signature, the release checksums and the publisher check for downloaded game DLLs stay required in both lanes.
+
+### Release scope and verification
+
+- Platform: Windows 10/11 x64 only. There is no macOS or Linux package. Game discovery, GPU and device-driver workflows, the Windows device inventory and NVIDIA profile access use Windows APIs, and the non-Windows code paths return no results or an explicit error.
+- Signatures: the release notes state the Authenticode state that the release workflow actually read for the exact published files. The Standard updater payload carries its Ed25519 signature, and `latest.json` points only at the exact Standard installer. Verify a download against `SHA256SUMS.txt`.
+- Checked before release: frontend type check, lint and the frontend suite, the Rust workspace library suites, Clippy across the workspace, generated-binding drift, the product, architecture and per-channel release contracts, and the packaging and release-safety tests.
+- Not checked: game or hardware compatibility, device-driver installation or restoration on other machines, in-game effects of DLSS profile changes, and performance. A correct hash, a verified publisher or a successful install does not prove that a game runs correctly.
 
 ## [1.6.9] - 2026-06-12
 

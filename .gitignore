@@ -4,6 +4,7 @@ Cargo.lock.bak
 
 node_modules/
 dist/
+frontend/dist-nexus/
 tests/e2e/.report/
 tests/e2e/.results/
 .stealth-output/
@@ -39,6 +40,7 @@ gemini.md
 .codegraph/
 .cursor/
 .codex/
+.zcode/
 .opencode/
 .aider*
 .specify/

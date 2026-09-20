@@ -1,6 +1,24 @@
 pub mod download;
 pub mod hash;
+pub mod v3;
 pub mod zip;
+pub use v3::SourceHealth;
+
+pub fn ensure_available_space(path: &Path, required: u64) -> Result<(), CatalogError> {
+    let directory = if path.is_dir() {
+        path
+    } else {
+        path.parent()
+            .ok_or_else(|| CatalogError::Unsafe("destination has no directory".into()))?
+    };
+    let available = fs2::available_space(directory)?;
+    if available < required {
+        return Err(CatalogError::Unsafe(format!(
+            "insufficient disk space: {required} bytes required, {available} available"
+        )));
+    }
+    Ok(())
+}
 
 pub use download::{
     fetch_shared, DownloadCache, DownloadOptions, DownloadProgress, DEFAULT_CACHE_TTL,
@@ -55,13 +73,67 @@ pub enum CatalogError {
     EmptyCatalog,
     #[error("catalog downgrade refused: current {current}, fetched {fetched}")]
     Downgrade { current: String, fetched: String },
+    #[error("unsupported catalog schema: expected {expected}, got {actual}")]
+    UnsupportedSchema { expected: u32, actual: u32 },
+    #[error("catalog is stale: generated {generated}, maximum age is {max_age_days} days")]
+    StaleCatalog {
+        generated: String,
+        max_age_days: i64,
+    },
+    #[error("catalog timestamp is too far in the future: generated {generated}")]
+    FutureCatalog { generated: String },
+    #[error("server returned 304 without a verified generation for {url}")]
+    NotModifiedWithoutVerifiedGeneration { url: String },
+}
+
+pub struct VerifiedFetchRequest<'a> {
+    pub client: &'a reqwest::Client,
+    pub cache_path: &'a Path,
+    pub url: &'a str,
+    pub minimum_generated_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerifiedGeneration {
+    pub catalog: Catalog,
+    pub url: String,
+    pub etag: Option<String>,
+    pub generated_at: chrono::DateTime<chrono::Utc>,
+    pub verified_at: chrono::DateTime<chrono::Utc>,
+    pub content_sha256: String,
+}
+
+#[derive(Debug)]
+pub enum VerifiedFetchOutcome {
+    Modified(VerifiedGeneration),
+    NotModified(VerifiedGeneration),
+    Failed {
+        error: CatalogError,
+        retained: Option<VerifiedGeneration>,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct VerifiedGenerationFile {
+    schema_version: u32,
+    url: String,
+    etag: Option<String>,
+    generated_at: chrono::DateTime<chrono::Utc>,
+    verified_at: chrono::DateTime<chrono::Utc>,
+    content_sha256: String,
+    manifest: String,
+    signature: String,
+}
+
+const VERIFIED_GENERATION_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct Catalog {
     pub schema_version: u32,
     pub generated_at: chrono::DateTime<chrono::Utc>,
     pub vendors: BTreeMap<String, BTreeMap<String, FamilyEntry>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sources: BTreeMap<String, SourceHealth>,
     #[serde(default)]
     pub incompatible_games: Vec<String>,
     #[serde(default)]
@@ -79,7 +151,7 @@ pub struct Catalog {
 /// `needle` matched as a substring against files on disk, and the canonical
 /// engine `name` reported on a hit. Mirrors a `(needle, name)` row of the
 /// compile-time `ANTI_CHEAT_BINARIES` table so the two layers merge cleanly.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct AntiCheatBinary {
     pub needle: String,
     pub name: String,
@@ -89,7 +161,7 @@ pub struct AntiCheatBinary {
 /// time (with an AreWeAntiCheatYet Linux/Wine status overlay applied
 /// server-side), bundled into the manifest with zero new runtime outbound. Keys
 /// in `by_name` are lowercased for case-insensitive matching.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 pub struct AntiCheatIndex {
     #[serde(default)]
     pub by_appid: BTreeMap<u32, AntiCheatEntry>,
@@ -97,7 +169,7 @@ pub struct AntiCheatIndex {
     pub by_name: BTreeMap<String, AntiCheatEntry>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct AntiCheatEntry {
     /// Kernel/usermode anti-cheat engines (Easy Anti-Cheat, BattlEye, Vanguard …)
     /// — account-ban risk on a DLL swap.
@@ -179,14 +251,16 @@ impl AntiCheatIndex {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct FamilyEntry {
     pub latest: String,
     pub releases: Vec<Release>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct Release {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact: Option<dlssync_contracts::ArtifactDescriptor>,
     pub version: String,
     pub version_packed: u64,
     pub filename: String,
@@ -226,28 +300,31 @@ fn default_hash_algorithm() -> String {
 
 /// Commit the embedded `fallback/manifest.json` (+ `.sig`) was snapshotted from.
 /// Refreshed alongside the bundled fallback when a release re-bundles it.
-pub const FALLBACK_MANIFEST_COMMIT_SHA: &str = "afc77c0da20834b616375a66338e70e113d64686";
+pub const FALLBACK_MANIFEST_COMMIT_SHA: &str = "9c5b4a3b717e3637c0b8e708f93c66c38dd6d912";
 
 /// Manifest URL used by the standard build. It tracks `@main` so the catalog can
 /// refresh with new upstream DLL versions between application releases.
 #[cfg(not(feature = "nexus"))]
 pub const DEFAULT_MANIFEST_URL: &str =
-    "https://cdn.jsdelivr.net/gh/xt0n1-t3ch/dlssync-manifest@main/manifest.json";
+    "https://cdn.jsdelivr.net/gh/xt0n1-t3ch/dlssync-manifest@main/manifest-v3.json";
 
 /// Manifest URL used by the Nexus Mods build. It is pinned to the same immutable
 /// commit as the bundled fallback manifest so outbound DLL download destinations
 /// cannot change without a manual source change and a new application release.
 #[cfg(feature = "nexus")]
 pub const DEFAULT_MANIFEST_URL: &str =
-    "https://cdn.jsdelivr.net/gh/xt0n1-t3ch/dlssync-manifest@afc77c0da20834b616375a66338e70e113d64686/manifest.json";
+    "https://cdn.jsdelivr.net/gh/xt0n1-t3ch/dlssync-manifest@9c5b4a3b717e3637c0b8e708f93c66c38dd6d912/manifest.json";
 
 /// Canonical moving upstream used only for a user-requested catalog refresh.
 /// The Nexus build never calls this automatically; its policy is enforced in
 /// `dlssync-application` before any request is created.
 pub const CANONICAL_MANIFEST_URL: &str =
-    "https://cdn.jsdelivr.net/gh/xt0n1-t3ch/dlssync-manifest@main/manifest.json";
+    "https://cdn.jsdelivr.net/gh/xt0n1-t3ch/dlssync-manifest@main/manifest-v3.json";
 
 pub const MANIFEST_ENV_VAR: &str = "DLSSYNC_MANIFEST_URL";
+pub const SUPPORTED_SCHEMA_VERSION: u32 = 3;
+pub const MAX_CATALOG_AGE_DAYS: i64 = 180;
+pub const MAX_FUTURE_CLOCK_SKEW_MINUTES: i64 = 10;
 
 const MANIFEST_RETRY_BACKOFF_MS: &[u64] = &[200, 800, 2000];
 
@@ -340,6 +417,21 @@ fn verify_with_pubkey(
 }
 
 impl Catalog {
+    /// Read an existing signed document without claiming it is current.
+    /// The generator uses this to retain last-good historical data on failure.
+    pub fn from_signed_bytes(bytes: &[u8], signature: &str) -> Result<Self, CatalogError> {
+        verify_manifest_signature(bytes, signature).map_err(CatalogError::Signature)?;
+        let catalog: Catalog = serde_json::from_slice(bytes)?;
+        if !matches!(catalog.schema_version, 2 | 3) {
+            return Err(CatalogError::UnsupportedSchema {
+                expected: SUPPORTED_SCHEMA_VERSION,
+                actual: catalog.schema_version,
+            });
+        }
+        catalog.validate_artifacts()?;
+        Ok(catalog)
+    }
+
     pub async fn fetch(client: &reqwest::Client) -> Result<Self, CatalogError> {
         let url = manifest_url();
         Self::fetch_from(client, &url).await
@@ -397,10 +489,40 @@ impl Catalog {
         url: &str,
         minimum_generated_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<Self, CatalogError> {
-        let (catalog, raw, signature) = fetch_raw_strict_with_retry(client, url).await?;
-        validate_catalog_candidate(&catalog, minimum_generated_at)?;
-        write_verified_cache_atomic(cache_path, &raw, &signature)?;
-        Ok(catalog)
+        let mut last_error = String::new();
+        for (index, backoff) in MANIFEST_RETRY_BACKOFF_MS.iter().enumerate() {
+            match fetch_verified_generation(VerifiedFetchRequest {
+                client,
+                cache_path,
+                url,
+                minimum_generated_at,
+            })
+            .await
+            {
+                VerifiedFetchOutcome::Modified(generation)
+                | VerifiedFetchOutcome::NotModified(generation) => return Ok(generation.catalog),
+                VerifiedFetchOutcome::Failed { error, .. }
+                    if matches!(
+                        error,
+                        CatalogError::Downgrade { .. }
+                            | CatalogError::Io(_)
+                            | CatalogError::NotModifiedWithoutVerifiedGeneration { .. }
+                    ) =>
+                {
+                    return Err(error);
+                }
+                VerifiedFetchOutcome::Failed { error, .. } => {
+                    last_error = error.to_string();
+                    if index + 1 < MANIFEST_RETRY_BACKOFF_MS.len() {
+                        tokio::time::sleep(Duration::from_millis(*backoff)).await;
+                    }
+                }
+            }
+        }
+        Err(CatalogError::Retries {
+            attempts: MANIFEST_RETRY_BACKOFF_MS.len() as u32,
+            last: last_error,
+        })
     }
 
     pub fn releases(&self, vendor: &str, family: &str) -> Vec<Release> {
@@ -434,7 +556,8 @@ impl Catalog {
         let f = v.get(family)?;
         f.releases
             .iter()
-            .find(|r| r.version == version && r.filename.eq_ignore_ascii_case(filename))
+            .filter(|r| r.version == version && r.filename.eq_ignore_ascii_case(filename))
+            .max_by_key(|r| (r.channel == "stable", !r.is_dev, r.released_at))
             .cloned()
     }
 
@@ -449,7 +572,8 @@ impl Catalog {
         f.releases
             .iter()
             .filter(|r| r.filename.eq_ignore_ascii_case(filename))
-            .max_by_key(|r| r.version_packed)
+            .filter(|r| r.channel == "stable" && !r.is_dev)
+            .max_by_key(|r| (r.version_packed, r.released_at))
             .cloned()
     }
 }
@@ -458,6 +582,31 @@ fn validate_catalog_candidate(
     catalog: &Catalog,
     minimum_generated_at: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<(), CatalogError> {
+    validate_catalog_at(catalog, minimum_generated_at, chrono::Utc::now())
+}
+
+fn validate_catalog_at(
+    catalog: &Catalog,
+    minimum_generated_at: Option<chrono::DateTime<chrono::Utc>>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<(), CatalogError> {
+    if !matches!(catalog.schema_version, 2 | 3) {
+        return Err(CatalogError::UnsupportedSchema {
+            expected: SUPPORTED_SCHEMA_VERSION,
+            actual: catalog.schema_version,
+        });
+    }
+    if catalog.generated_at > now + chrono::Duration::minutes(MAX_FUTURE_CLOCK_SKEW_MINUTES) {
+        return Err(CatalogError::FutureCatalog {
+            generated: catalog.generated_at.to_rfc3339(),
+        });
+    }
+    if catalog.generated_at < now - chrono::Duration::days(MAX_CATALOG_AGE_DAYS) {
+        return Err(CatalogError::StaleCatalog {
+            generated: catalog.generated_at.to_rfc3339(),
+            max_age_days: MAX_CATALOG_AGE_DAYS,
+        });
+    }
     if catalog.vendors.is_empty() {
         return Err(CatalogError::EmptyCatalog);
     }
@@ -469,48 +618,199 @@ fn validate_catalog_candidate(
             });
         }
     }
+    catalog.validate_artifacts()?;
     Ok(())
 }
 
-async fn fetch_raw_strict_with_retry(
-    client: &reqwest::Client,
-    url: &str,
-) -> Result<(Catalog, Vec<u8>, String), CatalogError> {
-    let mut last_err = String::new();
-    for (idx, backoff) in MANIFEST_RETRY_BACKOFF_MS.iter().enumerate() {
-        match fetch_raw_strict_once(client, url).await {
-            Ok(value) => return Ok(value),
-            Err(error) => {
-                last_err = error.to_string();
-                if idx + 1 < MANIFEST_RETRY_BACKOFF_MS.len() {
-                    tokio::time::sleep(Duration::from_millis(*backoff)).await;
-                }
-            }
-        }
+pub async fn fetch_verified_generation(request: VerifiedFetchRequest<'_>) -> VerifiedFetchOutcome {
+    let retained = load_verified_generation(request.cache_path);
+    let matching_validator = retained
+        .as_ref()
+        .filter(|generation| generation.url == request.url)
+        .and_then(|generation| generation.etag.clone());
+
+    let mut http_request = request.client.get(request.url);
+    if let Some(etag) = matching_validator.as_deref() {
+        http_request = http_request.header(reqwest::header::IF_NONE_MATCH, etag);
     }
-    Err(CatalogError::Retries {
-        attempts: MANIFEST_RETRY_BACKOFF_MS.len() as u32,
-        last: last_err,
+
+    let response = match http_request.send().await {
+        Ok(response) => response,
+        Err(error) => {
+            return VerifiedFetchOutcome::Failed {
+                error: CatalogError::Http(error),
+                retained,
+            };
+        }
+    };
+    if response.status() == reqwest::StatusCode::NOT_MODIFIED {
+        return match retained.filter(|generation| {
+            generation.url == request.url
+                && generation.etag.as_deref() == matching_validator.as_deref()
+        }) {
+            Some(generation) if matching_validator.is_some() => {
+                VerifiedFetchOutcome::NotModified(generation)
+            }
+            _ => VerifiedFetchOutcome::Failed {
+                error: CatalogError::NotModifiedWithoutVerifiedGeneration {
+                    url: request.url.to_string(),
+                },
+                retained: None,
+            },
+        };
+    }
+
+    let response = match response.error_for_status() {
+        Ok(response) => response,
+        Err(error) => {
+            return VerifiedFetchOutcome::Failed {
+                error: CatalogError::Http(error),
+                retained,
+            };
+        }
+    };
+    let etag = response
+        .headers()
+        .get(reqwest::header::ETAG)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let raw = match response.bytes().await {
+        Ok(bytes) => bytes.to_vec(),
+        Err(error) => {
+            return VerifiedFetchOutcome::Failed {
+                error: CatalogError::Http(error),
+                retained,
+            };
+        }
+    };
+    let signature = match fetch_signature(request.client, request.url).await {
+        Ok(Some(signature)) => signature,
+        Ok(None) => {
+            return VerifiedFetchOutcome::Failed {
+                error: CatalogError::MissingSignature {
+                    url: request.url.to_string(),
+                },
+                retained,
+            };
+        }
+        Err(error) => {
+            return VerifiedFetchOutcome::Failed {
+                error: CatalogError::Http(error),
+                retained,
+            };
+        }
+    };
+    if let Err(reason) = verify_manifest_signature(&raw, &signature) {
+        return VerifiedFetchOutcome::Failed {
+            error: CatalogError::Signature(reason),
+            retained,
+        };
+    }
+    let catalog = match serde_json::from_slice::<Catalog>(&raw) {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            return VerifiedFetchOutcome::Failed {
+                error: CatalogError::Parse(error),
+                retained,
+            };
+        }
+    };
+    if let Err(error) = validate_catalog_candidate(&catalog, request.minimum_generated_at) {
+        return VerifiedFetchOutcome::Failed { error, retained };
+    }
+    let manifest = match String::from_utf8(raw.clone()) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            return VerifiedFetchOutcome::Failed {
+                error: CatalogError::Unsafe(format!("catalog manifest is not UTF-8: {error}")),
+                retained,
+            };
+        }
+    };
+    let content_sha256 = hex::encode(sha2::Sha256::digest(&raw));
+    let verified_at = chrono::Utc::now();
+    let file = VerifiedGenerationFile {
+        schema_version: VERIFIED_GENERATION_SCHEMA_VERSION,
+        url: request.url.to_string(),
+        etag: etag.clone(),
+        generated_at: catalog.generated_at,
+        verified_at,
+        content_sha256: content_sha256.clone(),
+        manifest,
+        signature,
+    };
+    if let Err(error) = persist_verified_generation(request.cache_path, &file) {
+        return VerifiedFetchOutcome::Failed { error, retained };
+    }
+
+    VerifiedFetchOutcome::Modified(VerifiedGeneration {
+        generated_at: catalog.generated_at,
+        catalog,
+        url: request.url.to_string(),
+        etag,
+        verified_at,
+        content_sha256,
     })
 }
 
-async fn fetch_raw_strict_once(
-    client: &reqwest::Client,
-    url: &str,
-) -> Result<(Catalog, Vec<u8>, String), CatalogError> {
-    let bytes = client
-        .get(url)
-        .send()
-        .await?
-        .error_for_status()?
-        .bytes()
-        .await?;
-    let signature = fetch_signature(client, url)
-        .await?
-        .ok_or_else(|| CatalogError::MissingSignature { url: url.into() })?;
-    verify_manifest_signature(&bytes, &signature).map_err(CatalogError::Signature)?;
-    let catalog = serde_json::from_slice::<Catalog>(&bytes)?;
-    Ok((catalog, bytes.to_vec(), signature))
+pub fn load_verified_generation(cache_path: &Path) -> Option<VerifiedGeneration> {
+    let raw_file = std::fs::read(cache_path).ok()?;
+    let file = serde_json::from_slice::<VerifiedGenerationFile>(&raw_file).ok()?;
+    if file.schema_version != VERIFIED_GENERATION_SCHEMA_VERSION || file.url.is_empty() {
+        return None;
+    }
+    let manifest = file.manifest.as_bytes();
+    let actual_sha256 = hex::encode(sha2::Sha256::digest(manifest));
+    if actual_sha256 != file.content_sha256 {
+        return None;
+    }
+    verify_manifest_signature(manifest, &file.signature).ok()?;
+    let catalog = serde_json::from_slice::<Catalog>(manifest).ok()?;
+    validate_catalog_candidate(&catalog, None).ok()?;
+    if catalog.generated_at != file.generated_at {
+        return None;
+    }
+    Some(VerifiedGeneration {
+        generated_at: catalog.generated_at,
+        catalog,
+        url: file.url,
+        etag: file.etag,
+        verified_at: file.verified_at,
+        content_sha256: file.content_sha256,
+    })
+}
+
+fn persist_verified_generation(
+    cache_path: &Path,
+    generation: &VerifiedGenerationFile,
+) -> Result<(), CatalogError> {
+    persist_verified_generation_with(cache_path, generation, || Ok(()))
+}
+
+fn persist_verified_generation_with<F>(
+    cache_path: &Path,
+    generation: &VerifiedGenerationFile,
+    before_commit: F,
+) -> Result<(), CatalogError>
+where
+    F: FnOnce() -> std::io::Result<()>,
+{
+    let parent = cache_path
+        .parent()
+        .ok_or_else(|| CatalogError::Missing("catalog cache has no parent".into()))?;
+    std::fs::create_dir_all(parent)?;
+    let mut stage = tempfile::NamedTempFile::new_in(parent)?;
+    {
+        use std::io::Write as _;
+        serde_json::to_writer(stage.as_file_mut(), generation)?;
+        stage.as_file_mut().flush()?;
+        stage.as_file().sync_all()?;
+    }
+    before_commit()?;
+    stage
+        .persist(cache_path)
+        .map_err(|error| CatalogError::Io(error.error))?;
+    Ok(())
 }
 
 async fn try_fetch(client: &reqwest::Client, url: &str) -> Result<Catalog, CatalogError> {
@@ -523,6 +823,7 @@ async fn try_fetch(client: &reqwest::Client, url: &str) -> Result<Catalog, Catal
         .await?;
     enforce_manifest_signature(client, url, &bytes).await?;
     let c: Catalog = serde_json::from_slice(&bytes)?;
+    validate_catalog_candidate(&c, None)?;
     Ok(c)
 }
 
@@ -636,6 +937,7 @@ async fn fetch_raw_once(
     };
     enforce_signature_outcome(url, &bytes, fetched)?;
     let c: Catalog = serde_json::from_slice(&bytes)?;
+    validate_catalog_candidate(&c, None)?;
     Ok((c, bytes.to_vec(), sig_opt))
 }
 
@@ -648,7 +950,20 @@ const FALLBACK_SIGNATURE: &str = include_str!("../fallback/manifest.json.sig");
 pub fn embedded_fallback_catalog() -> Result<Catalog, CatalogError> {
     verify_manifest_signature(FALLBACK_MANIFEST, FALLBACK_SIGNATURE)
         .map_err(CatalogError::Signature)?;
-    Ok(serde_json::from_slice(FALLBACK_MANIFEST)?)
+    let catalog: Catalog = serde_json::from_slice(FALLBACK_MANIFEST)?;
+    // The immutable fallback may outlive the network freshness window; require schema,
+    // signature, and non-empty data but do not brick offline startup over its age.
+    if !matches!(catalog.schema_version, 2 | 3) {
+        return Err(CatalogError::UnsupportedSchema {
+            expected: SUPPORTED_SCHEMA_VERSION,
+            actual: catalog.schema_version,
+        });
+    }
+    if catalog.vendors.is_empty() {
+        return Err(CatalogError::EmptyCatalog);
+    }
+    catalog.validate_artifacts()?;
+    Ok(catalog)
 }
 
 /// Sidecar path holding the detached signature next to the cached manifest, so
@@ -662,28 +977,15 @@ fn cache_sig_path(cache_path: &Path) -> PathBuf {
 /// Persist the RAW manifest bytes (atomic) plus the detached signature sidecar.
 /// Best-effort: cache write failures are logged, never fatal to a live fetch.
 fn write_catalog_cache(cache_path: &Path, raw: &[u8], sig: Option<&str>) {
-    let Some(parent) = cache_path.parent() else {
-        return;
-    };
-    let _ = std::fs::create_dir_all(parent);
-    match tempfile::NamedTempFile::new_in(parent) {
-        Ok(mut staged) => {
-            use std::io::Write as _;
-            if staged.write_all(raw).is_ok() && staged.as_file().sync_all().is_ok() {
-                if let Err(e) = staged.persist(cache_path) {
-                    tracing::warn!(error = %e.error, "failed to persist catalog cache");
-                }
+    match sig {
+        Some(signature) => {
+            if let Err(error) = write_verified_cache_atomic(cache_path, raw, signature) {
+                tracing::warn!(%error, "failed to persist verified catalog cache");
             }
         }
-        Err(e) => tracing::warn!(error = %e, "failed to stage catalog cache"),
-    }
-    let sig_path = cache_sig_path(cache_path);
-    match sig {
-        Some(sig) => {
-            let _ = std::fs::write(sig_path, sig);
-        }
         None => {
-            let _ = std::fs::remove_file(sig_path);
+            tracing::warn!("unsigned catalog cache is not persisted");
+            let _ = std::fs::remove_file(cache_sig_path(cache_path));
         }
     }
 }
@@ -724,7 +1026,9 @@ pub fn manifest_public_key_fingerprint() -> String {
 
 /// Load + parse an on-disk cache after requiring its detached signature to verify.
 pub fn load_verified_cache(cache_path: &Path) -> Option<Catalog> {
-    load_cached_catalog_with(cache_path, true)
+    load_verified_generation(cache_path)
+        .map(|generation| generation.catalog)
+        .or_else(|| load_cached_catalog_with(cache_path, true))
 }
 
 /// Load + parse the on-disk cache. When enforcement is on, the cached raw bytes
@@ -733,7 +1037,9 @@ pub fn load_verified_cache(cache_path: &Path) -> Option<Catalog> {
 /// legacy re-serialized cache from before sidecar caching has no `.sig`, so it is
 /// correctly rejected under enforcement and accepted only when enforcement is off.
 fn load_cached_catalog(cache_path: &Path) -> Option<Catalog> {
-    load_cached_catalog_with(cache_path, signature_enforced())
+    load_verified_generation(cache_path)
+        .map(|generation| generation.catalog)
+        .or_else(|| load_cached_catalog_with(cache_path, signature_enforced()))
 }
 
 fn load_cached_catalog_with(cache_path: &Path, require_signature: bool) -> Option<Catalog> {
@@ -742,7 +1048,9 @@ fn load_cached_catalog_with(cache_path: &Path, require_signature: bool) -> Optio
         let sig = std::fs::read_to_string(cache_sig_path(cache_path)).ok()?;
         verify_manifest_signature(&raw, &sig).ok()?;
     }
-    serde_json::from_slice(&raw).ok()
+    let catalog: Catalog = serde_json::from_slice(&raw).ok()?;
+    validate_catalog_candidate(&catalog, None).ok()?;
+    Some(catalog)
 }
 
 /// A raw Ed25519 signature is 64 bytes = 128 hex chars.
@@ -809,6 +1117,30 @@ pub async fn download_and_extract_dll_cached(
 mod tests {
     use super::*;
 
+    fn verified_generation_fixture(url: &str, etag: Option<&str>) -> VerifiedGenerationFile {
+        let catalog = Catalog::from_signed_bytes(FALLBACK_MANIFEST, FALLBACK_SIGNATURE).unwrap();
+        VerifiedGenerationFile {
+            schema_version: VERIFIED_GENERATION_SCHEMA_VERSION,
+            url: url.to_string(),
+            etag: etag.map(str::to_owned),
+            generated_at: catalog.generated_at,
+            verified_at: chrono::Utc::now(),
+            content_sha256: hex::encode(sha2::Sha256::digest(FALLBACK_MANIFEST)),
+            manifest: String::from_utf8(FALLBACK_MANIFEST.to_vec()).unwrap(),
+            signature: FALLBACK_SIGNATURE.to_string(),
+        }
+    }
+
+    #[test]
+    fn space_guard_rejects_impossible_allocation_without_creating_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("candidate.dll");
+        let error = ensure_available_space(&target, u64::MAX).unwrap_err();
+        assert!(error.to_string().contains("insufficient disk space"));
+        assert!(!target.exists());
+        ensure_available_space(dir.path(), 0).unwrap();
+    }
+
     #[test]
     fn embedded_fallback_verifies_against_production_pubkey_and_parses() {
         // This is the brick-guard: it runs the real Ed25519 verification of the
@@ -852,6 +1184,7 @@ mod tests {
 
     fn release_with(filename: &str, version: &str, packed: u64, sha: &str) -> Release {
         Release {
+            artifact: None,
             version: version.into(),
             version_packed: packed,
             filename: filename.into(),
@@ -882,6 +1215,7 @@ mod tests {
         let mut vendors = BTreeMap::new();
         vendors.insert("intel".to_string(), families);
         Catalog {
+            sources: Default::default(),
             schema_version: 2,
             generated_at: chrono::Utc::now(),
             vendors,
@@ -1174,6 +1508,42 @@ mod tests {
     }
 
     #[test]
+    fn automatic_candidate_excludes_preview_and_development() {
+        let stable = release_with("libxess.dll", "2.0.0", 200, "stable");
+        let mut preview = release_with("libxess.dll", "3.0.0", 300, "preview");
+        preview.channel = "experimental".into();
+        let mut developer = release_with("libxess.dll", "4.0.0", 400, "development");
+        developer.is_dev = true;
+        let catalog = catalog_with("xess_sr", vec![stable, preview, developer]);
+        assert_eq!(
+            catalog
+                .find_latest_for_file("intel", "xess_sr", "libxess.dll")
+                .unwrap()
+                .version,
+            "2.0.0"
+        );
+    }
+
+    #[test]
+    fn valid_signature_does_not_approve_an_arm_catalog_candidate() {
+        use ed25519_dalek::{Signer, SigningKey};
+        let mut candidate = release_with("libxess.dll", "2.0.0", 200, &"aa".repeat(32));
+        candidate.cdn_url = "https://example.com/sdk-aarch64.zip".into();
+        candidate.zip_entry = Some("bin/aarch64/libxess.dll".into());
+        let catalog = catalog_with("xess_sr", vec![candidate]);
+        let bytes = serde_json::to_vec(&catalog).unwrap();
+        let key = SigningKey::from_bytes(&[9; 32]);
+        let signature = hex::encode(key.sign(&bytes).to_bytes());
+        assert!(verify_with_pubkey(
+            &hex::encode(key.verifying_key().to_bytes()),
+            &bytes,
+            &signature
+        )
+        .is_ok());
+        assert!(catalog.validate_artifacts().is_err());
+    }
+
+    #[test]
     fn find_latest_for_file_filters_by_filename() {
         let c = catalog_with(
             "xess_sr",
@@ -1276,9 +1646,215 @@ mod tests {
         assert!(load_verified_cache(&cache).is_some());
     }
 
+    #[tokio::test]
+    async fn phase4_etag_is_sent_only_for_the_exact_verified_source_url() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        for manifest_path in ["/first.json", "/second.json"] {
+            Mock::given(method("GET"))
+                .and(path(manifest_path))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .insert_header("ETag", "\"generation-1\"")
+                        .set_body_bytes(FALLBACK_MANIFEST),
+                )
+                .mount(&server)
+                .await;
+            Mock::given(method("GET"))
+                .and(path(format!("{manifest_path}.sig")))
+                .respond_with(ResponseTemplate::new(200).set_body_string(FALLBACK_SIGNATURE))
+                .mount(&server)
+                .await;
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join("catalog.json");
+        let client = reqwest::Client::new();
+        let first_url = format!("{}/first.json", server.uri());
+        assert!(matches!(
+            fetch_verified_generation(VerifiedFetchRequest {
+                client: &client,
+                cache_path: &cache,
+                url: &first_url,
+                minimum_generated_at: None,
+            })
+            .await,
+            VerifiedFetchOutcome::Modified(_)
+        ));
+
+        let second_url = format!("{}/second.json", server.uri());
+        assert!(matches!(
+            fetch_verified_generation(VerifiedFetchRequest {
+                client: &client,
+                cache_path: &cache,
+                url: &second_url,
+                minimum_generated_at: None,
+            })
+            .await,
+            VerifiedFetchOutcome::Modified(_)
+        ));
+
+        let requests = server.received_requests().await.unwrap();
+        let first = requests
+            .iter()
+            .find(|request| request.url.path() == "/first.json")
+            .unwrap();
+        let second = requests
+            .iter()
+            .find(|request| request.url.path() == "/second.json")
+            .unwrap();
+        assert!(first.headers.get("if-none-match").is_none());
+        assert!(second.headers.get("if-none-match").is_none());
+    }
+
+    #[tokio::test]
+    async fn phase4_unverified_generation_never_sends_etag() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/manifest.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(FALLBACK_MANIFEST))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/manifest.json.sig"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(FALLBACK_SIGNATURE))
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join("catalog.json");
+        let url = format!("{}/manifest.json", server.uri());
+        let mut generation = verified_generation_fixture(&url, Some("untrusted-etag"));
+        generation.content_sha256 = "00".repeat(32);
+        persist_verified_generation(&cache, &generation).unwrap();
+
+        assert!(matches!(
+            fetch_verified_generation(VerifiedFetchRequest {
+                client: &reqwest::Client::new(),
+                cache_path: &cache,
+                url: &url,
+                minimum_generated_at: None,
+            })
+            .await,
+            VerifiedFetchOutcome::Modified(_)
+        ));
+        let requests = server.received_requests().await.unwrap();
+        let request = requests
+            .iter()
+            .find(|request| request.url.path() == "/manifest.json")
+            .unwrap();
+        assert!(request.headers.get("if-none-match").is_none());
+    }
+
+    #[tokio::test]
+    async fn phase4_not_modified_and_failed_preserve_verified_generation() {
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/manifest.json"))
+            .and(header("if-none-match", "\"generation-1\""))
+            .respond_with(ResponseTemplate::new(304))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/manifest.json"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("ETag", "\"generation-1\"")
+                    .set_body_bytes(FALLBACK_MANIFEST),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/manifest.json.sig"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(FALLBACK_SIGNATURE))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join("catalog.json");
+        let client = reqwest::Client::new();
+        let url = format!("{}/manifest.json", server.uri());
+        let first = fetch_verified_generation(VerifiedFetchRequest {
+            client: &client,
+            cache_path: &cache,
+            url: &url,
+            minimum_generated_at: None,
+        })
+        .await;
+        let modified = match first {
+            VerifiedFetchOutcome::Modified(generation) => generation,
+            other => panic!("expected modified, got {other:?}"),
+        };
+        let persisted = std::fs::read(&cache).unwrap();
+
+        let second = fetch_verified_generation(VerifiedFetchRequest {
+            client: &client,
+            cache_path: &cache,
+            url: &url,
+            minimum_generated_at: None,
+        })
+        .await;
+        let retained = match second {
+            VerifiedFetchOutcome::NotModified(generation) => generation,
+            other => panic!("expected not modified, got {other:?}"),
+        };
+        assert_eq!(retained.content_sha256, modified.content_sha256);
+        assert_eq!(std::fs::read(&cache).unwrap(), persisted);
+
+        let failed_url = format!("{}/missing.json", server.uri());
+        assert!(matches!(
+            fetch_verified_generation(VerifiedFetchRequest {
+                client: &client,
+                cache_path: &cache,
+                url: &failed_url,
+                minimum_generated_at: None,
+            })
+            .await,
+            VerifiedFetchOutcome::Failed {
+                retained: Some(_),
+                ..
+            }
+        ));
+        assert_eq!(std::fs::read(&cache).unwrap(), persisted);
+    }
+
+    #[test]
+    fn phase4_interrupted_generation_write_leaves_no_mixed_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join("catalog.json");
+        let old = verified_generation_fixture("https://example.test/old.json", Some("old"));
+        persist_verified_generation(&cache, &old).unwrap();
+        let old_bytes = std::fs::read(&cache).unwrap();
+
+        let new = verified_generation_fixture("https://example.test/new.json", Some("new"));
+        let error = persist_verified_generation_with(&cache, &new, || {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "simulated interruption before commit",
+            ))
+        })
+        .unwrap_err();
+        assert!(matches!(error, CatalogError::Io(_)));
+        assert_eq!(std::fs::read(&cache).unwrap(), old_bytes);
+        let loaded = load_verified_generation(&cache).unwrap();
+        assert_eq!(loaded.url, "https://example.test/old.json");
+        assert_eq!(loaded.etag.as_deref(), Some("old"));
+    }
+
     #[test]
     fn candidate_validation_rejects_empty_and_older_catalogs() {
         let empty = Catalog {
+            sources: Default::default(),
             schema_version: 2,
             generated_at: chrono::Utc::now(),
             vendors: BTreeMap::new(),
@@ -1289,6 +1865,26 @@ mod tests {
         assert!(matches!(
             validate_catalog_candidate(&empty, None),
             Err(CatalogError::EmptyCatalog)
+        ));
+
+        let now = chrono::Utc::now();
+        let mut invalid =
+            catalog_with("dlss_sr", vec![release_with("nvngx_dlss.dll", "1", 1, "a")]);
+        invalid.schema_version = 4;
+        assert!(matches!(
+            validate_catalog_at(&invalid, None, now),
+            Err(CatalogError::UnsupportedSchema { actual: 4, .. })
+        ));
+        invalid.schema_version = SUPPORTED_SCHEMA_VERSION;
+        invalid.generated_at = now - chrono::Duration::days(MAX_CATALOG_AGE_DAYS + 1);
+        assert!(matches!(
+            validate_catalog_at(&invalid, None, now),
+            Err(CatalogError::StaleCatalog { .. })
+        ));
+        invalid.generated_at = now + chrono::Duration::minutes(MAX_FUTURE_CLOCK_SKEW_MINUTES + 1);
+        assert!(matches!(
+            validate_catalog_at(&invalid, None, now),
+            Err(CatalogError::FutureCatalog { .. })
         ));
 
         let catalog = embedded_fallback_catalog().unwrap();

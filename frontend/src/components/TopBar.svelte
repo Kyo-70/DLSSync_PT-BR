@@ -1,8 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import {
-    searchQuery,
-    currentView,
     commandPaletteOpen,
     notificationsOpen,
     notificationsUnreadCount,
@@ -11,16 +9,13 @@
 
   let { onToggleTheme, theme }: { onToggleTheme: () => void; theme: string } = $props();
 
-  let searchInput: HTMLInputElement | undefined = $state();
 
   onMount(() => {
     const onKeydown = (e: KeyboardEvent): void => {
-      if (e.key === "/" && document.activeElement?.tagName !== "INPUT") {
+      const active = document.activeElement as HTMLElement | null;
+      if (e.key === "/" && !["INPUT", "TEXTAREA", "SELECT"].includes(active?.tagName ?? "") && !active?.isContentEditable) {
         e.preventDefault();
-        searchInput?.focus();
-      }
-      if (e.key === "Escape" && document.activeElement === searchInput) {
-        searchInput?.blur();
+        openPalette();
       }
     };
     window.addEventListener("keydown", onKeydown);
@@ -47,34 +42,19 @@
   }
 
   function openPalette(): void {
+    notificationsOpen.set(false);
     commandPaletteOpen.set(true);
   }
 
-  let showSearch = $derived($currentView === "library");
   let unread = $derived($notificationsUnreadCount);
   let modKeyLabel = $derived(typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac") ? "⌘" : "Ctrl");
 </script>
 
 <header class="topbar" data-tauri-drag-region>
-  <div class="topbar-left" data-tauri-drag-region>
-    {#if showSearch}
-      <div class="search-wrap">
-        <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-        </svg>
-        <input
-          bind:this={searchInput}
-          type="search"
-          placeholder={$t("component.chrome.topbar.searchPlaceholder")}
-          bind:value={$searchQuery}
-        />
-        <span class="kbd">/</span>
-      </div>
-    {/if}
-  </div>
+  <div class="topbar-left" data-tauri-drag-region></div>
 
   <div class="topbar-right">
-    <button class="topbar-btn palette-btn" title={$t("component.chrome.topbar.commandPaletteTitle", { mod: modKeyLabel })} onclick={openPalette} aria-label={$t("component.chrome.topbar.commandPaletteAria")}>
+    <button class="topbar-btn palette-btn" data-command-palette-toggle aria-haspopup="dialog" aria-expanded={$commandPaletteOpen} title={$t("component.chrome.topbar.commandPaletteTitle", { mod: modKeyLabel })} onclick={openPalette} aria-label={$t("component.chrome.topbar.commandPaletteAria")}>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
       </svg>
@@ -85,7 +65,7 @@
         class="topbar-btn bell-btn"
         title={$t("component.chrome.topbar.notifications")}
         data-notifications-toggle
-        onclick={() => notificationsOpen.update((v) => !v)}
+        onclick={() => { commandPaletteOpen.set(false); notificationsOpen.update((v) => !v); }}
         aria-haspopup="dialog"
         aria-expanded={$notificationsOpen}
         aria-label={unread > 0 ? $t("component.chrome.topbar.unreadNotifications", { count: unread }) : $t("component.chrome.topbar.notifications")}
@@ -142,32 +122,12 @@
     .topbar { background: var(--glass-fallback); }
   }
   .topbar-left { flex: 1; min-width: 0; display: flex; align-items: center; }
-  .search-wrap {
-    position: relative;
-    width: 100%;
-    max-width: 320px;
-    display: flex;
-    align-items: center;
-  }
-  .search-icon {
-    position: absolute;
-    left: 14px;
-    color: var(--text-muted);
-    pointer-events: none;
-  }
-  .search-wrap input {
-    width: 100%;
-    height: 36px;
-    padding: 0 38px 0 36px;
-    border-radius: var(--radius-full);
-    background: var(--bg-elevated);
-    border: 1px solid transparent;
-    font-size: var(--fs-sm);
-    color: var(--text-primary);
-  }
-  .search-wrap input:hover { background: var(--bg-card-hover); }
-  .search-wrap input:focus { background: var(--bg-card); border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
-  .search-wrap .kbd { position: absolute; right: 12px; pointer-events: none; }
+
+
+
+
+
+
 
   .topbar-right { display: flex; align-items: center; gap: 6px; }
 

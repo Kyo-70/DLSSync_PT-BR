@@ -2,7 +2,11 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 pub mod authenticode;
+pub mod identity;
 pub use authenticode::{allowed_subjects, enforce_subject, read_authenticode, AuthenticodeInfo};
+pub use identity::{
+    inspect_pe, read_pe_identity, require_x64_dll_pair, require_x64_executable, PeIdentity,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum VersionError {
@@ -16,7 +20,7 @@ pub enum VersionError {
     Missing,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct DllVersion {
     pub file_version: String,
     pub product_version: String,

@@ -14,6 +14,7 @@
 
 mod classify;
 mod snapshot;
+mod snapshot_manifest;
 mod store;
 mod version;
 
@@ -21,6 +22,7 @@ pub use classify::{classify, classify_best, DeviceClass};
 pub use snapshot::{
     add_driver_install_args, export_driver_args, is_published_oem_inf, restore_inf_glob,
 };
+pub use snapshot_manifest::{seal_driver_snapshot, verify_driver_snapshot};
 pub use store::{parse_enum_drivers, versions_by_original_name, DriverStorePackage};
 pub use version::{extract_version, is_newer, ole_date_to_iso, DriverVersion};
 
@@ -52,7 +54,7 @@ pub enum DriverError {
 }
 
 /// An installed device + its current driver, from WMI `Win32_PnPSignedDriver`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct SystemDevice {
     pub name: String,
     pub class: DeviceClass,
@@ -62,6 +64,11 @@ pub struct SystemDevice {
     pub driver_date: Option<String>,
     /// Raw hardware id (uppercased), e.g. `PCI\VEN_8086&DEV_9A49&SUBSYS_...`.
     pub hardware_id: String,
+    /// Exact PnP hardware and compatible IDs. `hardware_id` remains the unique device instance ID.
+    #[serde(default)]
+    pub hardware_ids: Vec<String>,
+    #[serde(default)]
+    pub problem_code: Option<u32>,
     /// The DriverStore published INF name for the installed driver, e.g.
     /// `oem47.inf`, from WMI `InfName`. The handle `pnputil /export-driver`
     /// needs to snapshot this device's current driver before an update.
@@ -78,7 +85,7 @@ fn default_present() -> bool {
 }
 
 /// A candidate driver offered by Windows Update / the Microsoft Update Catalog.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type)]
 pub struct DriverUpdate {
     /// `UpdateID:RevisionNumber` — the stable handle used to install.
     pub update_id: String,
@@ -105,23 +112,23 @@ pub struct DriverUpdate {
     pub support_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
-pub enum InstallStage {
+pub enum SystemDriverInstallStage {
     Downloading,
     Installing,
     Completed,
     Failed,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InstallProgress {
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct SystemDriverInstallProgress {
     pub stage: InstallStage,
     pub message: String,
     pub fraction: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct InstallReport {
     pub success: bool,
     pub reboot_required: bool,
@@ -130,7 +137,7 @@ pub struct InstallReport {
 }
 
 /// Per-class group of available updates, for the UI's "System & Components" view.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct DeviceGroup {
     pub class: DeviceClass,
     pub label: String,
@@ -270,6 +277,17 @@ pub fn hwid_key(raw: &str) -> Option<HwidKey> {
 /// the broadened [`HwidKey`] so ACPI/SWC/monitor devices match (and are then
 /// anti-downgrade checked) instead of silently passing unverified.
 pub fn matches_device(update: &DriverUpdate, device: &SystemDevice) -> bool {
+    if !device.present {
+        return false;
+    }
+    if !device.hardware_ids.is_empty() {
+        return update.hardware_id.as_deref().is_some_and(|id| {
+            device
+                .hardware_ids
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(id))
+        });
+    }
     match (
         update.hardware_id.as_deref().and_then(hwid_key),
         hwid_key(&device.hardware_id),
@@ -487,12 +505,17 @@ pub fn group_by_class(updates: Vec<DriverUpdate>) -> Vec<DeviceGroup> {
         .collect()
 }
 
+pub type InstallProgress = SystemDriverInstallProgress;
+pub type InstallStage = SystemDriverInstallStage;
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn dev(name: &str, class: DeviceClass, hwid: &str, ver: &str, date: &str) -> SystemDevice {
         SystemDevice {
+            hardware_ids: Vec::new(),
+            problem_code: None,
             name: name.into(),
             class,
             manufacturer: "Test".into(),
@@ -513,6 +536,8 @@ mod tests {
         manufacturer: &str,
     ) -> SystemDevice {
         SystemDevice {
+            hardware_ids: Vec::new(),
+            problem_code: None,
             manufacturer: manufacturer.into(),
             ..dev(name, class, hwid, ver, date)
         }
@@ -998,3 +1023,5 @@ mod tests {
         assert!(!matches_device(&update, &device));
     }
 }
+
+// Compatibility aliases for existing Rust callers. The wire type names remain unambiguous.

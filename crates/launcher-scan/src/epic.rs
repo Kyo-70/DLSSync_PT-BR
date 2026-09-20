@@ -1,4 +1,8 @@
-use crate::{DetectedGame, LauncherKind, LauncherScanner, ScanError};
+use crate::{
+    DetectedGame, GameArt, GameArtCandidate, GameArtSource, LauncherKind, LauncherScanner,
+    ScanError,
+};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use winreg::enums::HKEY_LOCAL_MACHINE;
 use winreg::RegKey;
@@ -78,13 +82,117 @@ fn parse_manifest(path: &std::path::Path) -> Option<DetectedGame> {
         .get("CatalogItemId")
         .and_then(|x| x.as_str())
         .map(|s| s.to_string());
+    let catalog_namespace = v
+        .get("CatalogNamespace")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    let vault_thumbnail = v
+        .get("VaultThumbnailUrl")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .trim();
+    let candidates = GameArtCandidate::https(
+        vault_thumbnail,
+        GameArtSource::EpicManifest,
+        "vault_thumbnail",
+        0,
+        0,
+    )
+    .into_iter()
+    .collect::<Vec<_>>();
+    let art = if candidates.is_empty() {
+        GameArt::unavailable(
+            GameArtSource::EpicManifest,
+            "no_local_or_official_cover_metadata",
+        )
+    } else {
+        GameArt::pending(candidates)
+    };
+    let mut native_ids = BTreeMap::new();
+    native_ids.insert("app_name".to_string(), app_name.to_string());
+    if let Some(id) = catalog_item_id.as_ref() {
+        native_ids.insert("catalog_item_id".to_string(), id.clone());
+    }
+    if !catalog_namespace.is_empty() {
+        native_ids.insert("catalog_namespace".to_string(), catalog_namespace);
+    }
     Some(DetectedGame {
         id: format!("epic-{}", app_name),
         name: display,
         launcher: LauncherKind::Epic,
         install_dir,
         app_id: catalog_item_id.or_else(|| Some(app_name.to_string())),
+        native_ids,
+        art,
         image_url: None,
         size_bytes: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::GameArtState;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn fixture_dir(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("dlssync-{name}-{nonce}"))
+    }
+
+    #[test]
+    fn epic_manifest_preserves_native_ids_and_observed_cover_url() {
+        let root = fixture_dir("epic-art");
+        let install = root.join("game");
+        std::fs::create_dir_all(&install).unwrap();
+        let manifest = root.join("game.item");
+        let json = serde_json::json!({
+            "InstallLocation": install,
+            "AppName": "app-name",
+            "DisplayName": "Fixture Game",
+            "CatalogNamespace": "namespace",
+            "CatalogItemId": "catalog-id",
+            "VaultThumbnailUrl": "https://cdn.example.invalid/cover.jpg"
+        });
+        std::fs::write(&manifest, serde_json::to_vec(&json).unwrap()).unwrap();
+
+        let game = parse_manifest(&manifest).unwrap();
+        assert_eq!(
+            game.native_ids.get("catalog_item_id").map(String::as_str),
+            Some("catalog-id")
+        );
+        assert_eq!(game.art.state, GameArtState::Pending);
+        assert_eq!(game.art.candidates.len(), 1);
+        assert_eq!(game.art.candidates[0].variant, "vault_thumbnail");
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn epic_without_observed_cover_is_explicitly_unavailable() {
+        let root = fixture_dir("epic-no-art");
+        let install = root.join("game");
+        std::fs::create_dir_all(&install).unwrap();
+        let manifest = root.join("game.item");
+        let json = serde_json::json!({
+            "InstallLocation": install,
+            "AppName": "modkit-app",
+            "DisplayName": "inZOI ModKit",
+            "CatalogNamespace": "namespace",
+            "CatalogItemId": "catalog-id",
+            "VaultThumbnailUrl": ""
+        });
+        std::fs::write(&manifest, serde_json::to_vec(&json).unwrap()).unwrap();
+
+        let game = parse_manifest(&manifest).unwrap();
+        assert_eq!(game.art.state, GameArtState::Unavailable);
+        assert!(!game.art.retryable);
+        assert_eq!(game.art.candidates.len(), 0);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

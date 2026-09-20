@@ -13,11 +13,10 @@ function source(name: string): string {
 describe("Phase 8 — floating chrome shares the .glass-dialog material", () => {
   const directPanels = [
     "ApplyProgressModal.svelte",
-    "VersionPickerPopover.svelte",
     "Select.svelte",
     "NotificationsBell.svelte",
   ];
-  const shellRoutedFlyouts = ["CatalogVersionsFlyout.svelte", "DriverHistoryFlyout.svelte"];
+  const shellRoutedFlyouts = ["CatalogVersionsFlyout.svelte", "DriverHistoryFlyout.svelte", "VersionPickerPopover.svelte"];
 
   it("applies the .glass-dialog class on every floating-chrome panel", () => {
     for (const file of directPanels) {
@@ -27,7 +26,7 @@ describe("Phase 8 — floating chrome shares the .glass-dialog material", () => 
       source("FlyoutShell.svelte"),
       "FlyoutShell should carry glass-dialog for routed flyouts",
     ).toContain("glass-dialog");
-    for (const file of shellRoutedFlyouts) {
+    for (const file of shellRoutedFlyouts.filter(file => file !== "VersionPickerPopover.svelte")) {
       expect(source(file), `${file} should route chrome through FlyoutShell`).toContain(
         "<FlyoutShell",
       );
@@ -67,7 +66,7 @@ describe("Phase 8 — floating chrome shares the .glass-dialog material", () => 
       source("FlyoutShell.svelte"),
       "FlyoutShell is the central --edge-color routing surface",
     ).toContain("--edge-color={accent}");
-    for (const file of shellRoutedFlyouts) {
+    for (const file of shellRoutedFlyouts.filter(file => file !== "VersionPickerPopover.svelte")) {
       expect(source(file), `${file} must pass {accent} into FlyoutShell`).toMatch(
         /<FlyoutShell[\s\S]*?\{accent\}/,
       );

@@ -1,72 +1,65 @@
+[b]Local draft: 1.7.0 is Unreleased.[/b] Do not publish this description as release certification. The source review still needs packaged network and artifact verification documented in docs/nexus-build.md. Verify the exact release artifacts before removing this draft notice.
+
 [center][img]https://raw.githubusercontent.com/xt0n1-t3ch/DLSSync/main/.github/assets/nexus/banner-header-1300x372.png[/img]
 
-[size=5][b]One trusted sync layer for DLSS, FSR, XeSS, DirectStorage and Windows drivers.[/b][/size]
+[size=5][b]Update game DLLs and inspect driver updates from one Windows app.[/b][/size]
 
-DLSSync scans your installed games, shows exactly what is outdated, and lets you review every file before anything changes. The public catalog is signed, every download is hash-checked against that catalog, vendor publishers are verified with Authenticode, and every apply starts with a restorable backup.
+DLSSync updates supported DLSS, FSR, XeSS, Streamline and DirectStorage DLLs already present in game folders. It also offers GPU and Windows device-driver workflows. Local DLL snapshots and an operation journal help you inspect changes and restore retained backups.
 
 [url=https://github.com/xt0n1-t3ch/DLSSync][img]https://img.shields.io/badge/Source-Code_on_GitHub-181717?style=for-the-badge&logo=github&logoColor=white[/img][/url]
 [url=https://github.com/xt0n1-t3ch/DLSSync-Manifest][img]https://img.shields.io/badge/Signed-Public_Catalog-0B8F6A?style=for-the-badge&logo=files&logoColor=white[/img][/url][/center]
 
-[size=4][b]What DLSSync manages[/b][/size]
+[size=4][b]What the app manages[/b][/size]
 
 [list]
-[*][b]NVIDIA:[/b] DLSS Super Resolution, Frame Generation, Ray Reconstruction, Streamline and Reflex.
-[*][b]AMD:[/b] FidelityFX Super Resolution, Frame Generation, loader, Vulkan and denoiser runtimes.
+[*][b]NVIDIA:[/b] DLSS Super Resolution, Frame Generation, Ray Reconstruction, Streamline and Reflex files.
+[*][b]AMD:[/b] Recognized FidelityFX upscaler, frame-generation, loader, Vulkan and denoiser runtimes.
 [*][b]Intel:[/b] XeSS Super Resolution, XeSS Frame Generation and XeLL.
 [*][b]Microsoft:[/b] DirectStorage and DirectStorage Core.
-[*][b]Drivers:[/b] NVIDIA, AMD and Intel GPU releases plus applicable Windows device-driver updates.
+[*][b]Drivers:[/b] NVIDIA, AMD and Intel GPU package workflows plus applicable Windows device-driver updates.
 [/list]
 
-[size=4][b]Why it is different[/b][/size]
+[size=4][b]Understand the checks and limits[/b][/size]
 
 [list]
-[*][b]Review before apply.[/b] Update Plan shows the exact file, current and target version, upstream source, signer, expected hash, backup and anti-cheat risk.
-[*][b]Signed public catalog.[/b] Catalog metadata must pass its detached Ed25519 signature and schema before DLSSync stores or uses it.
-[*][b]Traceable upstream downloads.[/b] Every row shows its exact source. Most current families come directly from vendor releases; historical NVIDIA DLSS and much of the AMD FSR and Intel XeSS back-catalog use the clearly labeled DLSS Swapper community archive where stable first-party assets are unavailable.
-[*][b]Publisher enforcement.[/b] A matching hash is not enough when the Authenticode publisher is wrong.
-[*][b]Reversible changes.[/b] Backups and the Operation Journal keep the evidence required to inspect or roll back an operation.
-[*][b]Anti-cheat awareness.[/b] Protected games are identified before mutation and require an explicit review path.
-[*][b]Zero telemetry.[/b] There are no accounts, analytics or tracking. Diagnostics stay local unless you choose to export them.
+[*]Catalog metadata has a detached Ed25519 signature. Artifact hashes use each entry's recorded algorithm, including SHA-256 and historical MD5. Publisher verification is a separate Authenticode check.
+[*]Sources include first-party releases and labeled DLSS Swapper community-archive history. An original vendor signature does not make an archive first-party.
+[*]Backups use SHA-256 to validate local snapshot bytes. Missing snapshots, locks, permissions and validation failures can prevent restore.
+[*]A correct hash does not prove that a game, GPU or mod combination works. Updating DLLs does not add a missing game integration.
+[*]Check a protected game's policy before changing files or driver profiles. An absent warning is not permission to modify it.
+[*]GPU installer outcomes and Windows driver recovery are separate from game DLL backups. A System Restore checkpoint is not guaranteed.
 [/list]
 
-[size=4][b]Important: Nexus build behavior[/b][/size]
+[size=4][b]Required NexusBuild- behavior[/b][/size]
 
-This download is the Nexus Mods compliant build. [b]Application self-updates are disabled[/b], and DLSSync makes [b]no automatic catalog request[/b] when it starts, opens Catalog or regains focus.
+The Nexus channel must have [b]no app self-updater and no automatic app-update or catalog network calls[/b]. Catalog refresh and every other network action must be [b]explicit and manual[/b]. Opening a page is not consent to a network lookup.
 
-The embedded signed catalog remains available offline. When you choose [b]Refresh Catalog[/b], DLSSync fetches the current manifest and detached signature from the public upstream, verifies both, rejects invalid or older data, and then shows the version delta. That button is the only catalog network trigger in this build.
+The embedded signed catalog supports the initial offline state. [b]Refresh Catalog[/b] explicitly retrieves current metadata and its detached signature for validation. Install future app versions manually from Nexus Mods.
 
-Public catalog and verification source: [url=https://github.com/xt0n1-t3ch/DLSSync-Manifest]DLSSync-Manifest on GitHub[/url]
+Standard and Nexus must use the same source commit and one [b]v1.7.0[/b] tag. Nexus assets use distinct [b]NexusBuild-[/b] names. Standard's updater feed must point only to the exact Standard installer, never a Nexus asset, and must carry its nonempty matching signature. Publication must preserve an existing release. These are acceptance requirements; complete network silence before manual actions and final public artifact bytes remain unverified in this draft.
 
-[size=4][b]New in 1.7.0[/b][/size]
-
-[list]
-[*]Trust Center with Ed25519 state, catalog commit, generation date, refresh method and public-key fingerprint.
-[*]Reviewable Update Plans with row exclusion, JSON export and stale-plan detection.
-[*]Append-only Operation Journal for scans, refreshes, plans, applies, rollbacks and driver actions.
-[*]A real [b]dlssync[/b] CLI for status, scan, catalog, plan, apply, rollback, journal and doctor workflows.
-[*]Portable mode that keeps settings, catalog, backups, logs and journal under [b]&lt;exe&gt;\data[/b].
-[*]Favorites, stronger filters and complete English, Spanish, Brazilian Portuguese, German, French, Japanese, Russian and Simplified Chinese interfaces.
-[/list]
-
-[size=4][b]How to use[/b][/size]
+[size=4][b]Use DLSSync[/b][/size]
 
 [list=1]
-[*]Install or extract DLSSync and open [b]Library[/b].
-[*]Scan the detected launchers or add a custom game folder in Settings.
-[*]Open a game and review its installed component versions and trust state.
-[*]Choose the updates, inspect the Update Plan, then apply the selected rows.
-[*]Use Backups or Operation Journal when you need to inspect or restore an earlier state.
+[*]Install or extract the intended channel and open [b]Library[/b].
+[*]Scan supported launchers or add the actual game folder through Settings. Discovery is not exhaustive.
+[*]Close the game and inspect detected components, versions and warnings.
+[*]Use the game's one-click update action. Routine updates prepare internally without a separate confirmation; validation can still reject an operation.
+[*]Read the per-file result and test the game. Use [b]Backups[/b] to restore retained snapshots if needed.
 [/list]
+
+[size=4][b]Privacy and requirements[/b][/size]
+
+Windows 10/11 x64 with WebView2. Game-folder writes, driver operations and some installation formats can require additional permissions. The repository has no telemetry endpoint, but functional network requests can send game titles or device compatibility parameters. Optional SteamGridDB lookup uses bearer authentication. Opening a prefilled GitHub issue URL sends its report contents before issue submission; review and redact diagnostics first.
+
+Portable mode uses data beside the executable when portable.flag is present and disables app self-update. Keep its backups and operation journal when moving the app.
 
 [size=4][b]Links[/b][/size]
 
 [list]
-[*][url=https://github.com/xt0n1-t3ch/DLSSync]Source code and documentation[/url]
-[*][url=https://github.com/xt0n1-t3ch/DLSSync-Manifest]Signed manifest, schema and independent verification[/url]
+[*][url=https://github.com/xt0n1-t3ch/DLSSync]Source code and user documentation[/url]
+[*][url=https://github.com/xt0n1-t3ch/DLSSync-Manifest]Catalog repository[/url]
 [*][url=https://github.com/xt0n1-t3ch/DLSSync/issues]Bug reports and feature requests[/url]
-[*][url=https://github.com/xt0n1-t3ch/DLSSync/releases]Standard and portable releases[/url]
+[*][url=https://github.com/xt0n1-t3ch/DLSSync/releases]Available GitHub releases[/url]
+[*][url=https://www.nexusmods.com/site/mods/1922]Nexus Mods, mod 1922[/url]
 [/list]
-
-[size=4][b]Requirements[/b][/size]
-
-Windows 10 or Windows 11, x64. Administrator approval is requested only for per-machine driver operations that Windows itself requires to run elevated.

@@ -29,6 +29,9 @@ function makeReport(model: string, status: DriverUpdateStatus): DriverStatusRepo
           }
         : null,
     status,
+    health: status === "update_available" ? "outdated" : status === "up_to_date" ? "current" : status,
+    action: { kind: "none", help_url: null },
+    reboot_pending: null,
   };
 }
 

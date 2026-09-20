@@ -37,9 +37,8 @@ pub fn export_driver_args(published_name: &str, dest: &str) -> Vec<String> {
 }
 
 /// `pnputil` arguments to (re)install every INF found under an exported snapshot
-/// — `/subdirs` recurses, `/install` forces the package onto matching devices so
-/// an explicit user rollback wins even when Windows considers the live driver
-/// newer.
+/// — `/subdirs` recurses and `/install` asks Windows to bind matching devices.
+/// Windows driver ranking still applies; a successful exit does not prove rollback.
 pub fn add_driver_install_args(inf_glob: &str) -> Vec<String> {
     vec![
         "/add-driver".to_string(),
@@ -67,15 +66,27 @@ pub mod win {
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-    fn run_pnputil(args: &[String]) -> Result<String, String> {
-        let output = Command::new("pnputil.exe")
+    fn run_pnputil(args: &[String]) -> Result<(String, bool), String> {
+        let mut system_directory = [0u16; 32768];
+        let length = unsafe {
+            windows::Win32::System::SystemInformation::GetSystemDirectoryW(Some(
+                &mut system_directory,
+            ))
+        } as usize;
+        if length == 0 || length >= system_directory.len() {
+            return Err("Windows system directory could not be resolved".into());
+        }
+        let executable =
+            std::path::PathBuf::from(String::from_utf16_lossy(&system_directory[..length]))
+                .join("pnputil.exe");
+        let output = Command::new(executable)
             .args(args)
             .creation_flags(CREATE_NO_WINDOW)
             .output()
             .map_err(|e| format!("failed to launch pnputil: {e}"))?;
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-        if output.status.success() {
-            return Ok(stdout);
+        if output.status.success() || output.status.code() == Some(3010) {
+            return Ok((stdout, output.status.code() == Some(3010)));
         }
         let stderr = String::from_utf8_lossy(&output.stderr);
         Err(format!(
@@ -97,20 +108,22 @@ pub mod win {
         }
         std::fs::create_dir_all(dest).map_err(|e| format!("create snapshot dir: {e}"))?;
         let dest_str = dest.to_string_lossy();
-        run_pnputil(&export_driver_args(published_name, &dest_str)).map(|_| ())
+        run_pnputil(&export_driver_args(published_name, &dest_str))?;
+        crate::seal_driver_snapshot(dest).map(|_| ())
     }
 
     /// Roll back by re-installing every INF in a previously-exported snapshot
     /// directory. Requires Administrator.
-    pub fn restore_driver(export_dir: &Path) -> Result<(), String> {
+    pub fn restore_driver(export_dir: &Path) -> Result<bool, String> {
         if !export_dir.is_dir() {
             return Err(format!(
                 "snapshot directory not found: {}",
                 export_dir.display()
             ));
         }
+        crate::verify_driver_snapshot(export_dir)?;
         let glob = restore_inf_glob(&export_dir.to_string_lossy());
-        run_pnputil(&add_driver_install_args(&glob)).map(|_| ())
+        run_pnputil(&add_driver_install_args(&glob)).map(|(_, reboot)| reboot)
     }
 
     /// Lay down a `DEVICE_DRIVER_INSTALL` System Restore checkpoint named
@@ -174,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    fn install_args_force_and_recurse() {
+    fn install_args_request_install_and_recurse() {
         assert_eq!(
             add_driver_install_args(r"C:\snap\oem47\*.inf"),
             vec![

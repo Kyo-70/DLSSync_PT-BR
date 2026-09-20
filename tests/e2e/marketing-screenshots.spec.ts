@@ -21,21 +21,18 @@ test.describe("marketing screenshots", () => {
     await expect(page.locator(".game-card")).toHaveCount(4, { timeout: 30_000 });
     await page.screenshot({ path: join(gallery, "01-library.png"), animations: "disabled" });
 
-    await protectedCard.locator(".body").click();
+    await protectedCard.getByRole("heading").getByRole("button").click();
     await expect(page.locator(".detail-view")).toBeVisible();
     await expect(page.locator(".detail-view .feature-row")).toHaveCount(2, { timeout: 30_000 });
     await page.screenshot({ path: join(gallery, "02-game-detail.png"), animations: "disabled" });
 
-    const apply = page.locator(".foot-apply");
-    await apply.click();
-    await page.locator(".ac-confirm-proceed").click();
-    await expect(page.getByRole("heading", { name: "Review update plan", exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Apply selected", exact: true })).toBeEnabled();
-    await page.screenshot({ path: join(gallery, "03-update-plan.png"), animations: "disabled" });
-    await page.locator(".plan-modal .close").click();
+    await page.locator(".detail-back").click();
+    await gotoView(page, "backups");
+    await expect(page.locator(".backup-hero")).toHaveCount(0);
+    await page.screenshot({ path: join(gallery, "03-backups.png"), animations: "disabled" });
 
     await gotoView(page, "catalog");
-    await expect(page.getByRole("heading", { name: "Trust Center", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Trust Center", exact: true })).toHaveCount(0);
     await page.screenshot({ path: join(gallery, "04-catalog-trust.png"), animations: "disabled" });
 
     await gotoView(page, "drivers");
@@ -43,7 +40,8 @@ test.describe("marketing screenshots", () => {
     await page.screenshot({ path: join(gallery, "05-drivers.png"), animations: "disabled" });
 
     await gotoView(page, "journal");
-    await expect(page.getByRole("heading", { name: "Operation Journal", exact: true })).toBeVisible();
+    // The journal moved under Backups as the "Activity" tab; `view.journal.title` is its heading.
+    await expect(page.getByRole("heading", { name: "Activity", exact: true })).toBeVisible();
     await page.screenshot({ path: join(gallery, "06-journal.png"), animations: "disabled" });
 
     await gotoView(page, "settings");

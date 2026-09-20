@@ -43,21 +43,8 @@ export function makeNotificationEntry(
   };
 }
 
-export interface NotificationEntry {
-  id: string;
-  kind: NotificationKind;
-  title: string;
-  body: string | null;
-  created_at: string;
-  read_at: string | null;
-  dismissed_at: string | null;
-  apply_id: string | null;
-  game_id: string | null;
-  error_class: string | null;
-  link: string | null;
-  vendor: string | null;
-  dedup_key: string | null;
-}
+import type { NotificationEntry } from "../generated/bindings";
+export type { NotificationEntry } from "../generated/bindings";
 
 const FEATURE_VENDOR_TOKENS: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bdlss\b|\bstreamline\b|\breflex\b|\bnvngx\b/, "nvidia"],
@@ -93,7 +80,7 @@ export interface ListFilter {
 export const notifications: Writable<NotificationEntry[]> = writable([]);
 
 export async function listNotifications(filter?: ListFilter): Promise<NotificationEntry[]> {
-  return transport(COMMANDS.list_notifications, { filter });
+  return transport(COMMANDS.list_notifications, { filter: filter ? { include_dismissed: filter.include_dismissed ?? null, limit: filter.limit ?? null } : null });
 }
 
 export async function markRead(id: string): Promise<void> {

@@ -118,11 +118,9 @@ fn entry_to_release(entry: &serde_json::Value) -> Option<DriverRelease> {
     let file0 = entry["Files"].as_array().and_then(|f| f.first());
     let download_url = file0
         .and_then(|f| f["Url"].as_str())
-        .unwrap_or_default()
-        .to_string();
-    if download_url.is_empty() {
-        return None;
-    }
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+        .map(str::to_string);
     let is_beta = entry["IsBeta"].as_bool().unwrap_or(false);
     Some(DriverRelease {
         vendor: DriverVendor::Intel,
@@ -338,8 +336,8 @@ mod tests {
             .expect("release");
         assert_eq!(r.version.display, "32.0.101.8801");
         assert_eq!(
-            r.download_url,
-            "https://downloadmirror.intel.com/919751/gfx_win_101.8801.exe"
+            r.download_url.as_deref(),
+            Some("https://downloadmirror.intel.com/919751/gfx_win_101.8801.exe")
         );
         assert!(r.release_notes_url.as_deref().unwrap().contains("785597"));
         assert_eq!(r.signature_subject, "Intel Corporation");
@@ -360,7 +358,10 @@ mod tests {
             .expect("release");
         assert_eq!(r.version.display, "32.0.101.7085");
         assert!(r.release_notes_url.as_deref().unwrap().contains("864990"));
-        assert!(r.download_url.contains("7085"));
+        assert!(r
+            .download_url
+            .as_deref()
+            .is_some_and(|url| url.contains("7085")));
     }
 
     #[test]
@@ -483,7 +484,9 @@ mod tests {
             "Win10 user must receive the Windows 10 package, not the Win11 one"
         );
         assert!(
-            r.download_url.contains("8900-w10"),
+            r.download_url
+                .as_deref()
+                .is_some_and(|url| url.contains("8900-w10")),
             "download URL must point at the Win10 installer"
         );
     }
@@ -497,7 +500,10 @@ mod tests {
             r.version.display, "32.0.101.9000",
             "Win11 user must receive the Windows 11 package, not the Win10 one"
         );
-        assert!(r.download_url.contains("9000-w11"));
+        assert!(r
+            .download_url
+            .as_deref()
+            .is_some_and(|url| url.contains("9000-w11")));
     }
 
     #[test]
