@@ -102,6 +102,7 @@ function spawnApp(dataDir: string): ChildProcess {
       DLSSYNC_E2E: "1",
       DLSSYNC_CDP_PORT: String(cdpPort),
       DLSSYNC_E2E_GPU_FIXTURE: "1",
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${cdpPort} --remote-debugging-address=127.0.0.1`,
       WEBVIEW2_USER_DATA_FOLDER: join(dataDir, "WebView2"),
     },
   });
