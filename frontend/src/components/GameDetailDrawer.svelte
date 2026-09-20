@@ -559,7 +559,7 @@
   });
 
   function requestApply(): void {
-    if (selectedCount === 0) return;
+    if (busy || selectedCount === 0) return;
     if (acActive && acSeverity === "danger" && !acConfirming) {
       acConfirming = true;
       return;

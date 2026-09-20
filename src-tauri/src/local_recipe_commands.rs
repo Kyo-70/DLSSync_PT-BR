@@ -183,8 +183,13 @@ fn validate_target(
     domain::validate_file_claims(&claims, &official).map_err(err)?;
     for config in &recipe.config_keys {
         let target = store.target(&config.path).map_err(err)?;
-        if official.iter().any(|file| file.path == config.path)
-            || claims.iter().any(|file| file.path == config.path)
+        let config_key = config.path.comparison_key();
+        if official
+            .iter()
+            .any(|file| file.path.comparison_key() == config_key)
+            || claims
+                .iter()
+                .any(|file| file.path.comparison_key() == config_key)
         {
             return Err(err(format!(
                 "Configuration conflicts with an owned component: {}",

@@ -193,10 +193,17 @@ pub enum PathGuardError {
 pub struct PathGuard;
 
 impl PathGuard {
-    /// The path must live inside `root`. `Path::starts_with` is component-wise,
-    /// so `/data/BackupsEvil` does not match a `/data/Backups` root.
+    /// The existing path must resolve inside `root`. Canonicalization applies
+    /// Windows filesystem casing and rejects symlink/junction escapes before
+    /// the component-wise containment check.
     pub fn assert_under_root(path: &Path, root: &Path) -> Result<(), PathGuardError> {
-        if path.starts_with(root) {
+        let canonical_root = root
+            .canonicalize()
+            .map_err(|_| PathGuardError::OutsideRoot(root.display().to_string()))?;
+        let canonical_path = path
+            .canonicalize()
+            .map_err(|_| PathGuardError::OutsideRoot(path.display().to_string()))?;
+        if canonical_path.starts_with(&canonical_root) {
             Ok(())
         } else {
             Err(PathGuardError::OutsideRoot(path.display().to_string()))
@@ -328,17 +335,24 @@ mod tests {
 
     #[test]
     fn guard_under_root_is_component_wise() {
-        let root = Path::new("/data/DLSSync/Backups");
-        assert!(PathGuard::assert_under_root(
-            Path::new("/data/DLSSync/Backups/Cyberpunk/sl.dll"),
-            root
-        )
-        .is_ok());
-        assert!(PathGuard::assert_under_root(Path::new("/etc/passwd"), root).is_err());
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("Backups");
+        std::fs::create_dir_all(root.join("Cyberpunk")).unwrap();
+        let inside = root.join("Cyberpunk/sl.dll");
+        std::fs::write(&inside, b"dll").unwrap();
+        assert!(PathGuard::assert_under_root(&inside, &root).is_ok());
+        assert!(PathGuard::assert_under_root(Path::new("/etc/passwd"), &root).is_err());
         assert!(
-            PathGuard::assert_under_root(Path::new("/data/DLSSync/BackupsEvil/x.dll"), root)
-                .is_err()
+            PathGuard::assert_under_root(&dir.path().join("BackupsEvil/x.dll"), &root).is_err()
         );
+        let escaped = root.join("Cyberpunk/../outside.dll");
+        std::fs::write(dir.path().join("outside.dll"), b"outside").unwrap();
+        assert!(PathGuard::assert_under_root(&escaped, &root).is_err());
+        #[cfg(windows)]
+        {
+            let differently_cased_root = PathBuf::from(root.to_string_lossy().to_uppercase());
+            assert!(PathGuard::assert_under_root(&inside, &differently_cased_root).is_ok());
+        }
     }
 
     #[test]

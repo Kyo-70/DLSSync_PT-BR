@@ -11,6 +11,11 @@ pub use art::{
 
 #[derive(Debug, thiserror::Error)]
 pub enum ScanError {
+    #[error("partial scan: {detail}")]
+    Partial {
+        games: Vec<DetectedGame>,
+        detail: String,
+    },
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
     #[error("registry: {0}")]
@@ -100,6 +105,10 @@ pub fn scan_all(launchers: &[LauncherKind]) -> Result<Vec<DetectedGame>, ScanErr
             };
             match result {
                 Ok(g) => out.extend(g),
+                Err(ScanError::Partial { games, detail }) => {
+                    out.extend(games);
+                    tracing::warn!(launcher = ?kind, %detail, "launcher scan partial");
+                }
                 Err(e) => tracing::warn!(launcher = ?kind, error = %e, "launcher scan failed"),
             }
         }

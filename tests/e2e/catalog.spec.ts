@@ -40,5 +40,7 @@ test.describe("catalog", () => {
     await expect(directStorage).toBeVisible();
     await directStorage.click();
     await expect(page.getByRole("button", { name: /Download/i }).first()).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "DirectStorage" })).toHaveCount(0);
   });
 });

@@ -94,7 +94,7 @@ function seedHermeticDataDir(): string {
 function spawnApp(dataDir: string): ChildProcess {
   return spawn(appBinaryPath, [], {
     cwd: repoRoot,
-    stdio: "ignore",
+    stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
     env: {
       ...process.env,
@@ -102,15 +102,19 @@ function spawnApp(dataDir: string): ChildProcess {
       DLSSYNC_E2E: "1",
       DLSSYNC_CDP_PORT: String(cdpPort),
       DLSSYNC_E2E_GPU_FIXTURE: "1",
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${cdpPort} --remote-debugging-address=127.0.0.1`,
       WEBVIEW2_USER_DATA_FOLDER: join(dataDir, "WebView2"),
     },
   });
 }
 
-async function waitForCdp(): Promise<void> {
+async function waitForCdp(child: ChildProcess, diagnostics: () => string): Promise<void> {
   const deadline = Date.now() + appReadyTimeoutMs;
   let lastError: unknown;
   while (Date.now() < deadline) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(`app exited before CDP: code=${child.exitCode} signal=${child.signalCode}; ${diagnostics()}`);
+    }
     try {
       const res = await fetch(cdpVersionEndpoint);
       if (res.ok) return;
@@ -120,7 +124,7 @@ async function waitForCdp(): Promise<void> {
     await delay(appReadyPollIntervalMs);
   }
   throw new Error(
-    `app CDP endpoint ${cdpVersionEndpoint} never became ready within ${appReadyTimeoutMs}ms (binary: ${appBinaryPath}; last error: ${String(lastError)})`,
+    `app CDP endpoint ${cdpVersionEndpoint} never became ready within ${appReadyTimeoutMs}ms (binary: ${appBinaryPath}; last error: ${String(lastError)}; ${diagnostics()})`,
   );
 }
 
@@ -189,9 +193,14 @@ export const test = base.extend<{ consoleGuard: void }, { app: AppHarness }>({
       if (occupied) throw new Error(`CDP port ${cdpPort} is occupied; set DLSSYNC_E2E_CDP_PORT`);
       const dataDir = seedHermeticDataDir();
       const child = spawnApp(dataDir);
+      let output = "";
+      const capture = (chunk: Buffer): void => { output = (output + chunk.toString()).slice(-16000); };
+      child.stdout?.on("data", capture);
+      child.stderr?.on("data", capture);
+      child.on("error", (error) => { output += String(error); });
       let browser: Browser | undefined;
       try {
-        await waitForCdp();
+        await waitForCdp(child, () => output);
         browser = await chromium.connectOverCDP(cdpBaseUrl);
         const context = browser.contexts()[0] ?? (await browser.newContext());
         const page = await findAppPage(context);

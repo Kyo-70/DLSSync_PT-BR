@@ -795,6 +795,7 @@ pub(crate) async fn apply_item_group(
         return Ok(group_failure(handle, &expanded, &error.to_string()));
     }
     let catalog = state.catalog.read().clone();
+    let previous_games = state.authoritative_state.snapshot().games;
     let mut post_apply_games: HashMap<String, (String, PathBuf)> = HashMap::new();
     for request in &expanded {
         let root = request
@@ -821,10 +822,21 @@ pub(crate) async fn apply_item_group(
         let ticket = state
             .authoritative_state
             .begin_observation(dlssync_application::scan::GAME_PROJECTION_SCOPE);
+        let launcher = previous_games
+            .iter()
+            .find(|game| game.id == game_id)
+            .and_then(|game| game.launcher.as_deref())
+            .and_then(|value| {
+                serde_json::from_value::<launcher_scan::LauncherKind>(serde_json::Value::String(
+                    value.to_string(),
+                ))
+                .ok()
+            })
+            .unwrap_or(launcher_scan::LauncherKind::Manual);
         let detected = launcher_scan::DetectedGame {
             id: game_id.clone(),
             name,
-            launcher: launcher_scan::LauncherKind::Manual,
+            launcher,
             install_dir,
             app_id: None,
             native_ids: Default::default(),
@@ -1440,9 +1452,10 @@ async fn stage_download(
         }
     });
 
+    let client = state.http_downloads.read().clone();
     let result = dll_catalog::download_and_extract_dll_cached(
         &state.download_cache,
-        &state.http_downloads,
+        &client,
         release,
         staging_dir,
         opts,
@@ -1675,7 +1688,7 @@ pub(crate) struct StateHandles {
     pub backups: Arc<parking_lot::RwLock<Option<backup_store::BackupStore>>>,
     pub journal: Arc<parking_lot::RwLock<Option<operation_journal::JournalStore>>>,
     pub settings: Arc<parking_lot::RwLock<crate::commands::settings::AppSettings>>,
-    pub http_downloads: reqwest::Client,
+    pub http_downloads: Arc<parking_lot::RwLock<reqwest::Client>>,
     pub download_cache: Arc<dll_catalog::DownloadCache>,
     pub authoritative_state: Arc<dlssync_application::state::StateCoordinator>,
 }

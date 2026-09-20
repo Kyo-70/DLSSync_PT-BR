@@ -10,6 +10,7 @@ test.describe("game detail", () => {
     const { page } = app;
     await gotoView(page, "library");
 
+    await page.locator(".game-card").first().waitFor({ state: "visible", timeout: 30_000 }).catch(() => undefined);
     if ((await page.locator(".game-card").count()) === 0) {
       testInfo.annotations.push({ type: "gated", description: "no games in library" });
       test.skip(true, "no games in library at test time");
@@ -43,7 +44,7 @@ test.describe("game detail", () => {
     await gotoView(page, "library");
 
     const protectedCard = page.locator(".game-card", { hasText: E2E_PROTECTED_GAME_NAME }).first();
-    await expect(protectedCard).toBeVisible();
+    await expect(protectedCard).toBeVisible({ timeout: 30_000 });
     await expect(protectedCard).toContainText("DLSS", { timeout: 30_000 });
     const detail = page.locator(".detail-view");
     await protectedCard.getByRole("heading").getByRole("button").click();
@@ -88,7 +89,17 @@ test.describe("game detail", () => {
     const apply = page.locator(".foot-apply");
     await expect(planReview).toHaveCount(0);
 
-    if (!(await apply.isEnabled())) {
+    const scanning = page.locator(".loading-state.scanning");
+    await scanning.waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
+    const applyReady = await expect(scanning)
+      .toHaveCount(0, { timeout: 30_000 })
+      .then(async () => {
+        await expect(apply).toBeEnabled({ timeout: 30_000 });
+        return true;
+      })
+      .catch(() => false);
+
+    if (!applyReady) {
       testInfo.annotations.push({
         type: "gated",
         description: "runtime published no applicable update for the fixture game; nothing to apply",

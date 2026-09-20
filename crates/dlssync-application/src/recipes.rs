@@ -92,7 +92,7 @@ impl RelativePath {
         &self.0
     }
 
-    fn comparison_key(&self) -> String {
+    pub fn comparison_key(&self) -> String {
         self.0.to_ascii_lowercase()
     }
 
@@ -1208,19 +1208,42 @@ impl RecipeStore {
         let parent = target.parent().ok_or_else(|| {
             RecipeTransactionError::Stale(format!("recipe target has no parent: {}", relative))
         })?;
-        let canonical_parent = parent.canonicalize().map_err(|error| {
+        let mut existing = parent;
+        while !existing.exists() {
+            existing = existing.parent().ok_or_else(|| {
+                RecipeTransactionError::Stale(format!(
+                    "recipe target has no existing ancestor: {}",
+                    relative
+                ))
+            })?;
+        }
+        let canonical_root = self.installation_root.canonicalize().map_err(|error| {
             RecipeTransactionError::Stale(format!(
-                "recipe target parent is unavailable for {}: {error}",
+                "installation root is unavailable for {}: {error}",
                 relative
             ))
         })?;
-        if !canonical_parent.starts_with(&self.installation_root) {
+        let canonical_existing = existing.canonicalize().map_err(|error| {
+            RecipeTransactionError::Stale(format!(
+                "recipe target ancestor is unavailable for {}: {error}",
+                relative
+            ))
+        })?;
+        if !canonical_existing.starts_with(&canonical_root) {
             return Err(RecipeTransactionError::Stale(format!(
                 "recipe target escapes the installation root: {}",
                 relative
             )));
         }
-        Ok(canonical_parent.join(target.file_name().unwrap_or_default()))
+        let missing_suffix = parent.strip_prefix(existing).map_err(|_| {
+            RecipeTransactionError::Stale(format!(
+                "recipe target ancestry could not be resolved: {}",
+                relative
+            ))
+        })?;
+        Ok(canonical_existing
+            .join(missing_suffix)
+            .join(target.file_name().unwrap_or_default()))
     }
 
     pub fn active_receipts(&self) -> Result<Vec<RecipeReceipt>, RecipeTransactionError> {

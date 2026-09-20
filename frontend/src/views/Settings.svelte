@@ -505,10 +505,6 @@
   ];
   const featureByKey = new Map(featureToggles.map((ft) => [ft.key, ft]));
 
-  const updateBehaviorToggles: FeatureToggle[] = [
-    { key: "create_backups", labelKey: "view.settings.feature.create_backups.label", subKey: "view.settings.feature.create_backups.sub", files: null },
-  ];
-
   let showFilesFor = $state<Record<string, boolean>>({});
   function toggleFiles(key: string): void {
     showFilesFor = { ...showFilesFor, [key]: !showFilesFor[key] };
@@ -627,30 +623,6 @@
           <p class="section-help">{$t("view.settings.general.performance.help")}</p>
         </header>
         <PerformanceToggles />
-
-        <header class="section-head section-head-gap">
-          <h2 class="section-title-h">{$t("view.settings.general.updateBehavior.title")}</h2>
-          <p class="section-help">{$t("view.settings.general.updateBehavior.help")}</p>
-        </header>
-        <div class="card">
-          {#each updateBehaviorToggles as ft, i}
-            <div class="row" class:row-divider={i > 0}>
-              <div class="row-text">
-                <div class="row-label">{$t(ft.labelKey)}</div>
-                <div class="row-sub">{$t(ft.subKey)}</div>
-              </div>
-              <label class="toggle">
-                <input
-                  type="checkbox"
-                  checked={$settings.update_prefs[ft.key]}
-                  aria-label={$t(ft.labelKey)}
-                  onchange={(e) => updatePref(ft.key, (e.target as HTMLInputElement).checked)}
-                />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-          {/each}
-        </div>
 
         <header class="section-head section-head-gap">
           <h2 class="section-title-h">

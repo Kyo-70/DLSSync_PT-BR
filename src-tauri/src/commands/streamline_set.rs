@@ -295,9 +295,12 @@ mod tests {
 
     #[test]
     fn backup_path_inside_root_is_restorable() {
-        let root = std::path::Path::new("/data/DLSSync/Backups");
-        let inside = std::path::Path::new("/data/DLSSync/Backups/Cyberpunk/2026/sl.dlss_g.dll");
-        assert!(backup_path_under_root(inside, root));
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("Backups");
+        let inside = root.join("Cyberpunk/2026/sl.dlss_g.dll");
+        std::fs::create_dir_all(inside.parent().unwrap()).unwrap();
+        std::fs::write(&inside, b"dll").unwrap();
+        assert!(backup_path_under_root(&inside, &root));
     }
 
     #[test]

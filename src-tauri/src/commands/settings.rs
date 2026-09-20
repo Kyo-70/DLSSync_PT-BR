@@ -1,4 +1,4 @@
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::paths::AppPaths;
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
@@ -480,7 +480,10 @@ pub async fn get_settings(state: State<'_, AppState>) -> AppResult<AppSettings> 
 #[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn save_settings(state: State<'_, AppState>, settings: AppSettings) -> AppResult<()> {
     let _projection_guard = dlssync_application::scan::projection_guard();
+    let download_client = AppState::download_client(settings.network.connect_timeout_secs)
+        .map_err(AppError::Other)?;
     persist(&state, &settings)?;
+    *state.http_downloads.write() = download_client;
     let ticket = state
         .authoritative_state
         .begin_observation(dlssync_application::scan::GAME_PROJECTION_SCOPE);

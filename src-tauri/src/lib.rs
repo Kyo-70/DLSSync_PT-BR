@@ -550,6 +550,11 @@ pub fn run() {
                 "settings loaded",
             );
             *state.settings.write() = loaded;
+            if let Err(error) = state.rebuild_download_client(
+                state.settings.read().network.connect_timeout_secs,
+            ) {
+                tracing::warn!(%error, "configured download timeout could not be applied; using default client");
+            }
 
             if let Err(e) = tray::install(app.handle()) {
                 tracing::warn!(error = %e, "tray icon install failed");

@@ -9,9 +9,11 @@ use driver_catalog::{
 };
 use driver_install::state::{classify_exit, describe_exit, reboot_required, InstallStage};
 use driver_install::{download_to_file, verify_signature, DownloadOpts};
+use parking_lot::RwLock;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 
 const WINDOWS_11_MIN_BUILD: u32 = 22000;
@@ -314,6 +316,52 @@ pub struct InstallOutcome {
     pub reboot_required: bool,
 }
 
+struct DriverCandidateLease {
+    registry: Arc<RwLock<HashMap<String, DriverInstallCandidate>>>,
+    download_url: String,
+    candidate: Option<DriverInstallCandidate>,
+}
+
+impl DriverCandidateLease {
+    fn acquire(
+        registry: Arc<RwLock<HashMap<String, DriverInstallCandidate>>>,
+        download_url: &str,
+    ) -> AppResult<Self> {
+        let candidate = registry.write().remove(download_url).ok_or_else(|| {
+            AppError::Validation(
+                "This driver package was not returned by the latest update check. Check again before installing."
+                    .into(),
+            )
+        })?;
+        Ok(Self {
+            registry,
+            download_url: download_url.to_string(),
+            candidate: Some(candidate),
+        })
+    }
+
+    fn candidate(&self) -> &DriverInstallCandidate {
+        self.candidate
+            .as_ref()
+            .expect("active driver candidate lease")
+    }
+
+    fn complete(mut self) {
+        self.candidate = None;
+    }
+}
+
+impl Drop for DriverCandidateLease {
+    fn drop(&mut self) {
+        if let Some(candidate) = self.candidate.take() {
+            self.registry
+                .write()
+                .entry(self.download_url.clone())
+                .or_insert(candidate);
+        }
+    }
+}
+
 const DRIVER_INSTALL_EVENT: &str = "driver_install_progress";
 
 /// Launch the downloaded vendor installer, preferring an unattended (silent)
@@ -459,16 +507,9 @@ pub async fn install_driver(
         ));
     }
     load_reboot_state(state.inner())?;
-    let candidate = state
-        .driver_install_candidates
-        .write()
-        .remove(&download_url)
-        .ok_or_else(|| {
-            AppError::Validation(
-                "This driver package was not returned by the latest update check. Check again before installing."
-                    .into(),
-            )
-        })?;
+    let candidate_lease =
+        DriverCandidateLease::acquire(state.driver_install_candidates.clone(), &download_url)?;
+    let candidate = candidate_lease.candidate().clone();
     if !vendor_key(candidate.release.vendor).eq_ignore_ascii_case(&vendor) {
         return Err(AppError::Validation(
             "The requested vendor does not match the checked driver package.".into(),
@@ -495,7 +536,7 @@ pub async fn install_driver(
             .map_err(|e| AppError::Other(format!("create install staging dir: {e}")))?
     };
     let dest = staging.path().join(installer_filename(&download_url));
-    let client = state.http_downloads.clone();
+    let client = state.http_downloads.read().clone();
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<DownloadProgress>();
     let app_pump = app.clone();
@@ -640,6 +681,7 @@ pub async fn install_driver(
                 tracing::warn!(%error, "driver reboot evidence could not be persisted");
             }
         }
+        candidate_lease.complete();
     }
     Ok(InstallOutcome {
         stage,

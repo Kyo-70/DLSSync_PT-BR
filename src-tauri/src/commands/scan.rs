@@ -54,6 +54,10 @@ pub async fn scan_libraries(
                     successful_launchers.insert(launcher);
                     all.extend(games);
                 }
+                Err(launcher_scan::ScanError::Partial { games, detail }) => {
+                    all.extend(games);
+                    tracing::warn!(launcher = ?launcher, %detail, "launcher scan partial; prior games retained");
+                }
                 Err(error) => {
                     tracing::warn!(launcher = ?launcher, %error, "launcher scan failed");
                 }
@@ -148,6 +152,21 @@ pub async fn scan_libraries(
             &discovery.successful_launchers,
             &discovery.successful_custom_roots,
         );
+        let removed_ids = removed_game_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<HashSet<_>>();
+        games.extend(
+            previous
+                .games
+                .iter()
+                .filter(|snapshot| {
+                    !observed_ids.contains(snapshot.id.as_str())
+                        && !removed_ids.contains(snapshot.id.as_str())
+                })
+                .map(retained_detected_game),
+        );
+        *games = deduplicate(std::mem::take(games));
         let mut affected_game_ids = snapshots
             .iter()
             .map(|snapshot| snapshot.id.clone())
@@ -191,6 +210,26 @@ pub async fn scan_libraries(
     }
 
     result.map(|discovery| discovery.games)
+}
+
+fn retained_detected_game(snapshot: &dlssync_contracts::GameSnapshot) -> DetectedGame {
+    DetectedGame {
+        id: snapshot.id.clone(),
+        name: snapshot.name.clone(),
+        launcher: snapshot
+            .launcher
+            .as_deref()
+            .and_then(|launcher| {
+                serde_json::from_value(serde_json::Value::String(launcher.to_string())).ok()
+            })
+            .unwrap_or(LauncherKind::Manual),
+        install_dir: snapshot.install_dir.clone().into(),
+        app_id: None,
+        native_ids: BTreeMap::new(),
+        art: GameArt::default(),
+        image_url: snapshot.art_url.clone(),
+        size_bytes: None,
+    }
 }
 
 #[cfg(windows)]
