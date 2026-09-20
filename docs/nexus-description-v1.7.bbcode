@@ -1,6 +1,4 @@
-[b]Local draft: 1.7.0 is Unreleased.[/b] Do not publish this description as release certification. The source review still needs packaged network and artifact verification documented in docs/nexus-build.md. Verify the exact release artifacts before removing this draft notice.
-
-[center][img]https://raw.githubusercontent.com/xt0n1-t3ch/DLSSync/main/.github/assets/nexus/banner-header-1300x372.png[/img]
+[center][img]https://raw.githubusercontent.com/xt0n1-t3ch/DLSSync/main/.github/assets/nexus/banner-v1.7-imagegen-1300x372.png[/img]
 
 [size=5][b]Update game DLLs and inspect driver updates from one Windows app.[/b][/size]
 
@@ -36,7 +34,7 @@ The Nexus channel must have [b]no app self-updater and no automatic app-update o
 
 The embedded signed catalog supports the initial offline state. [b]Refresh Catalog[/b] explicitly retrieves current metadata and its detached signature for validation. Install future app versions manually from Nexus Mods.
 
-Standard and Nexus must use the same source commit and one [b]v1.7.0[/b] tag. Nexus assets use distinct [b]NexusBuild-[/b] names. Standard's updater feed must point only to the exact Standard installer, never a Nexus asset, and must carry its nonempty matching signature. Publication must preserve an existing release. These are acceptance requirements; complete network silence before manual actions and final public artifact bytes remain unverified in this draft.
+Standard and Nexus use the same source commit and one [b]v1.7.0[/b] tag. Nexus assets use distinct [b]NexusBuild-[/b] names. Standard's updater feed points only to the exact Standard installer and carries its matching signature. The public release assets, SHA-256 inventory and updater feed were verified on September 20, 2026. A separate packaged network capture is still required before making a broader claim about every possible third-party request.
 
 [size=4][b]Use DLSSync[/b][/size]
 
