@@ -358,8 +358,8 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  publish:
-    name: Verify and publish one resumable release
+  prepare-release:
+    name: Prepare immutable verified release files
     needs: [resolve, build-windows, sign-windows, verify-signatures, stage-unsigned]
     if: >-
       always()
@@ -370,9 +370,8 @@ jobs:
       && needs.stage-unsigned.result != 'failure'
       && (needs.verify-signatures.result == 'success' || needs.stage-unsigned.result == 'success')
     runs-on: windows-latest
-    environment: release
     permissions:
-      contents: write
+      contents: read
     steps:
       - name: Checkout immutable commit
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -567,6 +566,62 @@ jobs:
           node scripts/release-safety.mjs checksums --dir release --version $env:VERSION
           node scripts/release-safety.mjs verify --dir release --version $env:VERSION
 
+      - name: Record release identity
+        shell: pwsh
+        env:
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          @{ commit = $env:RELEASE_COMMIT; version = $env:VERSION; tag = $env:TAG } |
+            ConvertTo-Json | Set-Content release-state.json -Encoding utf8
+
+      - name: Preserve the exact files before publication
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dlssync-release-ready
+          path: |
+            release/
+            release-body.md
+            release-state.json
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish the verified Windows release without rebuilding
+    needs: [resolve, prepare-release]
+    runs-on: windows-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.resolve.outputs.commit }}
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '24.18.0'
+          package-manager-cache: false
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: dlssync-release-ready
+          path: .
+      - name: Verify retained files and source identity
+        shell: pwsh
+        env:
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.commit }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          $state = Get-Content release-state.json -Raw | ConvertFrom-Json
+          if ($state.commit -ne $env:RELEASE_COMMIT -or $state.version -ne $env:VERSION -or $state.tag -ne $env:TAG) { throw 'Release identity mismatch' }
+          node scripts/release-safety.mjs verify --dir release --version $env:VERSION
+          if ($LASTEXITCODE -ne 0) { throw 'Release checksum verification failed' }
+          cargo xtask verify-updater-signature --installer "release/DLSSync_$env:VERSION`_x64-setup.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Updater signature verification failed' }
       - name: Create or resume release without destructive replacement
         shell: pwsh
         env:

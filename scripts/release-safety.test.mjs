@@ -38,6 +38,16 @@ test("publication never deletes a release before recreation", async () => {
   assert.doesNotMatch(workflow, /Delete existing release/i);
 });
 
+test("publication retries reuse retained files without compiling or signing again", async () => {
+  const workflow = await readFile(workflowPath, "utf8");
+  const publish = workflow.split(/\r?\n  publish:\r?\n/)[1];
+  assert.ok(publish, "a separate publication job must exist");
+  assert.match(publish, /dlssync-release-ready/);
+  assert.match(publish, /Release identity mismatch/);
+  assert.match(publish, /release-safety\.mjs verify/);
+  assert.doesNotMatch(publish, /tauri build|signer sign|build-nexus\.mjs/);
+});
+
 test("publication requires one verified signature state and never fakes one", async () => {
   const workflow = await readFile(workflowPath, "utf8");
   // Exactly one lane may produce the release input, and each lane must read the real
