@@ -1,0 +1,36 @@
+name: Updater signing preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-key-pair:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '24.18.0'
+          package-manager-cache: false
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
+      - run: pnpm install --frozen-lockfile
+      - name: Sign a fixed non-executable probe
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) { throw 'Updater signing key is unavailable' }
+          New-Item -ItemType Directory -Force target | Out-Null
+          Set-Content -LiteralPath target/signing-probe.bin -Value 'DLSSync updater key-pair preflight. Not an application installer.' -Encoding utf8
+          node node_modules/@tauri-apps/cli/tauri.js signer sign target/signing-probe.bin
+          if ($LASTEXITCODE -ne 0) { throw 'Signing preflight failed' }
+      - name: Verify the key pair against the configured public key
+        run: cargo xtask verify-updater-signature --installer target/signing-probe.bin
