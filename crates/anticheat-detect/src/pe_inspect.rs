@@ -54,7 +54,9 @@ fn section_samples(bytes: &[u8]) -> Option<Vec<(String, f64)>> {
     let sections = pe.checked_add(24)?.checked_add(optional_size)?;
     let table = bytes.get(sections..sections.checked_add(count.checked_mul(40)?)?)?;
     let mut result = Vec::with_capacity(count);
-    for section in table.chunks_exact(40) {
+    // `as_chunks` keeps the exact-size iteration and drops the same trailing remainder that
+    // `chunks_exact` dropped. The slice above is already a whole number of 40-byte headers.
+    for section in table.as_chunks::<40>().0 {
         let name_end = section[..8].iter().position(|byte| *byte == 0).unwrap_or(8);
         let name = std::str::from_utf8(&section[..name_end])
             .unwrap_or_default()

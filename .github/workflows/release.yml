@@ -489,6 +489,14 @@ jobs:
           }
           Remove-Item -LiteralPath $keyPath -Force
 
+      - name: Verify updater signature against the installed public key
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          cargo xtask verify-updater-signature --installer "release/DLSSync_$env:VERSION`_x64-setup.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Updater signature verification failed' }
+
       - name: Compose ordered release notes
         shell: pwsh
         env:

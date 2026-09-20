@@ -8,7 +8,7 @@
 
 DLSSync is a free, open-source DLSS updater for Windows 10/11 x64. It also works as an FSR updater and XeSS updater for supported DLLs already present in game folders, manages Streamline and DirectStorage sets, and includes a GPU driver updater for NVIDIA, AMD and Intel. Local SHA-256-verified backups and an operation journal help you inspect changes and restore retained DLL snapshots.
 
-**Release status:** version 1.7.0 is released for Windows 10/11 x64 as Standard and NexusBuild packages from one source commit. See the [1.7.0 changelog](CHANGELOG.md#170---2026-09-20) and read the signature statement in the release notes before running an installer.
+**Release status:** version 1.7.0 is released for Windows 10/11 x64 as Standard and NexusBuild packages from one source commit. See the [1.7.0 changelog](CHANGELOG.md#170---unreleased) and read the signature statement in the release notes before running an installer.
 
 <p align="center">
   <a href="https://github.com/xt0n1-t3ch/DLSSync/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/xt0n1-t3ch/DLSSync?style=flat&color=0a0a0a&logo=github&logoColor=white"></a>

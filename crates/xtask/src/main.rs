@@ -110,8 +110,9 @@ fn run() -> Result<(), String> {
         Some("generate-competitive") => generate_competitive(&root),
         Some("check-competitive") => check_competitive(&root),
         Some("verify-release") => verify_release(&root, args.collect()),
+        Some("verify-updater-signature") => verify_updater_signature(&root, args.collect()),
         _ => Err(
-            "usage: cargo xtask <version 1.2.3|generate-bindings|check-bindings|generate-product|check-product|check-architecture|generate-competitive|check-competitive|verify-release --channel standard|nexus|portable>"
+            "usage: cargo xtask <version 1.2.3|generate-bindings|check-bindings|generate-product|check-product|check-architecture|generate-competitive|check-competitive|verify-release --channel standard|nexus|portable|verify-updater-signature --installer <path>>"
                 .into(),
         ),
     }
@@ -713,6 +714,67 @@ fn run_command(root: &Path, program: &str, args: &[&str]) -> Result<(), String> 
     } else {
         Err(format!("{program} {} failed with {status}", args.join(" ")))
     }
+}
+
+/// Verify the Tauri updater signature of an exact installer against the public key that
+/// `src-tauri/tauri.conf.json` ships. A signer exit code proves only that signing ran; this
+/// proves the published bytes verify under the key installed copies actually trust.
+///
+/// Verification uses the maintained `minisign-verify` crate, the same implementation the
+/// updater plugin relies on. No signature parsing or cryptography is reimplemented here.
+fn verify_updater_signature(root: &Path, args: Vec<String>) -> Result<(), String> {
+    use base64::Engine as _;
+
+    let installer = args
+        .windows(2)
+        .find(|pair| pair[0] == "--installer")
+        .map(|pair| pair[1].clone())
+        .ok_or_else(|| "verify-updater-signature requires --installer".to_string())?;
+    let installer = root.join(installer);
+    let signature_path = {
+        let mut path = installer.clone().into_os_string();
+        path.push(".sig");
+        PathBuf::from(path)
+    };
+
+    let config: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(root.join("src-tauri/tauri.conf.json")).map_err(display)?,
+    )
+    .map_err(display)?;
+    let configured = config
+        .pointer("/plugins/updater/pubkey")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "tauri.conf.json has no plugins.updater.pubkey".to_string())?;
+
+    let engine = base64::engine::general_purpose::STANDARD;
+    let public_key_file = String::from_utf8(engine.decode(configured.trim()).map_err(display)?)
+        .map_err(|_| "configured updater public key is not valid UTF-8".to_string())?;
+    let public_key = minisign_verify::PublicKey::decode(&public_key_file)
+        .map_err(|error| format!("configured updater public key is unusable: {error}"))?;
+
+    let signature_file = fs::read_to_string(&signature_path)
+        .map_err(|_| format!("updater signature missing: {}", signature_path.display()))?;
+    let decoded = String::from_utf8(engine.decode(signature_file.trim()).map_err(display)?)
+        .map_err(|_| "updater signature is not valid UTF-8 after base64 decoding".to_string())?;
+    let signature = minisign_verify::Signature::decode(&decoded)
+        .map_err(|error| format!("updater signature is malformed: {error}"))?;
+
+    let bytes =
+        fs::read(&installer).map_err(|_| format!("installer missing: {}", installer.display()))?;
+    public_key
+        .verify(&bytes, &signature, false)
+        .map_err(|error| {
+            format!(
+                "updater signature does not verify for {} under the configured public key: {error}",
+                installer.display()
+            )
+        })?;
+
+    println!(
+        "Tauri updater signature verified for {} against the configured public key",
+        installer.display()
+    );
+    Ok(())
 }
 
 fn visit_files(root: &Path, visit: &mut impl FnMut(&Path)) -> Result<(), String> {

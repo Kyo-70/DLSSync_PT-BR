@@ -913,7 +913,10 @@ async fn prepare_single_item(
     cancel: CancellationToken,
     plan_item: &dlssync_contracts::UpdatePlanItem,
     backup_path: PathBuf,
-) -> Result<PreparedGuiItem, ApplyOutcome> {
+) -> Result<PreparedGuiItem, Box<ApplyOutcome>> {
+    let failure_outcome = |request: &ApplyRequest, group_id: &str, error: String| {
+        Box::new(failure_outcome(request, group_id, error))
+    };
     let release_result = {
         let catalog_guard = state.catalog.read();
         match catalog_guard.as_ref() {

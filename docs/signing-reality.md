@@ -38,3 +38,11 @@ See [installation](../README.md#download) and [Nexus channel rules](nexus-build.
 ## Maintainer boundary
 
 Verify signatures and source identity on the actual artifacts before publishing claims about them. The [SignPath configuration notes](../.github/workflows/SIGNPATH.md) describe setup, not proof that a release was signed. No external signing-program claims, reputation metrics or warning-removal promises are relied on here.
+
+Maintainers verify the Standard updater signature against the public key shipped in the app before publication:
+
+```powershell
+cargo xtask verify-updater-signature --installer release/DLSSync_1.7.0_x64-setup.exe
+```
+
+The verifier reads the adjacent `.sig` file and the configured public key. Missing, malformed, mismatched or tampered inputs fail verification.
