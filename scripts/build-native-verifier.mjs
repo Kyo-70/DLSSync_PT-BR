@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { access, chmod, copyFile, mkdir, writeFile } from "node:fs/promises";
-import { execFileSync } from "node:child_process";
+import { access, chmod, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { execFileSync, spawnSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
 import { run } from "./build-nexus.mjs";
@@ -44,6 +44,32 @@ const destination = path.join(binaries, `dlssync-authenticode-${target}`);
 await copyFile(path.join(build, 'osslsigncode'), destination);
 await chmod(destination, 0o755);
 await run(destination, ['--version'], { cwd: root, env: process.env });
+// Isolated test CA: never installed into the machine trust store or distributed.
+const fixture = path.join(work, 'verification-fixture');
+await mkdir(fixture, { recursive: true });
+const certificate = path.join(fixture, 'test-ca.pem');
+const privateKey = path.join(fixture, 'test-key.pem');
+const signed = path.join(fixture, 'signed.exe');
+await run('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', privateKey, '-out', certificate, '-days', '1', '-subj', '/CN=DLSSync Verifier Fixture', '-addext', 'extendedKeyUsage=codeSigning'], { cwd: root, env: process.env });
+await run(destination, ['sign', '-certs', certificate, '-key', privateKey, '-in', path.join(source, 'tests/files/unsigned.exe'), '-out', signed], { cwd: root, env: process.env });
+function verify(args, expectedSuccess) {
+  const result = spawnSync(destination, ['verify', '-index', '0', ...args], { encoding: 'utf8', timeout: 30000 });
+  if (result.error || result.signal || (result.status === 0) !== expectedSuccess) {
+    throw new Error(`Verifier self-test failed: ${result.error ?? result.stderr ?? result.status}`);
+  }
+}
+verify(['-CAfile', certificate, '-in', signed], true);
+verify(['-in', signed], false);
+const damaged = Buffer.from(await readFile(signed));
+const peOffset = damaged.readUInt32LE(0x3c);
+const sectionOffset = peOffset + 24 + damaged.readUInt16LE(peOffset + 20);
+const rawOffset = damaged.readUInt32LE(sectionOffset + 20);
+if (!damaged.readUInt32LE(sectionOffset + 16) || rawOffset >= damaged.length) throw new Error('Verifier fixture has no section payload');
+damaged[rawOffset] ^= 1;
+const tampered = path.join(fixture, 'tampered.exe');
+await writeFile(tampered, damaged);
+verify(['-CAfile', certificate, '-in', tampered], false);
+console.log('Verifier checks passed: explicit test CA, untrusted CA rejection, tampered bytes rejection');
 await copyFile(path.join(source, 'LICENSE.txt'), path.join(resources, 'osslsigncode-LICENSE.txt'));
 await copyFile(path.join(source, 'COPYING.txt'), path.join(resources, 'osslsigncode-COPYING.txt'));
 await copyFile(opensslLicense, path.join(resources, 'OpenSSL-LICENSE.txt'));

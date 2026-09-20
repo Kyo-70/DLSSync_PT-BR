@@ -53,7 +53,10 @@ jobs:
       - name: Build pinned native Authenticode verifier
         run: node scripts/build-native-verifier.mjs ${{ matrix.target }}
       - name: Shared library tests
-        run: cargo test -p launcher-scan -p pe-version -p backup-store --lib
+        run: |
+          mkdir -p target/debug/deps
+          cp src-tauri/binaries/dlssync-authenticode-${{ matrix.target }} target/debug/deps/dlssync-authenticode
+          cargo test -p launcher-scan -p pe-version -p backup-store --lib
       - name: Build native application
         env:
           APPLE_SIGNING_IDENTITY: '-'
