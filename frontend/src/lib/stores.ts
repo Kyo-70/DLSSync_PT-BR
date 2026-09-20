@@ -1,4 +1,5 @@
 import { writable, derived, get, type Writable, type Readable } from "svelte/store";
+import { supportsWindowsDrivers } from "./platform";
 import { translate, locale } from "./i18n/index";
 import {
   matchesTechnology,
@@ -948,6 +949,7 @@ export const driverCheckError: Writable<string | null> = writable(null);
 export const driverRebootPending: Writable<Record<string, string>> = writable({});
 
 export async function loadDriverUpdates(): Promise<void> {
+  if (!supportsWindowsDrivers) return;
   driverCheckInProgress.set(true);
   driverCheckError.set(null);
   try {
@@ -1062,6 +1064,7 @@ export const systemScanError: Writable<string | null> = writable(null);
 export const systemScanRan: Writable<boolean> = writable(false);
 
 export async function loadSystemDrivers(): Promise<void> {
+  if (!supportsWindowsDrivers) return;
   systemScanInProgress.set(true);
   systemScanError.set(null);
   try {

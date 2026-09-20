@@ -330,7 +330,8 @@
       "openLinkFailed": "Link öffnen fehlgeschlagen: {error}",
       "graphics": "Grafik",
       "devices": "Geräte",
-      "notChecked": "Updates noch nicht geprüft"
+      "notChecked": "Updates noch nicht geprüft",
+      "windowsOnly": "Treiberinstallation, Windows-Geräte und NVIDIA-Profile benötigen Windows. Bibliothek, Katalog und Sicherungen bleiben verfügbar."
     },
     "backups": {
       "title": "Backups",

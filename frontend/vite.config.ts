@@ -7,6 +7,9 @@ const webviewTarget = "chrome105";
 
 export default defineConfig(({ mode }) => ({
   plugins: [svelte()],
+  define: {
+    __DLSSYNC_TARGET_OS__: JSON.stringify(process.env.TAURI_ENV_PLATFORM ?? "windows"),
+  },
   resolve: {
     alias: mode === "nexus" || process.env.VITE_DLSSYNC_DISTRIBUTION === "nexus"
       ? [{ find: "@tauri-apps/plugin-updater", replacement: fileURLToPath(new URL("./src/lib/noAppUpdater.ts", import.meta.url)) }]

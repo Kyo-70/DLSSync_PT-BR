@@ -221,6 +221,19 @@ impl PathGuard {
     /// friends). Game libraries legitimately live under Program Files, so only the
     /// OS tree is denied.
     pub fn deny_system_dir(path: &Path) -> Result<(), PathGuardError> {
+        #[cfg(not(windows))]
+        {
+            let resolved = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+            if [
+                "/etc", "/usr", "/bin", "/sbin", "/lib", "/lib64", "/System", "/Library", "/dev",
+                "/proc", "/sys", "/boot", "/run",
+            ]
+            .iter()
+            .any(|root| resolved.starts_with(root))
+            {
+                return Err(PathGuardError::SystemDir(path.display().to_string()));
+            }
+        }
         let lower = path
             .to_string_lossy()
             .to_ascii_lowercase()

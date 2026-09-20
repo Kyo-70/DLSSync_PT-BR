@@ -41,3 +41,5 @@ Standing ownership and gate instructions live in [AGENTS.md](../AGENTS.md), with
 - [Nexus v1.7 BBCode draft](nexus-description-v1.7.bbcode): local draft, not approved for publication while channel/artifact gaps remain.
 
 Historical `docs/handoffs/` material is separate from current instructions and was not reviewed or modified in this documentation task. The short machine-readable entrypoint is [llms.txt](../llms.txt).
+
+- [Native platform boundaries](native-platforms.md): Linux/macOS packaging, verifier sources and Windows-only features.

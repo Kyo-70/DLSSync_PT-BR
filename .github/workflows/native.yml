@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: native-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   native:
     name: Native ${{ matrix.target }}
@@ -41,14 +45,19 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libayatana-appindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libayatana-appindicator3-dev librsvg2-dev patchelf cmake libssl-dev
+      - name: macOS verifier dependency
+        if: runner.os == 'macOS'
+        run: brew install openssl@3
       - run: pnpm install --frozen-lockfile
+      - name: Build pinned native Authenticode verifier
+        run: node scripts/build-native-verifier.mjs ${{ matrix.target }}
       - name: Shared library tests
         run: cargo test -p launcher-scan -p pe-version -p backup-store --lib
       - name: Build native application
         env:
           APPLE_SIGNING_IDENTITY: '-'
-        run: node node_modules/@tauri-apps/cli/tauri.js build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked
+        run: node node_modules/@tauri-apps/cli/tauri.js build --config target/native-verifier/${{ matrix.target }}/tauri.conf.json --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: native-${{ matrix.target }}
