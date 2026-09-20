@@ -591,6 +591,10 @@ jobs:
   publish:
     name: Publish the verified Windows release without rebuilding
     needs: [resolve, prepare-release]
+    if: >-
+      always()
+      && needs.resolve.result == 'success'
+      && needs.prepare-release.result == 'success'
     runs-on: windows-latest
     environment: release
     permissions:
