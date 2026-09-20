@@ -56,6 +56,7 @@ test("publication requires one verified signature state and never fakes one", as
   assert.match(workflow, /stage-unsigned:[\s\S]*?if:\s*vars\.SIGNPATH_ENABLED\s*!=\s*'true'/);
   assert.match(workflow, /verify-signatures:[\s\S]*?if:\s*needs\.sign-windows\.result\s*==\s*'success'/);
   assert.match(workflow, /needs\.verify-signatures\.result\s*==\s*'success'\s*\|\|\s*needs\.stage-unsigned\.result\s*==\s*'success'/);
+  assert.match(workflow, /publish:[\s\S]*?if:\s*>-[\s\S]*?always\(\)[\s\S]*?needs\.prepare-release\.result\s*==\s*'success'/);
   assert.match(workflow, /needs\.sign-windows\.result\s*!=\s*'failure'/);
   assert.match(workflow, /needs\.verify-signatures\.result\s*!=\s*'failure'/);
   assert.match(workflow, /needs\.stage-unsigned\.result\s*!=\s*'failure'/);
