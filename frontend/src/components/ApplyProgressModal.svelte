@@ -213,6 +213,17 @@
     Object.values($downloadProgressByGroup).reduce((acc, d) => acc + (d.bytes_per_sec ?? 0), 0),
   );
   const downloadPct = $derived(percentOf(totalBytesDownloaded, totalBytesTotal));
+  // While something is running without a known byte total, the aggregate is genuinely
+  // indeterminate: completed-item percentage would announce a precision the backend did not
+  // measure. In that state the bar drops `aria-valuenow` and shows an indeterminate treatment, so
+  // the visual and the accessibility value agree.
+  const progressIndeterminate = $derived(anyRunning && totalBytesTotal === null);
+  const renderedProgressPct = $derived(anyRunning ? downloadPct : itemProgressPct);
+  const reportedProgressPct = $derived(
+    !progressIndeterminate && Number.isFinite(renderedProgressPct)
+      ? Math.round(renderedProgressPct)
+      : undefined,
+  );
 
   const startedAt = $derived(
     entries.length === 0 ? Date.now() : Math.min(...entries.map((e) => e.started_at)),
@@ -631,10 +642,18 @@
     </button>
   </header>
 
-  <div class="progress-track" role="progressbar" aria-valuenow={anyRunning ? Math.round(downloadPct) : itemProgressPct} aria-valuemin="0" aria-valuemax="100">
+  <div
+    class="progress-track"
+    role="progressbar"
+    aria-valuenow={reportedProgressPct}
+    aria-valuemin="0"
+    aria-valuemax="100"
+    aria-busy={progressIndeterminate ? "true" : undefined}
+  >
     <div
       class="progress-fill"
-      style:width="{anyRunning && totalBytesTotal !== null ? downloadPct : itemProgressPct}%"
+      class:is-indeterminate={progressIndeterminate}
+      style:width={progressIndeterminate ? "35%" : `${renderedProgressPct}%`}
       class:is-danger={failedGroups > 0 && !anyRunning}
       class:is-success={allDone && failedGroups === 0}
     ></div>
@@ -1032,10 +1051,23 @@
     height: 100%;
     background: var(--accent);
     border-radius: var(--radius-full);
-    transition: width 0.4s var(--ease-out), background 0.2s var(--ease);
+    transition: none;
   }
   .progress-fill.is-success { background: var(--success); }
   .progress-fill.is-danger { background: var(--danger); }
+  /* Indeterminate treatment: a travelling segment instead of a filled proportion, so the bar does
+     not imply a measured percentage. Reduced motion keeps the segment static. */
+  .progress-fill.is-indeterminate {
+    animation: apply-progress-indeterminate 1.4s var(--ease-in-out, ease-in-out) infinite;
+  }
+  @keyframes apply-progress-indeterminate {
+    0% { margin-left: 0%; }
+    50% { margin-left: 65%; }
+    100% { margin-left: 0%; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .progress-fill.is-indeterminate { animation: none; }
+  }
 
   .modal-body {
     display: grid;
@@ -1118,7 +1150,7 @@
   .tile-sub { font-size: var(--fs-xs); color: var(--text-secondary); }
   .tile-download { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
   .tile-progress { height: 3px; background: var(--bg-input); border-radius: var(--radius-full); overflow: hidden; }
-  .tile-progress-fill { height: 100%; background: var(--accent); border-radius: var(--radius-full); transition: width 0.3s var(--ease-out); }
+  .tile-progress-fill { height: 100%; background: var(--accent); border-radius: var(--radius-full); transition: none; }
   .tile-progress-text { font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
   .tile-error-chip {
     margin-top: 4px;
@@ -1255,7 +1287,7 @@
     height: 100%;
     background: var(--accent);
     border-radius: var(--radius-full);
-    transition: width var(--dur-normal) var(--ease-out), background var(--dur-fast) var(--ease);
+    transition: none;
   }
   .phs-progress-fill.is-success { background: var(--success); }
   .phs-progress-fill.is-danger { background: var(--danger); }
@@ -1275,7 +1307,7 @@
   .block-label { display: flex; justify-content: space-between; align-items: baseline; font-size: var(--fs-sm); color: var(--text-secondary); font-weight: 600; }
   .attempt { color: var(--text-muted); font-size: var(--fs-2xs); }
   .block-progress { height: 6px; background: var(--bg-card); border-radius: var(--radius-full); overflow: hidden; }
-  .block-progress-fill { height: 100%; background: var(--accent); border-radius: var(--radius-full); transition: width 0.4s var(--ease-out); }
+  .block-progress-fill { height: 100%; background: var(--accent); border-radius: var(--radius-full); transition: none; }
   .block-stats { display: inline-flex; gap: 14px; font-size: var(--fs-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
   .error-block-list { display: flex; flex-direction: column; gap: 10px; }
@@ -1352,7 +1384,7 @@
     height: 100%;
     background: var(--accent);
     border-radius: var(--radius-full);
-    transition: width var(--dur-normal) var(--ease-out);
+    transition: none;
   }
   .file-stage.done .file-stage-bar-fill { background: var(--success); width: 100% !important; }
   .file-stage.failed .file-stage-bar-fill { background: var(--danger); }

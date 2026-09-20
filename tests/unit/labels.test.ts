@@ -5,6 +5,7 @@ import {
   familyLabel,
   familyShort,
   launcherLabel,
+  gameOperationLabel,
   familyVendor,
   familyCatalogKey,
   familyGroup,
@@ -42,9 +43,10 @@ describe("family mappings", () => {
     expect(familyVendor("totally_unknown" as never)).toBe("nvidia");
   });
 
-  it("catalog key collapses streamline + fsr variants", () => {
+  it("catalog keys preserve separate FSR components and supported aliases", () => {
     expect(familyCatalogKey("streamline_common")).toBe("streamline");
-    expect(familyCatalogKey("fsr_loader")).toBe("fsr_upscaler");
+    expect(familyCatalogKey("fsr_loader")).toBe("fsr_loader");
+    expect(familyCatalogKey("fsr_upscaler_vk")).toBe("fsr_upscaler_vk");
     expect(familyCatalogKey("xess_sr_dx11")).toBe("xess_sr");
   });
 
@@ -124,5 +126,17 @@ describe("map completeness invariants", () => {
     for (const s of ["outdated", "up_to_date", "no_dlls", "unknown", "scanning", "scan_failed"] as const) {
       expect(STATUS_LABELS[s]).toBeTruthy();
     }
+  });
+});
+
+describe("game operation label", () => {
+  it("never produces the forbidden Manual prefix for a user-added game", () => {
+    expect(gameOperationLabel("manual", "How to Fish")).toBe("How to Fish");
+    expect(gameOperationLabel("manual", "How to Fish")).not.toContain("Manual -");
+  });
+
+  it("names the launcher for a detected game", () => {
+    expect(gameOperationLabel("steam", "How to Fish")).toBe("Steam - How to Fish");
+    expect(gameOperationLabel("epic", "inZOI ModKit")).toBe("Epic Games - inZOI ModKit");
   });
 });

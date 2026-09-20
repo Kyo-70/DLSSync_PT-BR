@@ -1,4 +1,5 @@
-import type { ApplyStage } from "../generated/bindings";
+import type { ApplyStage, UpdatePlan } from "../generated/bindings";
+export type { UpdatePlan } from "../generated/bindings";
 export type { ApplyStage, ApplyProgress_Serialize as ApplyProgress, GroupDownloadProgress, InflightSnapshot } from "../generated/bindings";
 import type {
   LauncherKind,
@@ -19,6 +20,7 @@ import type {
   OperationStatus,
   OperationRecord,
   GameArt,
+  ArtResolveTrigger,
   ApplyRequest,
   ApplyResult,
   ApplyBatchRequest,
@@ -29,9 +31,10 @@ import type {
   DriverUpdate as SystemDriverUpdate,
   DeviceGroup as SystemDeviceGroup,
   SystemDriverOutcome,
+  SystemDevice,
   DriverInstallContext,
   DriverStoreVersion,
-  DlssOverrideConfig,
+  DlssPresetWriteConfig,
   OverrideScope,
   DlssOverrideReadback,
   DlssApplyOutcome,
@@ -72,6 +75,13 @@ export type {
   VendorSummary,
   FamilySummary,
   GameArt,
+  GameArtAsset,
+  GameArtCandidate,
+  GameArtSource,
+  GameArtState,
+  ArtCacheStatus,
+  ArtLocatorKind,
+  ArtResolveTrigger,
   ApplyRequest,
   ApplyResult,
   ApplyBatchRequest,
@@ -86,12 +96,16 @@ export type {
   DriverUpdate as SystemDriverUpdate,
   DeviceGroup as SystemDeviceGroup,
   SystemDriverOutcome,
+  SystemDevice,
   DriverInstallContext,
   DriverStoreVersion,
+  DriverHealth,
+  DriverUpdateAction,
   DlssPreset,
   FrameGenMode,
   FrameGenCount,
   DlssOverrideConfig,
+  DlssPresetWriteConfig,
   OverrideScope,
   DlssOverrideSource,
   DlssOverrideReadback,
@@ -273,6 +287,39 @@ export const BACKGROUND_SCAN_TICK_EVENT = "background:scan-tick";
 /** Backend -> frontend (tray "Apply all updates"): run the Apply-All flow. */
 export const BACKGROUND_APPLY_ALL_EVENT = "background:apply-all";
 
+/** Backend -> frontend: one ordered authoritative state delta. Emitted by `src-tauri/src/state.rs`. */
+export const STATE_EVENT = "state:event";
+
+/** Authoritative state contract. `Counter` values are decimal strings so the full u64 range
+ *  survives JSON and JavaScript; compare them as `BigInt`, never as `Number`. */
+export type {
+  AuthoritativeSnapshot,
+  StateEvent,
+  StateDelta,
+  StateWatermark,
+  StateCounts,
+  GameSnapshot,
+  OperationSnapshot,
+  BackupView,
+  HistoryView,
+  CatalogState,
+  MeasuredProgress,
+  SupportStatus,
+  ApplicabilityStatus,
+  ComponentStatus,
+  Counter,
+} from "../generated/bindings";
+
+/** Full authoritative snapshot plus its inclusive watermark. Subscribe to `STATE_EVENT` first. */
+export async function stateSnapshot(): Promise<import("../generated/bindings").AuthoritativeSnapshot> {
+  return transport(COMMANDS.state_snapshot);
+}
+
+/** Current emitter identity and inclusive watermark, used to detect a missed event. */
+export async function stateWatermark(): Promise<import("../generated/bindings").StateWatermark> {
+  return transport(COMMANDS.state_watermark);
+}
+
 export const DEFAULT_LAUNCHERS: LauncherKind[] = [
   "steam",
   "epic",
@@ -408,6 +455,10 @@ export async function scanSystemDrivers(): Promise<SystemDeviceGroup[]> {
   return transport(COMMANDS.scan_system_drivers);
 }
 
+export async function getSystemDevices(): Promise<SystemDevice[]> {
+  return transport(COMMANDS.get_system_devices);
+}
+
 export async function installSystemDriver(
   updateId: string,
   context?: DriverInstallContext,
@@ -426,21 +477,45 @@ export async function systemDriverVersions(infName: string): Promise<DriverStore
 }
 
 export type { DlssGeneration, NvidiaGpuArchitecture, DlssCapability } from "../generated/bindings";
-import type { DlssCapability } from "../generated/bindings";
+/** Capability and preset contract, phase 5.
+ *
+ *  The four DLSS features keep separate preset ranges and descriptions, so there is no shared preset
+ *  enum. `CapabilityAssessment.write_eligible` is the only gate that authorises a DRS write; a
+ *  documented provider namespace is not a support claim, and `PresetEvidence` keeps written,
+ *  read-back, provider-documented and in-game behaviour independent. When
+ *  `observation_complete` is false, origin, profile and application must not be asserted. */
+export type {
+  AdapterClass,
+  AdapterProvider,
+  CapabilityAssessment,
+  CapabilityEvidence,
+  DlssCapabilityReport,
+  DlssCapabilitySnapshot,
+  DlssPresetRegistry,
+  DrsSettingObservation,
+  FgPreset,
+  NrPreset,
+  PresetEvidence,
+  RrPreset,
+  SettingPatch,
+  SrPreset,
+} from "../generated/bindings";
+import type { DlssCapabilitySnapshot } from "../generated/bindings";
 
 export async function dlssOverridesSupported(): Promise<boolean> {
   return transport(COMMANDS.dlss_overrides_supported);
 }
 
-export async function dlssCapabilities(): Promise<DlssCapability[]> {
+export async function dlssCapabilities(): Promise<DlssCapabilitySnapshot> {
   return transport(COMMANDS.dlss_capabilities);
 }
 
 export async function applyDlssOverride(
   scope: OverrideScope,
-  config: DlssOverrideConfig,
+  config: DlssPresetWriteConfig,
+  changedSettingIds: number[] | null = null,
 ): Promise<DlssApplyOutcome> {
-  return transport(COMMANDS.apply_dlss_override, { scope, config });
+  return transport(COMMANDS.apply_dlss_override, { scope, config, changedSettingIds });
 }
 
 export async function resetDlssOverride(scope: OverrideScope): Promise<void> {
@@ -493,6 +568,10 @@ export async function applyUpdateBatch(request: ApplyBatchRequest): Promise<Appl
   return transport(COMMANDS.apply_update_batch, { request });
 }
 
+export async function previewUpdatePlan(items: ApplyRequest[], baseline?: UpdatePlan): Promise<UpdatePlan> {
+  return transport(COMMANDS.preview_update_plan, { items, baseline: baseline ?? null });
+}
+
 export async function applyStreamlineSet(items: ApplyRequest[]): Promise<StreamlineSetResult> {
   return transport(COMMANDS.apply_streamline_set, { items });
 }
@@ -517,12 +596,22 @@ export async function getDlssDebugOverlay(): Promise<boolean> {
   return transport(COMMANDS.get_dlss_debug_overlay);
 }
 
-export async function enrichGameArt(name: string, apiKey: string): Promise<GameArt> {
-  return transport(COMMANDS.enrich_game_art, { name, apiKey });
+/** Resolve art for a game through every source its launcher exposes.
+ *
+ *  `trigger` carries consent: `automatic` is a background pass, `user_scan` belongs to a scan the
+ *  user started and `explicit_retry` is a deliberate retry. The Nexus channel refuses the automatic
+ *  trigger before any request is built, so rendering a page can never cause a network call. */
+export async function enrichGameArt(
+  game: DetectedGame,
+  apiKey: string,
+  trigger: ArtResolveTrigger,
+): Promise<GameArt> {
+  return transport(COMMANDS.enrich_game_art, { game, apiKey, trigger });
 }
 
-export async function fetchSteamArt(name: string): Promise<GameArt> {
-  return transport(COMMANDS.fetch_steam_art, { name });
+/** Resolve Steam art from the application id, not from a name search. */
+export async function fetchSteamArt(appId: string, trigger: ArtResolveTrigger): Promise<GameArt> {
+  return transport(COMMANDS.fetch_steam_art, { appId, trigger });
 }
 
 export async function openPath(path: string): Promise<void> {
@@ -578,3 +667,24 @@ function assertCompleteSettings(value: unknown): asserts value is AppSettings {
     if (node === undefined) throw new Error(`Incomplete settings response: ${path}`);
   }
 }
+
+
+/** Local-only mod actions. Preview IDs are owned and consumed by the backend. */
+export const recipeApi: import("./recipes").RecipeApi = {
+  listKnownRecipes: () => transport(COMMANDS.list_known_recipes),
+  listOwnedRecipes: (request) => transport(COMMANDS.list_owned_recipes, { request }),
+  previewLocalRecipe: (request) => transport(COMMANDS.preview_local_recipe, { request }),
+  applyRecipe: (request) => transport(COMMANDS.apply_local_recipe, { request }),
+  configureRecipe: (request) => transport(COMMANDS.configure_local_recipe, { request }),
+  removeRecipe: (request) => transport(COMMANDS.remove_owned_recipe, { request }),
+  pickRecipeFile: async () => {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const result = await open({ multiple: false, filters: [{ name: "Mod recipe", extensions: ["json"] }] });
+    return typeof result === "string" ? result : null;
+  },
+  pickSourceDirectory: async () => {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const result = await open({ multiple: false, directory: true });
+    return typeof result === "string" ? result : null;
+  },
+};

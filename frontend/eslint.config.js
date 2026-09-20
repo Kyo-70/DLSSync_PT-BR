@@ -3,7 +3,7 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default [
-  { ignores: ["dist/**", "src/generated/**", "coverage/**"] },
+  { ignores: ["dist/**", "dist-nexus/**", "src/generated/**", "coverage/**"] },
   ...tseslint.configs.recommended,
   ...eslintPluginSvelte.configs["flat/recommended"],
   {

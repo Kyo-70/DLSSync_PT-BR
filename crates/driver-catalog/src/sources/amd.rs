@@ -93,33 +93,34 @@ fn public_version(version_attr: &str) -> &str {
     version_attr.split_whitespace().next().unwrap_or_default()
 }
 
-const AMD_INSTALLER_BASE: &str = "https://drivers.amd.com/drivers/";
-
-/// Construct the Adrenalin installer `.exe` URL from the public version + branch.
-/// Verified pattern (stable since 25.10.2): `whql-amd-software-adrenalin-edition-
-/// {ver}-{variant}.exe`, variant = `win11-c` (combined, RDNA3+) / `win11-a`
-/// (RDNA1/2). Beta/Optional drops the `whql-` prefix. Polaris/Vega has no
-/// deterministic URL → empty string, so the UI falls back to a manual download
-/// from the release-notes page. The download MUST send `Referer: amd.com` (set in
-/// the install command) or the CDN 302s to a download-incomplete page.
-fn build_installer_url(public_version: &str, arch: AmdArch, is_beta: bool) -> String {
-    let variant = match arch {
-        AmdArch::Mainstream => "win11-c",
-        AmdArch::Rdna12 => "win11-a",
-        AmdArch::PolarisVega => return String::new(),
-    };
-    let prefix = if is_beta { "" } else { "whql-" };
-    format!(
-        "{AMD_INSTALLER_BASE}{prefix}amd-software-adrenalin-edition-{public_version}-{variant}.exe"
-    )
-}
-
 fn child_text<'a>(node: roxmltree::Node<'a, 'a>, tag: &str) -> Option<&'a str> {
     node.children()
         .find(|c| c.has_tag_name(tag))
         .and_then(|c| c.text())
         .map(str::trim)
         .filter(|s| !s.is_empty())
+}
+
+fn observed_official_page(node: roxmltree::Node<'_, '_>) -> Option<String> {
+    let raw = child_text(node, "download-url")?;
+    let parsed = reqwest::Url::parse(raw).ok()?;
+    let host = parsed.host_str()?;
+    let is_amd_host = host.eq_ignore_ascii_case("amd.com")
+        || host
+            .to_ascii_lowercase()
+            .strip_suffix(".amd.com")
+            .is_some_and(|prefix| !prefix.is_empty());
+
+    if parsed.scheme() != "https"
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.port().is_some()
+        || !is_amd_host
+    {
+        return None;
+    }
+
+    Some(raw.to_string())
 }
 
 /// Pure parser over `amdversions.xml`. The document is newest-first, so the first
@@ -157,13 +158,15 @@ pub fn parse_version_table_history(
             continue;
         };
         let public = public_version(version_attr);
+        let Some(official_page) = observed_official_page(node) else {
+            continue;
+        };
         if !seen_public.insert(public.to_string()) {
             continue;
         }
         let is_beta = child_text(node, "whql")
             .map(|w| !w.eq_ignore_ascii_case("WHQL"))
             .unwrap_or(false);
-        let release_notes = child_text(node, "download-url").map(str::to_string);
         out.push(DriverRelease {
             vendor: DriverVendor::Amd,
             version: DriverVersion::four_part_labeled(windows_version, public),
@@ -174,11 +177,11 @@ pub fn parse_version_table_history(
             },
             display_version: Some(public.to_string()),
             is_beta,
-            download_url: build_installer_url(public, arch, is_beta),
+            download_url: None,
             size_bytes: 0,
             signature_subject: c::PUBLISHER_SUBJECT.to_string(),
             released_at: child_text(node, "release-date").and_then(parse_amd_date),
-            release_notes_url: release_notes,
+            release_notes_url: Some(official_page),
             changelog: None,
         });
     }
@@ -257,31 +260,6 @@ mod tests {
     }
 
     #[test]
-    fn installer_url_matches_verified_pattern() {
-        assert_eq!(
-            build_installer_url("26.6.1", AmdArch::Mainstream, false),
-            "https://drivers.amd.com/drivers/whql-amd-software-adrenalin-edition-26.6.1-win11-c.exe"
-        );
-        assert_eq!(
-            build_installer_url("26.6.1", AmdArch::Rdna12, false),
-            "https://drivers.amd.com/drivers/whql-amd-software-adrenalin-edition-26.6.1-win11-a.exe"
-        );
-    }
-
-    #[test]
-    fn installer_url_beta_drops_whql_prefix() {
-        assert_eq!(
-            build_installer_url("26.2.1", AmdArch::Mainstream, true),
-            "https://drivers.amd.com/drivers/amd-software-adrenalin-edition-26.2.1-win11-c.exe"
-        );
-    }
-
-    #[test]
-    fn installer_url_empty_for_polaris_vega() {
-        assert!(build_installer_url("25.8.1", AmdArch::PolarisVega, false).is_empty());
-    }
-
-    #[test]
     fn amd_arch_from_device_id_classifies_legacy_branches() {
         assert_eq!(amd_arch_from_device_id(0x73BF), Some(AmdArch::Rdna12));
         assert_eq!(amd_arch_from_device_id(0x731F), Some(AmdArch::Rdna12));
@@ -337,9 +315,9 @@ mod tests {
 
     const FIXTURE: &str = r#"<?xml version="1.0"?>
     <root>
-      <driver version="26.5.2 for Polaris and Vega" operating-system="Windows"><whql>WHQL</whql><download-url>https://amd/RN-RAD-WIN-26-5-2-polaris-vega.html</download-url><internal-version>23.19.25.01</internal-version><windows-version>31.0.21925.1001</windows-version><release-date>2026-05-14</release-date></driver>
-      <driver version="26.5.2" operating-system="Windows"><whql>WHQL</whql><download-url>https://amd/RN-RAD-WIN-26-5-2.html</download-url><internal-version>26.10.07.05</internal-version><windows-version>32.0.31007.5012</windows-version><release-date>2026-05-14</release-date></driver>
-      <driver version="26.5.2 for RDNA1 and RDNA2" operating-system="Windows"><whql>Optional</whql><download-url>https://amd/RN-RAD-WIN-26-5-2.html</download-url><windows-version>32.0.21043.10005</windows-version><release-date>2026-05-14</release-date></driver>
+      <driver version="26.5.2 for Polaris and Vega" operating-system="Windows"><whql>WHQL</whql><download-url>https://www.amd.com/RN-RAD-WIN-26-5-2-polaris-vega.html</download-url><internal-version>23.19.25.01</internal-version><windows-version>31.0.21925.1001</windows-version><release-date>2026-05-14</release-date></driver>
+      <driver version="26.5.2" operating-system="Windows"><whql>WHQL</whql><download-url>https://www.amd.com/RN-RAD-WIN-26-5-2.html</download-url><internal-version>26.10.07.05</internal-version><windows-version>32.0.31007.5012</windows-version><release-date>2026-05-14</release-date></driver>
+      <driver version="26.5.2 for RDNA1 and RDNA2" operating-system="Windows"><whql>Optional</whql><download-url>https://www.amd.com/RN-RAD-WIN-26-5-2.html</download-url><windows-version>32.0.21043.10005</windows-version><release-date>2026-05-14</release-date></driver>
       <driver version="26.5.1" operating-system="Linux"><windows-version>0.0.0.0</windows-version></driver>
     </root>"#;
 
@@ -351,13 +329,10 @@ mod tests {
         assert_eq!(release.vendor, DriverVendor::Amd);
         assert_eq!(release.version.display, "26.5.2");
         assert_eq!(release.version.raw, "32.0.31007.5012");
-        assert_eq!(
-            release.download_url,
-            "https://drivers.amd.com/drivers/whql-amd-software-adrenalin-edition-26.5.2-win11-c.exe"
-        );
+        assert_eq!(release.download_url, None);
         assert_eq!(
             release.release_notes_url.as_deref(),
-            Some("https://amd/RN-RAD-WIN-26-5-2.html")
+            Some("https://www.amd.com/RN-RAD-WIN-26-5-2.html")
         );
         assert!(!release.is_beta);
         assert!(release.released_at.is_some());
@@ -391,12 +366,12 @@ mod tests {
 
     const HISTORY_FIXTURE: &str = r#"<?xml version="1.0"?>
     <root>
-      <driver version="26.5.2" operating-system="Windows"><whql>WHQL</whql><download-url>https://amd/RN-26-5-2.html</download-url><windows-version>32.0.31007.5012</windows-version><release-date>2026-05-14</release-date></driver>
-      <driver version="26.5.2 for RDNA1 and RDNA2" operating-system="Windows"><whql>Optional</whql><download-url>https://amd/RN-26-5-2-rdna.html</download-url><windows-version>32.0.21043.10005</windows-version><release-date>2026-05-14</release-date></driver>
-      <driver version="26.5.1" operating-system="Windows"><whql>WHQL</whql><download-url>https://amd/RN-26-5-1.html</download-url><windows-version>32.0.31007.4001</windows-version><release-date>2026-05-01</release-date></driver>
-      <driver version="26.4.0" operating-system="Windows"><whql>WHQL</whql><download-url>https://amd/RN-26-4-0.html</download-url><windows-version>32.0.31000.7000</windows-version><release-date>2026-04-15</release-date></driver>
-      <driver version="26.4.0 for RDNA1 and RDNA2" operating-system="Windows"><whql>WHQL</whql><download-url>https://amd/RN-26-4-0-rdna.html</download-url><windows-version>32.0.21040.7000</windows-version><release-date>2026-04-15</release-date></driver>
-      <driver version="26.3.1 for Polaris and Vega" operating-system="Windows"><whql>WHQL</whql><download-url>https://amd/RN-26-3-1-pv.html</download-url><windows-version>31.0.21925.0500</windows-version><release-date>2026-03-15</release-date></driver>
+      <driver version="26.5.2" operating-system="Windows"><whql>WHQL</whql><download-url>https://www.amd.com/RN-26-5-2.html</download-url><windows-version>32.0.31007.5012</windows-version><release-date>2026-05-14</release-date></driver>
+      <driver version="26.5.2 for RDNA1 and RDNA2" operating-system="Windows"><whql>Optional</whql><download-url>https://www.amd.com/RN-26-5-2-rdna.html</download-url><windows-version>32.0.21043.10005</windows-version><release-date>2026-05-14</release-date></driver>
+      <driver version="26.5.1" operating-system="Windows"><whql>WHQL</whql><download-url>https://www.amd.com/RN-26-5-1.html</download-url><windows-version>32.0.31007.4001</windows-version><release-date>2026-05-01</release-date></driver>
+      <driver version="26.4.0" operating-system="Windows"><whql>WHQL</whql><download-url>https://www.amd.com/RN-26-4-0.html</download-url><windows-version>32.0.31000.7000</windows-version><release-date>2026-04-15</release-date></driver>
+      <driver version="26.4.0 for RDNA1 and RDNA2" operating-system="Windows"><whql>WHQL</whql><download-url>https://www.amd.com/RN-26-4-0-rdna.html</download-url><windows-version>32.0.21040.7000</windows-version><release-date>2026-04-15</release-date></driver>
+      <driver version="26.3.1 for Polaris and Vega" operating-system="Windows"><whql>WHQL</whql><download-url>https://www.amd.com/RN-26-3-1-pv.html</download-url><windows-version>31.0.21925.0500</windows-version><release-date>2026-03-15</release-date></driver>
       <driver version="26.3.0" operating-system="Linux"><windows-version>0.0.0.0</windows-version></driver>
     </root>"#;
 
@@ -435,11 +410,36 @@ mod tests {
     #[test]
     fn history_dedupes_repeated_public_versions_keeping_first_match() {
         let xml = r#"<root>
-          <driver version="26.5.2" operating-system="Windows"><whql>WHQL</whql><windows-version>32.0.31007.5012</windows-version></driver>
-          <driver version="26.5.2" operating-system="Windows"><whql>Optional</whql><windows-version>32.0.31007.5099</windows-version></driver>
+          <driver version="26.5.2" operating-system="Windows"><whql>WHQL</whql><download-url>https://www.amd.com/first.html</download-url><windows-version>32.0.31007.5012</windows-version></driver>
+          <driver version="26.5.2" operating-system="Windows"><whql>Optional</whql><download-url>https://www.amd.com/second.html</download-url><windows-version>32.0.31007.5099</windows-version></driver>
         </root>"#;
         let releases = parse_version_table_history(xml, AmdArch::Mainstream).unwrap();
         assert_eq!(releases.len(), 1);
         assert_eq!(releases[0].version.raw, "32.0.31007.5012");
+    }
+
+    #[test]
+    fn uses_observed_official_page_instead_of_synthesized_installer_url() {
+        let xml = include_str!("../../tests/fixtures/amd/observed-page-differs-from-pattern.xml");
+        let release = parse_version_table(xml, AmdArch::Mainstream)
+            .unwrap()
+            .expect("release with an observed official page");
+
+        assert!(release.download_url.is_none());
+        assert_eq!(
+            release.release_notes_url.as_deref(),
+            Some(
+                "https://www.amd.com/en/resources/support-articles/release-notes/RN-RAD-WIN-26-6-1.html"
+            )
+        );
+    }
+
+    #[test]
+    fn omits_release_when_official_page_is_not_observed() {
+        let xml = include_str!("../../tests/fixtures/amd/missing-observed-page.xml");
+
+        assert!(parse_version_table(xml, AmdArch::Mainstream)
+            .unwrap()
+            .is_none());
     }
 }

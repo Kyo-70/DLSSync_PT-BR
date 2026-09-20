@@ -1,9 +1,27 @@
+<script module lang="ts">
+  /** The app-update classifier and the banner wording live in `lib/appUpdateStatus.ts`, shared with
+   *  the Settings surface. That module imports no view, so this view chunk and the Settings chunk
+   *  stay separate: a shared leaf module replaces the duplicate copy without merging them.
+   *
+   *  `AboutUpdateAvailability` stays as an alias of the shared union so this surface's contract
+   *  keeps its name for existing consumers. The names are re-exported for the suites that read
+   *  them. */
+  import {
+    classifyUpdateCheck,
+    updateBannerFor,
+    type AppUpdateAvailability,
+    type UpdateBannerTone,
+  } from "../lib/appUpdateStatus";
+
+  export type AboutUpdateAvailability = AppUpdateAvailability;
+
+  export { classifyUpdateCheck, updateBannerFor, type UpdateBannerTone };
+</script>
+
 <script lang="ts">
   import { onMount } from "svelte";
   import { get } from "svelte/store";
   import { fly, fade } from "svelte/transition";
-  import { Tween } from "svelte/motion";
-  import { cubicOut } from "svelte/easing";
   import { t, locale, translate } from "../lib/i18n/index";
   import {
     manifestUpdatedAt,
@@ -30,9 +48,7 @@
   import changelogRaw from "../../../CHANGELOG.md?raw";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Bug from "@lucide/svelte/icons/bug";
-  import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import Signature from "@lucide/svelte/icons/signature";
-  import History from "@lucide/svelte/icons/history";
   import Cpu from "@lucide/svelte/icons/cpu";
   import HardDrive from "@lucide/svelte/icons/hard-drive";
   import MemoryStick from "@lucide/svelte/icons/memory-stick";
@@ -51,7 +67,7 @@
   let systemInfo = $state<SystemInfo | null>(null);
   let systemInfoFailed = $state(false);
   let updateChecking = $state(false);
-  let updateMessage = $state<{ kind: "info" | "success" | "warning" | "danger"; text: string } | null>(null);
+  let updateStatus = $state<AboutUpdateAvailability>({ kind: "unchecked" });
   let starCount = $state<number | null>(null);
 
   type ReleaseHighlights = { version: string; summary: string; bullets: string[] };
@@ -110,10 +126,6 @@
     } catch (err) { showToast("warning", translate(get(locale), "view.about.toast.openLinkFailed", { error: String(err) })); }
   }
 
-  const familyTween = new Tween(0, { duration: 600, easing: cubicOut });
-  const releaseTween = new Tween(0, { duration: 800, easing: cubicOut });
-  const gameTween = new Tween(0, { duration: 500, easing: cubicOut });
-  const backupTween = new Tween(0, { duration: 500, easing: cubicOut });
 
   onMount(async () => {
     try {
@@ -172,11 +184,8 @@
   let vendorCount = $derived($catalogVendors.length);
   let gameCount = $derived($games.length);
   let backupCount = $derived($backups.length);
+  let updateBanner = $derived(updateBannerFor($locale, updateStatus, version));
 
-  $effect(() => { familyTween.target = familyCount; });
-  $effect(() => { releaseTween.target = releaseCount; });
-  $effect(() => { gameTween.target = gameCount; });
-  $effect(() => { backupTween.target = backupCount; });
 
   const SOURCES = [
     { vendor: "NVIDIA", url: "https://github.com/NVIDIA/DLSS", label: "DLSS SDK", accent: vendorAccent("nvidia") },
@@ -204,27 +213,19 @@
 
   async function checkForUpdates(): Promise<void> {
     if (!appUpdaterEnabled) {
+      // Nexus policy: no self-updater and no automatic check. The action opens the mod page.
       await openReleases();
       return;
     }
     if (updateChecking) return;
     updateChecking = true;
-    updateMessage = { kind: "info", text: translate(get(locale), "view.about.update.checking") };
+    updateStatus = { kind: "checking" };
     try {
       const { check } = await import("@tauri-apps/plugin-updater");
       const update = await check();
-      if (update && (update as { available?: boolean }).available !== false) {
-        const next = (update as { version?: string }).version ?? "unknown";
-        updateMessage = { kind: "success", text: translate(get(locale), "view.about.update.available", { version: next }) };
-      } else {
-        updateMessage = { kind: "success", text: translate(get(locale), "view.about.update.latest", { version }) };
-      }
+      updateStatus = classifyUpdateCheck(update);
     } catch (err: unknown) {
-      const msg = String(err);
-      updateMessage = {
-        kind: "warning",
-        text: translate(get(locale), "view.about.update.failed", { error: msg }),
-      };
+      updateStatus = { kind: "error", error: String(err) };
     } finally {
       updateChecking = false;
     }
@@ -276,7 +277,7 @@
 
 <header class="view-header">
   <div>
-    <h1 class="view-title">{$t("view.about.title")}</h1>
+    <div class="about-title-line"><h1 class="view-title">DLSSync</h1><span class="about-version mono">v{version}</span></div>
     <p class="view-subtitle">{$t("view.about.subtitle")}</p>
   </div>
   <div class="header-actions">
@@ -291,7 +292,7 @@
     </button>
     <button class="btn btn-ghost sponsor-btn" onclick={() => openExternal(EXTERNAL_URLS.sponsor)} title={$t("view.about.action.sponsorTitle")}>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.27 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.77-3.4 6.86-8.55 11.53L12 21.35z"/></svg>
-      Sponsor
+      {$t("view.about.action.sponsor")}
     </button>
     {/if}
     <button class="btn btn-ghost kofi-btn" onclick={() => openExternal(EXTERNAL_URLS.kofi)} title={$t("view.about.action.kofiTitle")}>
@@ -328,38 +329,7 @@
   </div>
 </header>
 
-<section class="brand-hero" in:fly={{ y: 6, duration: 240 }}>
-  <div class="brand-hero-glow" aria-hidden="true"></div>
-  <div class="brand-hero-top">
-    <div class="brand-mark" aria-hidden="true">
-      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M3 12a9 9 0 1 0 3-6.7"/>
-        <polyline points="3 4 3 9 8 9"/>
-      </svg>
-    </div>
-    <div class="brand-text">
-      <div class="brand-title-row">
-        <h2 class="brand-title">DLSSync</h2>
-        <span class="brand-version mono">v{version}</span>
-      </div>
-      <span class="brand-tagline">{$t("view.about.tagline")}</span>
-    </div>
-  </div>
-  <div class="brand-pillars">
-    <span class="pillar" title={$t("view.about.pillar.hashVerifiedTitle")}>
-      <ShieldCheck size={14} />
-      {$t("view.about.pillar.hashVerified")}
-    </span>
-    <span class="pillar" title={$t("view.about.pillar.vendorSignedTitle")}>
-      <Signature size={14} />
-      {$t("view.about.pillar.vendorSigned")}
-    </span>
-    <span class="pillar" title={$t("view.about.pillar.reversibleTitle")}>
-      <History size={14} />
-      {$t("view.about.pillar.reversible")}
-    </span>
-  </div>
-</section>
+
 
 {#if !appUpdaterEnabled}
   <section class="nexus-notice" in:fly={{ y: 6, duration: 220, delay: 0 }}>
@@ -374,7 +344,7 @@
     <header class="wn-head">
       <span class="wn-tag">
         <span class="wn-eyebrow">{$t("view.about.whatsNew.eyebrow")}</span>
-        <span class="wn-version mono">v{releaseHighlights.version}</span>
+        <span class="wn-version mono">{releaseHighlights.version === "Unreleased" ? $t("view.about.whatsNew.unreleased") : `v${releaseHighlights.version}`}</span>
       </span>
       <button class="wn-link" onclick={openReleases} title={$t("view.about.whatsNew.openReleasesTitle")}>
         {$t("view.about.whatsNew.viewChangelog")}
@@ -394,27 +364,29 @@
   </section>
 {/if}
 
-{#if updateMessage}
+{#if updateBanner}
   <div
     class="update-banner"
-    class:is-success={updateMessage.kind === "success"}
-    class:is-warning={updateMessage.kind === "warning"}
-    class:is-danger={updateMessage.kind === "danger"}
-    class:is-info={updateMessage.kind === "info"}
+    class:is-success={updateBanner.tone === "success"}
+    class:is-warning={updateBanner.tone === "warning"}
+    class:is-danger={updateBanner.tone === "danger"}
+    class:is-info={updateBanner.tone === "info"}
+    data-testid="about-update-status"
+    data-status={updateStatus.kind}
     in:fly={{ y: -4, duration: 180 }}
   >
-    {updateMessage.text}
+    {updateBanner.text}
   </div>
 {/if}
 
 <section class="about-kpis" in:fly={{ y: 6, duration: 280, delay: 0 }}>
   <div class="about-kpi">
     <span class="kpi-label">{$t("view.about.kpi.familiesTracked")}</span>
-    <span class="kpi-value">{Math.round(familyTween.current)}</span>
+    <span class="kpi-value">{familyCount}</span>
   </div>
   <div class="about-kpi">
     <span class="kpi-label">{$t("view.about.kpi.versionsInManifest")}</span>
-    <span class="kpi-value">{Math.round(releaseTween.current).toLocaleString()}</span>
+    <span class="kpi-value">{releaseCount.toLocaleString()}</span>
   </div>
   <div class="about-kpi">
     <span class="kpi-label">{$t("view.about.kpi.upstreamVendors")}</span>
@@ -422,11 +394,11 @@
   </div>
   <div class="about-kpi">
     <span class="kpi-label">{$t("view.about.kpi.gamesDetected")}</span>
-    <span class="kpi-value">{Math.round(gameTween.current)}</span>
+    <span class="kpi-value">{gameCount}</span>
   </div>
   <div class="about-kpi">
     <span class="kpi-label">{$t("view.about.kpi.backupsStored")}</span>
-    <span class="kpi-value">{Math.round(backupTween.current)}</span>
+    <span class="kpi-value">{backupCount}</span>
   </div>
   <div class="about-kpi">
     <span class="kpi-label">{$t("view.about.kpi.manifestUpdated")}</span>
@@ -658,7 +630,7 @@
     padding: 16px 20px;
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-left: 3px solid var(--accent);
+    border-left: 1px solid var(--accent);
     border-radius: var(--radius-xl);
   }
   .nexus-notice-kicker {
@@ -756,14 +728,6 @@
     padding: 18px 22px 18px 26px;
     margin-bottom: 22px;
     overflow: hidden;
-  }
-  .whats-new::before {
-    content: '';
-    position: absolute;
-    left: 0; top: 14px; bottom: 14px;
-    width: 3px;
-    border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
-    background: var(--accent);
   }
   .wn-head {
     display: flex;

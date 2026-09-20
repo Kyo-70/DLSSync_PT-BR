@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::{classify, dedup_devices, filter_present, DeviceCatalog, DriverError, SystemDevice};
+use crate::{classify, DeviceCatalog, DriverError, SystemDevice};
 
 type WmiRow = HashMap<String, wmi::Variant>;
 
@@ -16,8 +16,9 @@ impl DeviceCatalog for WmiInventory {
              InfName FROM Win32_PnPSignedDriver",
         )
         .map_err(DriverError::Inventory)?;
-        let devices: Vec<SystemDevice> = rows.iter().filter_map(device_from_row).collect();
-        Ok(dedup_devices(filter_present(devices)))
+        let entities = query("SELECT DeviceID, Name, PNPClass, Manufacturer, HardwareID, CompatibleID, Present, ConfigManagerErrorCode FROM Win32_PnPEntity")
+            .map_err(DriverError::Inventory)?;
+        Ok(join_inventory(&rows, &entities))
     }
 }
 
@@ -47,9 +48,64 @@ fn device_from_row(row: &WmiRow) -> Option<SystemDevice> {
         driver_version,
         driver_date,
         hardware_id,
+        hardware_ids: Vec::new(),
+        problem_code: None,
         inf_name,
         present: true,
     })
+}
+
+/// Keep each PnP instance intact. Two interfaces can use different driver packages.
+fn join_inventory(signed: &[WmiRow], entities: &[WmiRow]) -> Vec<SystemDevice> {
+    let drivers: HashMap<_, _> = signed
+        .iter()
+        .filter_map(device_from_row)
+        .map(|device| (device.hardware_id.clone(), device))
+        .collect();
+    let mut seen = std::collections::HashSet::new();
+    entities
+        .iter()
+        .filter_map(|entity| {
+            if !matches!(entity.get("Present"), Some(wmi::Variant::Bool(true))) {
+                return None;
+            }
+            let id = string_field(entity, "DeviceID")?.to_ascii_uppercase();
+            if !seen.insert(id.clone()) {
+                return None;
+            }
+            let mut device = drivers.get(&id).cloned().unwrap_or_else(|| SystemDevice {
+                name: string_field(entity, "Name").unwrap_or_else(|| id.clone()),
+                class: classify(&string_field(entity, "PNPClass").unwrap_or_default()),
+                manufacturer: string_field(entity, "Manufacturer").unwrap_or_default(),
+                driver_version: None,
+                driver_date: None,
+                inf_name: None,
+                hardware_id: id,
+                hardware_ids: Vec::new(),
+                problem_code: None,
+                present: true,
+            });
+            device.hardware_ids = ["HardwareID", "CompatibleID"]
+                .into_iter()
+                .flat_map(|key| match entity.get(key) {
+                    Some(wmi::Variant::Array(values)) => values
+                        .iter()
+                        .filter_map(|value| match value {
+                            wmi::Variant::String(id) => Some(id.to_ascii_uppercase()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>(),
+                    _ => Vec::new(),
+                })
+                .collect();
+            device.problem_code = match entity.get("ConfigManagerErrorCode") {
+                Some(wmi::Variant::UI4(code)) => Some(*code),
+                Some(wmi::Variant::I4(code)) => u32::try_from(*code).ok(),
+                _ => None,
+            };
+            Some(device)
+        })
+        .collect()
 }
 
 fn string_field(row: &WmiRow, key: &str) -> Option<String> {
@@ -77,6 +133,38 @@ pub fn cim_to_iso(cim: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn joins_present_instances_without_merging_distinct_interfaces() {
+        let entity = |id: &str, present: bool| {
+            HashMap::from([
+                ("DeviceID".into(), wmi::Variant::String(id.into())),
+                (
+                    "Name".into(),
+                    wmi::Variant::String("Audio interface".into()),
+                ),
+                ("Present".into(), wmi::Variant::Bool(present)),
+                (
+                    "HardwareID".into(),
+                    wmi::Variant::Array(vec![wmi::Variant::String("SWC\\AUDIO".into())]),
+                ),
+                ("ConfigManagerErrorCode".into(), wmi::Variant::UI4(28)),
+            ])
+        };
+        let devices = join_inventory(
+            &[],
+            &[
+                entity("SWD\\ONE", true),
+                entity("SWD\\TWO", true),
+                entity("SWD\\GONE", false),
+            ],
+        );
+        assert_eq!(devices.len(), 2);
+        assert_ne!(devices[0].hardware_id, devices[1].hardware_id);
+        assert_eq!(devices[0].hardware_ids, vec!["SWC\\AUDIO"]);
+        assert_eq!(devices[0].problem_code, Some(28));
+        assert_eq!(devices[0].driver_version, None);
+    }
 
     #[test]
     fn parses_cim_datetime() {

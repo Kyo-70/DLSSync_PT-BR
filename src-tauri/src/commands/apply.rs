@@ -45,11 +45,17 @@ pub struct ApplyRequest {
     /// When absent, the running-game check falls back to the DLL's parent folder.
     #[serde(default)]
     pub install_dir: Option<String>,
+    #[serde(default)]
+    pub observed_sha256: Option<String>,
 }
 
 #[derive(Debug, Deserialize, specta::Type)]
 pub struct ApplyBatchRequest {
     pub items: Vec<ApplyRequest>,
+    #[serde(default)]
+    pub plan: Option<dlssync_contracts::UpdatePlan>,
+    #[serde(default)]
+    pub actor: Option<dlssync_contracts::OperationActor>,
 }
 
 #[derive(Debug, Serialize, specta::Type)]
@@ -146,25 +152,49 @@ pub async fn apply_update_batch(
     if request.items.is_empty() {
         return Ok(ApplyBatchResult { outcomes: vec![] });
     }
-    let handles_for_lookup = state.inner().clone_handles();
+    let actor = request
+        .actor
+        .unwrap_or(dlssync_contracts::OperationActor::Gui);
+    if !matches!(
+        actor,
+        dlssync_contracts::OperationActor::Gui | dlssync_contracts::OperationActor::Background
+    ) {
+        return Err(AppError::Validation(
+            "invalid WebView operation actor".into(),
+        ));
+    }
+    // Register before any file/catalog inspection. The UI can request cancellation
+    // while those checks are running, before a download task exists.
+    let registration =
+        BatchRegistration::new(&handle, state.apply_registry.clone(), &request.items);
+    let tokens = &registration.tokens;
+    if let Some(plan) = &request.plan {
+        let catalog = state.catalog.read();
+        let catalog = catalog
+            .as_ref()
+            .ok_or_else(|| AppError::Other("catalog unavailable".into()))?;
+        dlssync_application::validate_update_plan(catalog, plan)
+            .map_err(|error| AppError::Other(error.to_string()))?;
+    }
     let mut by_group: HashMap<String, Vec<ApplyRequest>> = HashMap::new();
     for item in &request.items {
-        let release = lookup_release(&handles_for_lookup, item).await?;
-        let gid = group_id_for(&release.cdn_url);
-        by_group.entry(gid).or_default().push(item.clone());
+        by_group
+            .entry(item.game_id.clone())
+            .or_default()
+            .push(item.clone());
     }
-    let registry = state.apply_registry.clone();
-    let tokens: HashMap<String, CancellationToken> = request
-        .items
-        .iter()
-        .map(|r| (r.apply_id.clone(), registry.register(&r.apply_id)))
-        .collect();
-    emit_inflight(&handle, registry.in_flight());
-
     let concurrency = state.settings.read().effective_apply_concurrency() as usize;
     let semaphore = Arc::new(Semaphore::new(concurrency.max(1)));
     let mut group_tasks = Vec::with_capacity(by_group.len());
     for (_gid, items) in by_group.into_iter() {
+        let reviewed = request
+            .plan
+            .as_ref()
+            .map(|plan| {
+                dlssync_application::planning::subset_update_plan(plan, &[items[0].game_id.clone()])
+            })
+            .transpose()
+            .map_err(|error| AppError::Other(error.to_string()))?;
         let handle_c = handle.clone();
         let state_c = state.inner().clone_handles();
         let sem = semaphore.clone();
@@ -172,16 +202,26 @@ pub async fn apply_update_batch(
         let apply_ids_for_group: Vec<String> = items.iter().map(|r| r.apply_id.clone()).collect();
         let task = tokio::spawn(async move {
             let _permit = sem.acquire_owned().await.ok();
-            let mut group_outcomes = Vec::with_capacity(items.len());
-            for item in items {
-                let token = tokens_c
-                    .get(&item.apply_id)
-                    .cloned()
-                    .unwrap_or_else(CancellationToken::new);
-                let outcome = apply_single_item(&handle_c, &state_c, &item, token).await;
-                group_outcomes.push((item.apply_id.clone(), outcome));
+            let ids: Vec<_> = items.iter().map(|item| item.apply_id.clone()).collect();
+            match apply_item_group(
+                &handle_c,
+                &state_c,
+                &items,
+                &tokens_c,
+                reviewed.as_ref(),
+                actor,
+            )
+            .await
+            {
+                Ok(outcomes) => outcomes
+                    .into_iter()
+                    .map(|outcome| (outcome.apply_id.clone(), Ok(outcome)))
+                    .collect::<Vec<(String, AppResult<ApplyOutcome>)>>(),
+                Err(error) => ids
+                    .into_iter()
+                    .map(|id| (id, Err(AppError::Other(error.to_string()))))
+                    .collect::<Vec<(String, AppResult<ApplyOutcome>)>>(),
             }
-            group_outcomes
         });
         group_tasks.push((apply_ids_for_group, task));
     }
@@ -217,11 +257,41 @@ pub async fn apply_update_batch(
             }
         }
     }
-    for r in &request.items {
-        registry.release(&r.apply_id);
-    }
-    emit_inflight(&handle, registry.in_flight());
     Ok(ApplyBatchResult { outcomes })
+}
+
+pub(crate) struct BatchRegistration {
+    handle: AppHandle,
+    registry: Arc<crate::state::ApplyRegistry>,
+    pub(crate) tokens: HashMap<String, CancellationToken>,
+}
+
+impl BatchRegistration {
+    pub(crate) fn new(
+        handle: &AppHandle,
+        registry: Arc<crate::state::ApplyRegistry>,
+        items: &[ApplyRequest],
+    ) -> Self {
+        let tokens = items
+            .iter()
+            .map(|item| (item.apply_id.clone(), registry.register(&item.apply_id)))
+            .collect();
+        emit_inflight(handle, registry.in_flight());
+        Self {
+            handle: handle.clone(),
+            registry,
+            tokens,
+        }
+    }
+}
+
+impl Drop for BatchRegistration {
+    fn drop(&mut self) {
+        for id in self.tokens.keys() {
+            self.registry.release(id);
+        }
+        emit_inflight(&self.handle, self.registry.in_flight());
+    }
 }
 
 #[tauri::command]
@@ -263,15 +333,601 @@ pub(crate) async fn lookup_release(
         })
 }
 
+struct PreparedGuiItem {
+    file: dlssync_application::execution::PreparedFile,
+    request: ApplyRequest,
+    group_id: String,
+    backup_id: String,
+    previous_version: Option<String>,
+    new_version: String,
+    game_executable: Option<String>,
+    cancel: CancellationToken,
+    _staging: tempfile::TempDir,
+}
+
 pub(crate) async fn apply_single_item(
     handle: &AppHandle,
     state: &StateHandles,
     request: &ApplyRequest,
     cancel: CancellationToken,
 ) -> AppResult<ApplyOutcome> {
-    let release = match lookup_release(state, request).await {
-        Ok(r) => r,
-        Err(e) => return Ok(failure_outcome(request, "_", e.to_string())),
+    let tokens = HashMap::from([(request.apply_id.clone(), cancel)]);
+    let outcomes = apply_item_group(
+        handle,
+        state,
+        std::slice::from_ref(request),
+        &tokens,
+        None,
+        dlssync_contracts::OperationActor::Gui,
+    )
+    .await?;
+    outcomes
+        .into_iter()
+        .find(|outcome| outcome.apply_id == request.apply_id)
+        .ok_or_else(|| AppError::Other("transaction returned no requested outcome".into()))
+}
+
+fn group_failure_progress(request: &ApplyRequest, reason: &str) -> ApplyProgress {
+    let cancelled = classify_error(reason) == "cancelled";
+    ApplyProgress {
+        apply_id: request.apply_id.clone(),
+        group_id: request.game_id.clone(),
+        stage: if cancelled {
+            STAGE_CANCELLED
+        } else {
+            STAGE_FAILED
+        },
+        message: if cancelled {
+            "Cancelled"
+        } else {
+            "Update could not finish"
+        }
+        .into(),
+        progress: None,
+        error: Some(reason.to_string()),
+        error_class: Some(
+            serde_json::from_value(serde_json::json!(classify_error(reason)))
+                .unwrap_or(dlssync_contracts::ApplyErrorClass::Other),
+        ),
+        attempt: None,
+    }
+}
+
+fn group_failure(handle: &AppHandle, requests: &[ApplyRequest], reason: &str) -> Vec<ApplyOutcome> {
+    requests
+        .iter()
+        .map(|request| {
+            let _ = handle.emit(
+                EVENT_APPLY_PROGRESS,
+                group_failure_progress(request, reason),
+            );
+            failure_outcome(request, &request.game_id, reason.to_string())
+        })
+        .collect()
+}
+
+#[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
+pub async fn preview_update_plan(
+    state: State<'_, AppState>,
+    items: Vec<ApplyRequest>,
+    baseline: Option<dlssync_contracts::UpdatePlan>,
+) -> AppResult<dlssync_contracts::UpdatePlan> {
+    if let Some(plan) = baseline {
+        let catalog = state.catalog.read();
+        let catalog = catalog
+            .as_ref()
+            .ok_or_else(|| AppError::Other("catalog unavailable".into()))?;
+        dlssync_application::validate_update_plan(catalog, &plan)
+            .map_err(|error| AppError::Other(error.to_string()))?;
+    }
+    let (_, plan, _) = plan_for_requests(&state.inner().clone_handles(), &items).await?;
+    Ok(plan)
+}
+
+async fn plan_for_requests(
+    state: &StateHandles,
+    requests: &[ApplyRequest],
+) -> AppResult<(dll_catalog::Catalog, dlssync_contracts::UpdatePlan, PathBuf)> {
+    let catalog = state
+        .catalog
+        .read()
+        .clone()
+        .ok_or_else(|| AppError::Other("catalog unavailable".into()))?;
+    let root = state
+        .backups
+        .read()
+        .as_ref()
+        .map(|store| store.root_dir.clone())
+        .ok_or_else(|| AppError::Other("backup store unavailable".into()))?;
+    let mut games = Vec::new();
+    for request in requests {
+        if games
+            .iter()
+            .any(|game: &dlssync_contracts::ScannedGame| game.id == request.game_id)
+        {
+            continue;
+        }
+        let install_root = request
+            .install_dir
+            .as_ref()
+            .map(PathBuf::from)
+            .or_else(|| {
+                PathBuf::from(&request.dll_path)
+                    .parent()
+                    .map(std::path::Path::to_path_buf)
+            })
+            .ok_or_else(|| AppError::Other("game root missing".into()))?;
+        crate::paths::PathGuard::assert_safe_scan_dir(&install_root)
+            .map_err(|error| AppError::Validation(error.to_string()))?;
+        let mut game =
+            tokio::task::spawn_blocking(move || dlssync_application::scan_path(&install_root))
+                .await
+                .map_err(|error| AppError::Other(error.to_string()))?
+                .map_err(|error| AppError::Other(error.to_string()))?;
+        game.id = request.game_id.clone();
+        if let Some(label) = &request.game_label {
+            game.name = label.clone();
+        }
+        games.push(game);
+    }
+    let mut items = Vec::with_capacity(requests.len());
+    for request in requests {
+        let path = PathBuf::from(&request.dll_path)
+            .canonicalize()
+            .map_err(|error| AppError::Other(error.to_string()))?;
+        let game = games
+            .iter()
+            .find(|game| game.id == request.game_id)
+            .ok_or_else(|| AppError::Other("game missing from plan".into()))?;
+        let component = game
+            .components
+            .iter()
+            .find(|component| {
+                PathBuf::from(&component.path).canonicalize().ok().as_ref() == Some(&path)
+            })
+            .ok_or_else(|| {
+                AppError::Other(format!(
+                    "requested DLL not observed in game: {}",
+                    path.display()
+                ))
+            })?;
+        if component.family != request.family {
+            return Err(AppError::Other(
+                "requested DLL family differs from observation".into(),
+            ));
+        }
+        if request.observed_sha256.as_ref().is_some_and(|expected| {
+            component
+                .sha256
+                .as_ref()
+                .is_none_or(|observed| !observed.eq_ignore_ascii_case(expected))
+        }) {
+            return Err(AppError::Other(
+                "installed bytes changed since review; scan again".into(),
+            ));
+        }
+        let filename = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| AppError::Other("invalid DLL filename".into()))?;
+        let release = catalog
+            .find_file(
+                &request.vendor,
+                &request.family,
+                &request.target_version,
+                filename,
+            )
+            .ok_or_else(|| AppError::Other("requested catalog artifact missing".into()))?;
+        items.push(dlssync_contracts::UpdatePlanItem {
+            id: request.apply_id.clone(),
+            game_id: game.id.clone(),
+            game_name: game.name.clone(),
+            dll_path: component.path.clone(),
+            family: component.family.clone(),
+            current_version: component.current_version.clone(),
+            target_version: release.version,
+            backup_path: String::new(),
+            selected: true,
+            trust: dlssync_contracts::TrustEvidence {
+                source_url: release.cdn_url,
+                expected_sha256: release.sha256,
+                observed_sha256: component.sha256.clone(),
+                signature_subject: release.signature_subject,
+                signature_verified: release.signed,
+                anti_cheat_risk: None,
+            },
+        });
+    }
+    let plan = dlssync_application::build_verified_update_plan(&catalog, &games, items, &root)
+        .map_err(|error| AppError::Other(error.to_string()))?;
+    Ok((catalog, plan, root))
+}
+
+pub(crate) async fn apply_item_group(
+    handle: &AppHandle,
+    state: &StateHandles,
+    requests: &[ApplyRequest],
+    tokens: &HashMap<String, CancellationToken>,
+    reviewed: Option<&dlssync_contracts::UpdatePlan>,
+    actor: dlssync_contracts::OperationActor,
+) -> AppResult<Vec<ApplyOutcome>> {
+    if requests.is_empty() {
+        return Ok(vec![]);
+    }
+    let planned = if let Some(plan) = reviewed {
+        let catalog = state
+            .catalog
+            .read()
+            .clone()
+            .ok_or_else(|| AppError::Other("catalog unavailable".into()))?;
+        let root = state
+            .backups
+            .read()
+            .as_ref()
+            .map(|store| store.root_dir.clone())
+            .ok_or_else(|| AppError::Other("backup store unavailable".into()))?;
+        dlssync_application::validate_update_plan(&catalog, plan)
+            .map_err(|error| AppError::Other(error.to_string()))?;
+        for request in requests {
+            let path = PathBuf::from(&request.dll_path)
+                .canonicalize()
+                .map_err(|error| AppError::Other(error.to_string()))?;
+            if !plan.items.iter().any(|item| {
+                std::path::Path::new(&item.dll_path) == path
+                    && item.game_id == request.game_id
+                    && item.target_version == request.target_version
+                    && item.family == request.family
+            }) {
+                return Ok(group_failure(
+                    handle,
+                    requests,
+                    "request differs from reviewed plan",
+                ));
+            }
+        }
+        for change in plan
+            .changes
+            .iter()
+            .filter(|change| !change.added_as_dependency)
+        {
+            if !requests.iter().any(|request| {
+                PathBuf::from(&request.dll_path).canonicalize().ok()
+                    == Some(PathBuf::from(&change.precondition.absolute_path))
+            }) {
+                return Ok(group_failure(
+                    handle,
+                    requests,
+                    "reviewed plan includes an unrequested member",
+                ));
+            }
+        }
+        Ok((catalog, plan.clone(), root))
+    } else {
+        plan_for_requests(state, requests).await
+    };
+    let (catalog, plan, root) = match planned {
+        Ok(plan) => plan,
+        Err(error) => return Ok(group_failure(handle, requests, &error.to_string())),
+    };
+    let hardware = crate::system_info::collect();
+    let policy = dlssync_application::policy::ApplyPolicy {
+        fsr4_capable: hardware.gpus.iter().any(|gpu| gpu.fsr4_capable),
+        allow_streamline: state.settings.read().update_prefs.update_streamline,
+    };
+    if let Err(error) = validate_batch_policy(&plan, &policy)
+        .and_then(|()| dlssync_application::policy::validate_plan_backups(&root, &plan))
+    {
+        return Ok(group_failure(handle, requests, &error.to_string()));
+    }
+    let game_roots = dlssync_application::transaction::plan_game_roots(&plan)
+        .map_err(|error| AppError::Other(error.to_string()))?;
+    let _preparation_lock = match dlssync_application::transaction::lock_preparation(&game_roots) {
+        Ok(lock) => lock,
+        Err(error) => return Ok(group_failure(handle, requests, &error.to_string())),
+    };
+    let mut expanded = Vec::with_capacity(plan.items.len());
+    let mut expanded_tokens = cancellation_tokens_for_group(requests, tokens);
+    for item in &plan.items {
+        let source = requests.iter().find(|request| {
+            PathBuf::from(&request.dll_path).canonicalize().ok()
+                == Some(PathBuf::from(&item.dll_path))
+        });
+        let template = source
+            .or_else(|| {
+                requests
+                    .iter()
+                    .find(|request| request.game_id == item.game_id)
+            })
+            .ok_or_else(|| AppError::Other("dependency has no game request".into()))?;
+        let mut request = template.clone();
+        if source.is_none() {
+            request.apply_id = uuid::Uuid::new_v4().to_string();
+            if let Some(token) = tokens.get(&template.apply_id) {
+                expanded_tokens.insert(request.apply_id.clone(), token.clone());
+            }
+        }
+        request.dll_path = item.dll_path.clone();
+        request.family = item.family.clone();
+        request.target_version = item.target_version.clone();
+        request.vendor = dll_scanner::family_vendor(&item.family)
+            .ok_or_else(|| {
+                AppError::Validation(format!("unknown component family: {}", item.family))
+            })?
+            .into();
+        expanded.push(request);
+    }
+    let mut prepared = Vec::with_capacity(expanded.len());
+    for (request, item) in expanded.iter().zip(&plan.items) {
+        if expanded_tokens
+            .values()
+            .any(CancellationToken::is_cancelled)
+        {
+            return Ok(group_failure(handle, &expanded, "cancelled"));
+        }
+        let cancel = expanded_tokens
+            .get(&request.apply_id)
+            .cloned()
+            .unwrap_or_default();
+        let backup_path =
+            dlssync_application::policy::derived_backup_destination(&root, &plan, item)
+                .map_err(|error| AppError::Other(error.to_string()))?;
+        match prepare_single_item(handle, state, request, cancel, item, backup_path).await {
+            Ok(file) => prepared.push(file),
+            Err(outcome) => {
+                return Ok(group_failure(
+                    handle,
+                    &expanded,
+                    outcome.error.as_deref().unwrap_or("preparation failed"),
+                ))
+            }
+        }
+    }
+    let files: Vec<_> = prepared.iter().map(|item| item.file.clone()).collect();
+    for item in &prepared {
+        let ctx = StageContext {
+            handle: handle.clone(),
+            apply_id: item.request.apply_id.clone(),
+            group_id: item.group_id.clone(),
+        };
+        ctx.stage(STAGE_REPLACE, "Installing updates", None, None);
+    }
+    let result = (|| -> Result<usize, dlssync_application::ExecutionError> {
+        let current = state.catalog.read().clone().ok_or_else(|| {
+            dlssync_application::ExecutionError::Stale("catalog unavailable".into())
+        })?;
+        dlssync_application::validate_update_plan(&current, &plan)?;
+        dlssync_application::execution::validate_prepared_plan(&plan, &files)?;
+        let store_guard = state.backups.read();
+        let store = store_guard.as_ref().ok_or_else(|| {
+            dlssync_application::ExecutionError::Integrity("backup store unavailable".into())
+        })?;
+        let journal = dlssync_application::transaction::recovery_journal(store)?;
+        let mut game_ids: Vec<String> = expanded
+            .iter()
+            .map(|request| request.game_id.clone())
+            .collect();
+        game_ids.sort();
+        game_ids.dedup();
+        let operation_id = plan.id.clone();
+        let scoped_game_id = (game_ids.len() == 1).then(|| game_ids[0].clone());
+        dlssync_application::transaction::apply_durable_observed(
+            &journal,
+            &root,
+            &plan.id,
+            actor,
+            &files,
+            |file| {
+                if prepared.iter().any(|item| item.cancel.is_cancelled()) {
+                    return Err(dlssync_application::ExecutionError::Cancelled);
+                }
+                if state.catalog.read().as_ref().is_none_or(|current| {
+                    dlssync_application::planning::catalog_revision(current)
+                        != dlssync_application::planning::catalog_revision(&catalog)
+                }) {
+                    return Err(dlssync_application::ExecutionError::Stale(
+                        "catalog changed during transaction".into(),
+                    ));
+                }
+                pe_version::require_x64_dll_pair(&file.target, &file.staged)?;
+                if let Some(item) = prepared.iter().find(|item| item.file.target == file.target) {
+                    if let Some(executable) = &item.game_executable {
+                        pe_version::require_x64_executable(std::path::Path::new(executable))?;
+                    }
+                }
+                Ok(())
+            },
+            |_, stage| {
+                let operation = dlssync_contracts::OperationSnapshot {
+                    id: operation_id.clone(),
+                    plan_id: plan.id.clone(),
+                    actor,
+                    kind: dlssync_contracts::OperationKind::DllApply,
+                    game_ids: game_ids.clone(),
+                    parent_operation_id: None,
+                    started_at: Some(plan.created_at.clone()),
+                    sequence: dlssync_contracts::Counter::default(),
+                    stage,
+                    progress: dlssync_contracts::MeasuredProgress {
+                        files_verified: prepared
+                            .iter()
+                            .filter(|item| {
+                                dll_catalog::hex_sha256_file(&item.file.target).is_ok_and(|hash| {
+                                    hash.eq_ignore_ascii_case(&item.file.expected_sha256)
+                                })
+                            })
+                            .count() as u32,
+                        files_total: Some(prepared.len() as u32),
+                        measurement_basis: dlssync_contracts::MeasurementBasis::VerifiedFiles,
+                        ..dlssync_contracts::MeasuredProgress::default()
+                    },
+                    results: Vec::new(),
+                    cancel_requested: prepared.iter().any(|item| item.cancel.is_cancelled()),
+                    error: None,
+                    state_revision: String::new(),
+                    updated_at: chrono::Utc::now().to_rfc3339(),
+                };
+                let receipt = state
+                    .authoritative_state
+                    .commit(dlssync_application::state::StateCommit {
+                        operation_id: Some(operation_id.clone()),
+                        game_id: scoped_game_id.clone(),
+                        delta: dlssync_contracts::StateDelta {
+                            affected_game_ids: game_ids.clone(),
+                            operations: vec![operation],
+                            ..dlssync_contracts::StateDelta::default()
+                        },
+                    })
+                    .map_err(|error| error.to_string())?;
+                receipt.delivery_error.map_or(Ok(()), Err)
+            },
+        )
+    })();
+    if let Err(error) = result {
+        if let Some(store) = state.backups.read().as_ref() {
+            if let Err(sync_error) =
+                dlssync_application::transaction::sync_restore_verifications(store)
+            {
+                tracing::warn!(error = %sync_error, "restore verification projection after failed apply was incomplete");
+            }
+        }
+        refresh_apply_persisted_state(state);
+        return Ok(group_failure(handle, &expanded, &error.to_string()));
+    }
+    let catalog = state.catalog.read().clone();
+    let mut post_apply_games: HashMap<String, (String, PathBuf)> = HashMap::new();
+    for request in &expanded {
+        let root = request
+            .install_dir
+            .as_ref()
+            .map(PathBuf::from)
+            .or_else(|| PathBuf::from(&request.dll_path).parent().map(PathBuf::from));
+        if let Some(root) = root {
+            post_apply_games
+                .entry(request.game_id.clone())
+                .or_insert_with(|| {
+                    (
+                        request
+                            .game_label
+                            .clone()
+                            .unwrap_or_else(|| request.game_id.clone()),
+                        root,
+                    )
+                });
+        }
+    }
+    for (game_id, (name, install_dir)) in post_apply_games {
+        let _projection_guard = dlssync_application::scan::projection_guard();
+        let ticket = state
+            .authoritative_state
+            .begin_observation(dlssync_application::scan::GAME_PROJECTION_SCOPE);
+        let detected = launcher_scan::DetectedGame {
+            id: game_id.clone(),
+            name,
+            launcher: launcher_scan::LauncherKind::Manual,
+            install_dir,
+            app_id: None,
+            native_ids: Default::default(),
+            art: Default::default(),
+            image_url: None,
+            size_bytes: None,
+        };
+        let snapshot = dlssync_application::scan::observe_game_snapshot(
+            &detected,
+            catalog.as_ref(),
+            &crate::commands::settings::projection_settings(&state.settings.read(), &game_id),
+        );
+        match state.authoritative_state.commit_observation(
+            ticket,
+            dlssync_application::state::StateCommit {
+                game_id: Some(game_id.clone()),
+                delta: dlssync_contracts::StateDelta {
+                    affected_game_ids: vec![game_id],
+                    games: vec![snapshot],
+                    ..dlssync_contracts::StateDelta::default()
+                },
+                ..dlssync_application::state::StateCommit::default()
+            },
+        ) {
+            Ok(receipt) => {
+                if let Some(error) = receipt.delivery_error {
+                    tracing::warn!(%error, "post-apply observation event delivery failed");
+                }
+            }
+            Err(error) => tracing::warn!(%error, "post-apply observation commit was stale"),
+        }
+    }
+    refresh_apply_persisted_state(state);
+    Ok(prepared
+        .into_iter()
+        .map(|item| {
+            let ctx = StageContext {
+                handle: handle.clone(),
+                apply_id: item.request.apply_id.clone(),
+                group_id: item.group_id,
+            };
+            ctx.stage(
+                STAGE_VERIFY_POST,
+                &format!("Installed version: {}", item.new_version),
+                None,
+                None,
+            );
+            ctx.stage(STAGE_COMPLETE, "Update installed", Some(1.0), None);
+            ApplyOutcome {
+                apply_id: item.request.apply_id,
+                success: true,
+                backup_id: Some(item.backup_id),
+                previous_version: item.previous_version,
+                new_version: Some(item.new_version),
+                error: None,
+            }
+        })
+        .collect())
+}
+
+fn validate_batch_policy(
+    plan: &dlssync_contracts::UpdatePlan,
+    policy: &dlssync_application::policy::ApplyPolicy,
+) -> Result<(), dlssync_application::ExecutionError> {
+    dlssync_application::policy::evaluate_plan(plan, policy)
+}
+
+fn cancellation_tokens_for_group(
+    requests: &[ApplyRequest],
+    tokens: &HashMap<String, CancellationToken>,
+) -> HashMap<String, CancellationToken> {
+    requests
+        .iter()
+        .filter_map(|request| {
+            tokens
+                .get(&request.apply_id)
+                .map(|token| (request.apply_id.clone(), token.clone()))
+        })
+        .collect()
+}
+
+async fn prepare_single_item(
+    handle: &AppHandle,
+    state: &StateHandles,
+    request: &ApplyRequest,
+    cancel: CancellationToken,
+    plan_item: &dlssync_contracts::UpdatePlanItem,
+    backup_path: PathBuf,
+) -> Result<PreparedGuiItem, ApplyOutcome> {
+    let release_result = {
+        let catalog_guard = state.catalog.read();
+        match catalog_guard.as_ref() {
+            Some(catalog) => {
+                dlssync_application::planning::resolve_planned_release(catalog, plan_item)
+            }
+            None => Err(dlssync_application::ExecutionError::Stale(
+                "catalog unavailable".into(),
+            )),
+        }
+    };
+    let release = match release_result {
+        Ok(release) => release,
+        Err(error) => return Err(failure_outcome(request, "_", error.to_string())),
     };
     let group_id = group_id_for(&release.cdn_url);
     let ctx = StageContext {
@@ -300,7 +956,7 @@ pub(crate) async fn apply_single_item(
                 reason.clone(),
                 Some("driver_too_old"),
             );
-            return Ok(failure_outcome(request, &group_id, reason));
+            return Err(failure_outcome(request, &group_id, reason));
         }
     }
 
@@ -310,7 +966,7 @@ pub(crate) async fn apply_single_item(
     {
         let reason = guard_err.to_string();
         ctx.fail("Unsafe target path", reason.clone(), Some("permission"));
-        return Ok(failure_outcome(request, &group_id, reason));
+        return Err(failure_outcome(request, &group_id, reason));
     }
     if !dll_path.exists() {
         ctx.fail(
@@ -318,7 +974,7 @@ pub(crate) async fn apply_single_item(
             "missing".to_string(),
             Some("missing"),
         );
-        return Ok(failure_outcome(
+        return Err(failure_outcome(
             request,
             &group_id,
             format!("dll not found: {}", dll_path.display()),
@@ -331,7 +987,7 @@ pub(crate) async fn apply_single_item(
             reason.clone(),
             Some("streamline_locked"),
         );
-        return Ok(failure_outcome(request, &group_id, reason));
+        return Err(failure_outcome(request, &group_id, reason));
     }
     if let Err(reason) = ensure_writable(&dll_path) {
         let class = if reason.contains("locked") {
@@ -342,7 +998,7 @@ pub(crate) async fn apply_single_item(
             "other"
         };
         ctx.fail("DLL is locked", reason.clone(), Some(class));
-        return Ok(failure_outcome(request, &group_id, reason));
+        return Err(failure_outcome(request, &group_id, reason));
     }
 
     let game_root = request
@@ -358,7 +1014,7 @@ pub(crate) async fn apply_single_item(
             .unwrap_or(&request.game_id);
         let err = format!("Close {label} before updating its DLLs (running: {running_exe})");
         ctx.fail("Game is running", err.clone(), Some("game_running"));
-        return Ok(failure_outcome(request, &group_id, err));
+        return Err(failure_outcome(request, &group_id, err));
     }
 
     let game_executable =
@@ -372,7 +1028,7 @@ pub(crate) async fn apply_single_item(
                     error.to_string(),
                     Some("architecture"),
                 );
-                return Ok(failure_outcome(request, &group_id, error.to_string()));
+                return Err(failure_outcome(request, &group_id, error.to_string()));
             }
         };
     if let Some(executable) = &game_executable {
@@ -382,7 +1038,7 @@ pub(crate) async fn apply_single_item(
                 error.to_string(),
                 Some("architecture"),
             );
-            return Ok(failure_outcome(request, &group_id, error.to_string()));
+            return Err(failure_outcome(request, &group_id, error.to_string()));
         }
     }
     let backup_root = match state.backups.read().as_ref().map(|s| s.root_dir.clone()) {
@@ -390,7 +1046,7 @@ pub(crate) async fn apply_single_item(
         None => {
             let err = "backup store not initialized".to_string();
             ctx.fail(&err, err.clone(), Some("backup"));
-            return Ok(failure_outcome(request, &group_id, err));
+            return Err(failure_outcome(request, &group_id, err));
         }
     };
 
@@ -404,7 +1060,7 @@ pub(crate) async fn apply_single_item(
         Ok(t) => t,
         Err(e) => {
             ctx.fail("Staging dir failed", e.to_string(), Some("other"));
-            return Ok(failure_outcome(request, &group_id, e.to_string()));
+            return Err(failure_outcome(request, &group_id, e.to_string()));
         }
     };
     let staged_dll =
@@ -413,7 +1069,7 @@ pub(crate) async fn apply_single_item(
             Err(err) => {
                 let class = classify_error(&err);
                 ctx.fail("Download failed", err.clone(), Some(class));
-                return Ok(failure_outcome(request, &group_id, err));
+                return Err(failure_outcome(request, &group_id, err));
             }
         };
 
@@ -423,7 +1079,7 @@ pub(crate) async fn apply_single_item(
             error.to_string(),
             Some("architecture"),
         );
-        return Ok(failure_outcome(request, &group_id, error.to_string()));
+        return Err(failure_outcome(request, &group_id, error.to_string()));
     }
 
     let algo = dll_catalog::HashAlgo::from_hex_len(&release.sha256)
@@ -447,11 +1103,11 @@ pub(crate) async fn apply_single_item(
         Ok(Ok(h)) => h,
         Ok(Err(e)) => {
             ctx.fail("Hash failed", e.to_string(), Some("hash"));
-            return Ok(failure_outcome(request, &group_id, e.to_string()));
+            return Err(failure_outcome(request, &group_id, e.to_string()));
         }
         Err(e) => {
             ctx.fail("Hash task failed", e.to_string(), Some("other"));
-            return Ok(failure_outcome(request, &group_id, e.to_string()));
+            return Err(failure_outcome(request, &group_id, e.to_string()));
         }
     };
     if !new_hash.eq_ignore_ascii_case(&release.sha256) {
@@ -460,9 +1116,17 @@ pub(crate) async fn apply_single_item(
             release.sha256, new_hash
         );
         ctx.fail("Integrity check failed", err.clone(), Some("hash"));
-        return Ok(failure_outcome(request, &group_id, err));
+        return Err(failure_outcome(request, &group_id, err));
     }
     ctx.stage(STAGE_VERIFY_SHA, &format!("{algo_label} OK"), None, None);
+
+    let expected_sha256 = match dll_catalog::hex_sha256_file(&staged_dll) {
+        Ok(hash) => hash,
+        Err(error) => {
+            ctx.fail("Staged hash unreadable", error.to_string(), Some("hash"));
+            return Err(failure_outcome(request, &group_id, error.to_string()));
+        }
+    };
 
     let allow_unsigned = state.settings.read().advanced.allow_unsigned_dlls;
     ctx.stage(
@@ -480,7 +1144,7 @@ pub(crate) async fn apply_single_item(
         Ok(info) => info,
         Err(e) => {
             ctx.fail("Signature task failed", e.to_string(), Some("other"));
-            return Ok(failure_outcome(request, &group_id, e.to_string()));
+            return Err(failure_outcome(request, &group_id, e.to_string()));
         }
     };
     match auth_info {
@@ -497,7 +1161,7 @@ pub(crate) async fn apply_single_item(
                     info.subject_cn.as_deref().unwrap_or("?")
                 );
                 ctx.fail("Untrusted signature chain", err.clone(), Some("signature"));
-                return Ok(failure_outcome(request, &group_id, err));
+                return Err(failure_outcome(request, &group_id, err));
             }
             Ok(()) => {
                 let trust_tag = if !info.trusted {
@@ -534,7 +1198,7 @@ pub(crate) async fn apply_single_item(
             Err(reason) => {
                 let with_hint = enrich_signature_error(&reason);
                 ctx.fail("Signature rejected", with_hint.clone(), Some("signature"));
-                return Ok(failure_outcome(request, &group_id, with_hint));
+                return Err(failure_outcome(request, &group_id, with_hint));
             }
         },
         None if allow_unsigned => {
@@ -551,13 +1215,13 @@ pub(crate) async fn apply_single_item(
                        ships unsigned binaries"
                 .to_string();
             ctx.fail("Signature unreadable", err.clone(), Some("signature"));
-            return Ok(failure_outcome(request, &group_id, err));
+            return Err(failure_outcome(request, &group_id, err));
         }
     }
 
     if cancel.is_cancelled() {
         ctx.cancelled();
-        return Ok(failure_outcome(request, &group_id, "cancelled".into()));
+        return Err(failure_outcome(request, &group_id, "cancelled".into()));
     }
 
     let previous_sha = match tokio::task::spawn_blocking({
@@ -569,11 +1233,11 @@ pub(crate) async fn apply_single_item(
         Ok(Ok(h)) => h,
         Ok(Err(e)) => {
             ctx.fail("Hash old DLL failed", e.to_string(), Some("hash"));
-            return Ok(failure_outcome(request, &group_id, e.to_string()));
+            return Err(failure_outcome(request, &group_id, e.to_string()));
         }
         Err(e) => {
             ctx.fail("Hash task failed", e.to_string(), Some("other"));
-            return Ok(failure_outcome(request, &group_id, e.to_string()));
+            return Err(failure_outcome(request, &group_id, e.to_string()));
         }
     };
     let previous_version = tokio::task::spawn_blocking({
@@ -593,29 +1257,18 @@ pub(crate) async fn apply_single_item(
         .and_then(|n| n.to_str())
         .unwrap_or("unknown.dll")
         .to_string();
-    let backup_path = match state.backups.read().as_ref().and_then(|store| {
-        let label = request
-            .game_label
-            .as_deref()
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or(&request.game_id);
-        store
-            .allocate_backup_path(label, created_at, &filename)
-            .ok()
-    }) {
-        Some(p) => p,
-        None => {
-            let err = "could not allocate backup path".to_string();
-            ctx.fail(&err, err.clone(), Some("backup"));
-            return Ok(failure_outcome(request, &group_id, err));
-        }
-    };
+    if plan_item.trust.observed_sha256.as_deref() != Some(previous_sha.as_str()) {
+        let message = "installed bytes changed since plan creation".to_string();
+        ctx.fail("Stale plan", message.clone(), Some("hash"));
+        return Err(failure_outcome(request, &group_id, message));
+    }
     if cancel.is_cancelled() {
         ctx.cancelled();
-        return Ok(failure_outcome(request, &group_id, "cancelled".into()));
+        return Err(failure_outcome(request, &group_id, "cancelled".into()));
     }
     let copy_src = dll_path.clone();
     let copy_dst = backup_path.clone();
+    let copy_expected = previous_sha.clone();
     let backup_space = std::fs::metadata(&dll_path)
         .map_err(dll_catalog::CatalogError::from)
         .and_then(|metadata| dll_catalog::ensure_available_space(&backup_path, metadata.len()));
@@ -625,17 +1278,26 @@ pub(crate) async fn apply_single_item(
             error.to_string(),
             Some("backup"),
         );
-        return Ok(failure_outcome(request, &group_id, error.to_string()));
+        return Err(failure_outcome(request, &group_id, error.to_string()));
     }
-    match tokio::task::spawn_blocking(move || std::fs::copy(&copy_src, &copy_dst)).await {
+    match tokio::task::spawn_blocking(move || {
+        dlssync_application::policy::create_contained_backup(
+            &backup_root,
+            &copy_src,
+            &copy_dst,
+            &copy_expected,
+        )
+    })
+    .await
+    {
         Ok(Ok(_)) => {}
         Ok(Err(e)) => {
             ctx.fail("Backup copy failed", e.to_string(), Some("backup"));
-            return Ok(failure_outcome(request, &group_id, e.to_string()));
+            return Err(failure_outcome(request, &group_id, e.to_string()));
         }
         Err(e) => {
             ctx.fail("Backup copy task failed", e.to_string(), Some("other"));
-            return Ok(failure_outcome(request, &group_id, e.to_string()));
+            return Err(failure_outcome(request, &group_id, e.to_string()));
         }
     }
     let entry = BackupEntry {
@@ -663,21 +1325,20 @@ pub(crate) async fn apply_single_item(
         .transpose()
     {
         ctx.fail("Backup insert failed", e.to_string(), Some("backup"));
-        return Ok(failure_outcome(request, &group_id, e.to_string()));
+        return Err(failure_outcome(request, &group_id, e.to_string()));
     }
     ctx.stage(STAGE_BACKUP, "Backup created", None, None);
 
-    ctx.stage(STAGE_REPLACE, "Installing new DLL", None, None);
     if let Ok(meta) = std::fs::symlink_metadata(&dll_path) {
         if meta.file_type().is_symlink() {
             let err = format!("refusing to replace symlink: {}", dll_path.display());
             ctx.fail("Symlink detected", err.clone(), Some("permission"));
-            return Ok(failure_outcome(request, &group_id, err));
+            return Err(failure_outcome(request, &group_id, err));
         }
     }
     if cancel.is_cancelled() {
         ctx.cancelled();
-        return Ok(failure_outcome(request, &group_id, "cancelled".into()));
+        return Err(failure_outcome(request, &group_id, "cancelled".into()));
     }
     let identity_check = pe_version::require_x64_dll_pair(&dll_path, &staged_dll).and_then(|()| {
         game_executable
@@ -692,7 +1353,7 @@ pub(crate) async fn apply_single_item(
             error.to_string(),
             Some("architecture"),
         );
-        return Ok(failure_outcome(request, &group_id, error.to_string()));
+        return Err(failure_outcome(request, &group_id, error.to_string()));
     }
     let target_space = std::fs::metadata(&staged_dll)
         .map_err(dll_catalog::CatalogError::from)
@@ -703,104 +1364,37 @@ pub(crate) async fn apply_single_item(
             error.to_string(),
             Some("backup"),
         );
-        return Ok(failure_outcome(request, &group_id, error.to_string()));
+        return Err(failure_outcome(request, &group_id, error.to_string()));
     }
-    if let Err(e) = atomic_replace(&staged_dll, &dll_path) {
-        let os = e.raw_os_error().unwrap_or(0);
-        let (class, msg) = if os == 32 || os == 33 {
-            (
-                "lock",
-                format!(
-                    "{filename} is locked — the game may still be running. Close it and retry."
-                ),
-            )
-        } else {
-            ("other", format!("atomic replace failed: {e}"))
-        };
-        let roll_src = backup_path.clone();
-        let roll_dst = dll_path.clone();
-        match tokio::task::spawn_blocking(move || std::fs::copy(&roll_src, &roll_dst)).await {
-            Ok(Err(roll)) => {
-                tracing::error!(error = %roll, "rollback after replace failure also failed");
-            }
-            Err(join_err) => {
-                tracing::error!(error = %join_err, "rollback task after replace failure failed to join");
-            }
-            Ok(Ok(_)) => {}
+    let new_version = match pe_version::read_dll_version(&staged_dll) {
+        Ok(version) => version.file_version,
+        Err(error) => {
+            let message = format!("candidate version unreadable: {error}");
+            ctx.fail(
+                "Candidate identity unreadable",
+                message.clone(),
+                Some("hash"),
+            );
+            return Err(failure_outcome(request, &group_id, message));
         }
-        ctx.fail("Replace failed", msg.clone(), Some(class));
-        return Ok(failure_outcome(request, &group_id, msg));
-    }
-    ctx.stage(STAGE_REPLACE, "Installed", None, None);
-    drop(staging);
-
-    let post_algo = dll_catalog::HashAlgo::from_hex_len(&release.sha256)
-        .unwrap_or(dll_catalog::HashAlgo::Sha256);
-    let installed_hash = tokio::task::spawn_blocking({
-        let dll_path = dll_path.clone();
-        move || dll_catalog::hash_file_with(&dll_path, post_algo)
-    })
-    .await
-    .ok()
-    .and_then(|r| r.ok());
-    if !installed_hash
-        .as_deref()
-        .is_some_and(|h| h.eq_ignore_ascii_case(&release.sha256))
-    {
-        let roll_src = backup_path.clone();
-        let roll_dst = dll_path.clone();
-        match tokio::task::spawn_blocking(move || std::fs::copy(&roll_src, &roll_dst)).await {
-            Ok(Err(roll)) => {
-                tracing::error!(error = %roll, "rollback after post-swap hash mismatch also failed");
-            }
-            Err(join_err) => {
-                tracing::error!(error = %join_err, "rollback task after post-swap hash mismatch failed to join");
-            }
-            Ok(Ok(_)) => {}
-        }
-        let got = installed_hash.unwrap_or_else(|| "unreadable".to_string());
-        let err = format!(
-            "post-swap integrity check failed for {filename}: expected {} got {} — rolled back to \
-             the previous DLL",
-            release.sha256, got
-        );
-        ctx.fail("Post-swap verify failed", err.clone(), Some("hash"));
-        return Ok(failure_outcome(request, &group_id, err));
-    }
-
-    ctx.stage(STAGE_VERIFY_POST, "Reading new DLL version", None, None);
-    let new_version = match tokio::time::timeout(
-        Duration::from_secs(5),
-        tokio::task::spawn_blocking({
-            let dll_path = dll_path.clone();
-            move || pe_version::read_dll_version(&dll_path).ok()
-        }),
-    )
-    .await
-    {
-        Ok(Ok(Some(v))) => v.file_version,
-        _ => release.version.clone(),
     };
-    ctx.stage(
-        STAGE_VERIFY_POST,
-        &format!("Installed version: {new_version}"),
-        None,
-        None,
-    );
-    ctx.stage(
-        STAGE_COMPLETE,
-        &format!("Updated {} to v{}", filename, new_version),
-        Some(1.0),
-        None,
-    );
-
-    Ok(ApplyOutcome {
-        apply_id: request.apply_id.clone(),
-        success: true,
-        backup_id: Some(entry_id),
+    Ok(PreparedGuiItem {
+        file: dlssync_application::execution::PreparedFile {
+            target: dll_path,
+            staged: staged_dll,
+            backup: backup_path,
+            previous_sha256: previous_sha,
+            expected_sha256,
+            expected_version: Some(new_version.clone()),
+        },
+        request: request.clone(),
+        group_id,
+        backup_id: entry_id,
         previous_version,
-        new_version: Some(new_version),
-        error: None,
+        new_version,
+        game_executable,
+        cancel,
+        _staging: staging,
     })
 }
 
@@ -811,6 +1405,10 @@ async fn stage_download(
     ctx: &StageContext,
     cancel: CancellationToken,
 ) -> Result<PathBuf, String> {
+    let _download_slot = tokio::select! {
+        permit = dlssync_application::transaction::acquire_download_slot() => permit,
+        () = cancel.cancelled() => return Err("cancelled".into()),
+    };
     let (tx, mut rx) = mpsc::unbounded_channel::<DownloadProgress>();
     let net = state.settings.read().network.clone();
     let opts = DownloadOptions {
@@ -917,7 +1515,7 @@ impl StageContext {
     }
 }
 
-fn emit_inflight(handle: &AppHandle, in_flight: usize) {
+pub(crate) fn emit_inflight(handle: &AppHandle, in_flight: usize) {
     let _ = handle.emit(EVENT_APPLY_INFLIGHT, InflightSnapshot { in_flight });
     crate::tray::update_inflight(handle, in_flight);
 }
@@ -958,7 +1556,7 @@ const WINDOWS_EXE_EXTENSION: &str = "exe";
 /// are likely locked. Returns `None` when nothing matches OR when process
 /// enumeration is unavailable — detection failure must never block an apply, so
 /// the caller proceeds and falls back to the on-disk lock/replace error path.
-fn detect_running_game(game_root: &std::path::Path) -> Option<String> {
+pub(crate) fn detect_running_game(game_root: &std::path::Path) -> Option<String> {
     let root = normalize_for_match(game_root)?;
     let mut sys = sysinfo::System::new();
     sys.refresh_processes_specifics(
@@ -1069,29 +1667,14 @@ fn ensure_writable(path: &std::path::Path) -> Result<(), String> {
     }
 }
 
-fn atomic_replace(source: &std::path::Path, dest: &std::path::Path) -> std::io::Result<()> {
-    let parent = dest.parent().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "destination has no parent",
-        )
-    })?;
-    let mut staged = tempfile::NamedTempFile::new_in(parent)?;
-    {
-        let mut src = std::fs::File::open(source)?;
-        std::io::copy(&mut src, staged.as_file_mut())?;
-        staged.as_file_mut().sync_all()?;
-    }
-    staged.persist(dest).map_err(|e| e.error)?;
-    Ok(())
-}
-
 pub(crate) struct StateHandles {
     pub catalog: Arc<parking_lot::RwLock<Option<dll_catalog::Catalog>>>,
     pub backups: Arc<parking_lot::RwLock<Option<backup_store::BackupStore>>>,
+    pub journal: Arc<parking_lot::RwLock<Option<operation_journal::JournalStore>>>,
     pub settings: Arc<parking_lot::RwLock<crate::commands::settings::AppSettings>>,
     pub http_downloads: reqwest::Client,
     pub download_cache: Arc<dll_catalog::DownloadCache>,
+    pub authoritative_state: Arc<dlssync_application::state::StateCoordinator>,
 }
 
 impl AppState {
@@ -1099,10 +1682,36 @@ impl AppState {
         StateHandles {
             catalog: self.catalog.clone(),
             backups: self.backups.clone(),
+            journal: self.journal.clone(),
             settings: self.settings.clone(),
             http_downloads: self.http_downloads.clone(),
             download_cache: self.download_cache.clone(),
+            authoritative_state: self.authoritative_state.clone(),
         }
+    }
+}
+
+fn refresh_apply_persisted_state(state: &StateHandles) {
+    let backups = state.backups.read();
+    let history = state.journal.read();
+    if let (Some(backups), Some(history)) = (backups.as_ref(), history.as_ref()) {
+        if let Err(error) =
+            dlssync_application::transaction::project_recovery_history(backups, history)
+        {
+            tracing::warn!(%error, "post-apply recovery History projection failed");
+        }
+    }
+    match state
+        .authoritative_state
+        .refresh_persisted_views(backups.as_ref(), history.as_ref())
+    {
+        Ok(Some(receipt)) => {
+            if let Some(error) = receipt.delivery_error {
+                tracing::warn!(%error, "post-apply persisted-state event delivery failed");
+            }
+        }
+        Ok(None) => {}
+        Err(error) => tracing::warn!(%error, "post-apply persisted-state projection failed"),
     }
 }
 
@@ -1110,6 +1719,113 @@ impl AppState {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn batch_policy_rejects_automatically_expanded_fsr4() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let temp = tempfile::tempdir()?;
+        let catalog = dll_catalog::embedded_fallback_catalog()?;
+        let mut json = serde_json::to_value(catalog)?;
+        let releases = json["vendors"]["amd"]["fsr_upscaler"]["releases"]
+            .as_array_mut()
+            .ok_or("missing FSR releases")?;
+        for release in releases {
+            if release["filename"] == "amd_fidelityfx_upscaler_dx12.dll" {
+                release["version"] = serde_json::json!("4.1.0");
+            }
+        }
+        let catalog: dll_catalog::Catalog = serde_json::from_value(json)?;
+        let mut components = Vec::new();
+        for (family, filename) in [
+            ("fsr_loader", "amd_fidelityfx_loader_dx12.dll"),
+            ("fsr_upscaler", "amd_fidelityfx_upscaler_dx12.dll"),
+        ] {
+            let path = temp.path().join(filename);
+            let mut bytes = vec![0; 128];
+            bytes[..2].copy_from_slice(b"MZ");
+            bytes[60..64].copy_from_slice(&64u32.to_le_bytes());
+            bytes[64..68].copy_from_slice(b"PE\0\0");
+            bytes[68..70].copy_from_slice(&0x8664u16.to_le_bytes());
+            bytes[84..86].copy_from_slice(&2u16.to_le_bytes());
+            bytes[86..88].copy_from_slice(&0x2000u16.to_le_bytes());
+            bytes[88..90].copy_from_slice(&0x20bu16.to_le_bytes());
+            std::fs::write(&path, bytes)?;
+            components.push(dlssync_contracts::ScannedComponent {
+                family: family.into(),
+                path: path.display().to_string(),
+                current_version: None,
+                sha256: Some(dll_catalog::hex_sha256_file(&path)?),
+            });
+        }
+        let games = [dlssync_contracts::ScannedGame {
+            id: "game".into(),
+            name: "Game".into(),
+            launcher: "manual".into(),
+            install_dir: temp.path().display().to_string(),
+            components,
+        }];
+        let items = dlssync_application::plan_items(&catalog, &games, temp.path(), None)
+            .into_iter()
+            .filter(|item| item.family == "fsr_loader")
+            .collect();
+        let plan =
+            dlssync_application::build_verified_update_plan(&catalog, &games, items, temp.path())?;
+        assert!(plan.changes.iter().any(|change| change.added_as_dependency));
+        assert!(plan
+            .items
+            .iter()
+            .any(|item| item.family == "fsr_upscaler" && item.target_version == "4.1.0"));
+        assert!(
+            validate_batch_policy(&plan, &dlssync_application::policy::ApplyPolicy::default())
+                .is_err_and(|error| error.to_string().contains("RDNA4"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn group_failure_preserves_recovery_diagnostic_in_event_and_result(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let request: ApplyRequest = serde_json::from_value(serde_json::json!({
+            "apply_id": "a", "game_id": "game", "dll_path": "a.dll",
+            "vendor": "nvidia", "family": "dlss_sr", "target_version": "1"
+        }))?;
+        for reason in [
+            "cancelled",
+            "rolled_back: cancelled",
+            "rollback_failed: cancelled",
+        ] {
+            let event = group_failure_progress(&request, reason);
+            let outcome = failure_outcome(&request, "game", reason.into());
+            assert_eq!(event.error.as_deref(), Some(reason));
+            assert_eq!(outcome.error.as_deref(), Some(reason));
+            assert_eq!(
+                event.stage,
+                if reason == "cancelled" {
+                    STAGE_CANCELLED
+                } else {
+                    STAGE_FAILED
+                }
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn cancelling_another_game_does_not_cancel_this_group() {
+        let request: ApplyRequest = serde_json::from_value(serde_json::json!({
+            "apply_id": "a", "game_id": "game-a", "dll_path": "a.dll",
+            "vendor": "nvidia", "family": "dlss_sr", "target_version": "1"
+        }))
+        .unwrap();
+        let a = CancellationToken::new();
+        let b = CancellationToken::new();
+        let tokens = HashMap::from([("a".into(), a.clone()), ("b".into(), b.clone())]);
+        let group = cancellation_tokens_for_group(&[request], &tokens);
+        b.cancel();
+        assert!(!group.values().any(CancellationToken::is_cancelled));
+        a.cancel();
+        assert!(group.values().any(CancellationToken::is_cancelled));
+    }
 
     fn under(exe: &str, root: &str) -> bool {
         let root_norm = normalize_for_match(Path::new(root)).expect("root normalizes");

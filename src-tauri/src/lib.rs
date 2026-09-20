@@ -1,9 +1,16 @@
+mod art_transport;
 mod commands;
 mod constants;
 mod efficiency;
 mod error;
 #[cfg(feature = "bindings")]
 pub mod ipc_bindings;
+mod local_recipe_commands;
+#[path = "commands/recipes.rs"]
+mod recipe_commands;
+pub use recipe_commands::{
+    preview_recipe_conflicts_contract, remove_recipe_verified_contract, validate_recipe_contract,
+};
 mod logging;
 mod netpolicy;
 mod paths;
@@ -84,12 +91,12 @@ fn run_driver_restore_child(dir: &str, result_path: Option<String>) -> i32 {
     use system_drivers::InstallReport;
     let (report, exit) =
         match system_drivers::driver_snapshot::restore_driver(std::path::Path::new(dir)) {
-            Ok(()) => (
+            Ok(reboot_required) => (
                 InstallReport {
                     success: true,
-                    reboot_required: true,
+                    reboot_required,
                     result_code: 0,
-                    message: "Driver rolled back from its pre-update snapshot.".to_string(),
+                    message: "Windows accepted the saved driver package. Active-version verification is pending.".to_string(),
                 },
                 0,
             ),
@@ -122,7 +129,24 @@ fn run_wua_install_child(
     use system_drivers::{InstallProgress, InstallReport, UpdateSource, WuaSource};
 
     if let (Some(inf), Some(dest)) = (snapshot_inf.as_deref(), snapshot_dest.as_deref()) {
-        let _ = system_drivers::driver_snapshot::export_driver(inf, std::path::Path::new(dest));
+        if let Err(error) =
+            system_drivers::driver_snapshot::export_driver(inf, std::path::Path::new(dest))
+        {
+            let report = InstallReport {
+                success: false,
+                reboot_required: false,
+                result_code: -1,
+                message: format!(
+                    "The current driver could not be backed up. No update was installed: {error}"
+                ),
+            };
+            if let Some(path) = result_path.as_deref() {
+                if let Ok(json) = serde_json::to_string(&report) {
+                    let _ = std::fs::write(path, json);
+                }
+            }
+            return 2;
+        }
         let _ = system_drivers::driver_snapshot::create_restore_point(
             "DLSSync — before System & Components driver update",
         );
@@ -335,6 +359,13 @@ pub fn run() {
             app_paths
                 .ensure_dirs()
                 .map_err(|e| format!("create app dirs: {e}"))?;
+            let art_transport_root = art_transport::initialize(app.handle(), &app_paths.cache_dir)
+                .map_err(|e| format!("initialize art asset transport: {e}"))?;
+            tracing::info!(
+                scope = %art_transport_root.display(),
+                recursive = false,
+                "asset protocol limited to application art cache",
+            );
             let migration = app_paths.migrate_legacy(app.handle());
             if migration.legacy_root.is_some() {
                 tracing::info!(
@@ -350,6 +381,7 @@ pub fn run() {
             }
 
             let state: tauri::State<'_, state::AppState> = app.state();
+            state.install_event_handle(app.handle().clone());
             *state.paths.write() = Some(app_paths.clone());
             let config = dlssync_application::product_config()
                 .map_err(|e| format!("product config: {e}"))?;
@@ -369,6 +401,14 @@ pub fn run() {
                 app_paths.backups_dir.clone(),
             ) {
                 Ok(store) => {
+                    match dlssync_application::transaction::recover_store(&store) {
+                        Ok(records) => {
+                            for record in &records {
+                                tracing::warn!(operation = %record.id, stage = ?record.stage, error = ?record.error, "startup transaction recovery");
+                            }
+                        }
+                        Err(error) => tracing::error!(%error, "startup transaction recovery failed"),
+                    }
                     sweep_stale_staging_dirs(&store.root_dir);
                     *state.backups.write() = Some(store);
                     tracing::info!(
@@ -406,6 +446,21 @@ pub fn run() {
 
             match operation_journal::JournalStore::open(app_paths.journal_db.clone()) {
                 Ok(store) => {
+                    if let Some(backups) = state.backups.read().as_ref() {
+                        match dlssync_application::transaction::project_recovery_history(
+                            backups,
+                            &store,
+                        ) {
+                            Ok(projected) if projected > 0 => tracing::info!(
+                                projected,
+                                "projected durable recovery records into History"
+                            ),
+                            Ok(_) => {}
+                            Err(error) => {
+                                tracing::warn!(%error, "recovery History projection pending")
+                            }
+                        }
+                    }
                     *state.journal.write() = Some(store);
                     tracing::info!(
                         db = %app_paths.journal_db.display(),
@@ -442,6 +497,14 @@ pub fn run() {
                         });
                 *state.catalog_provenance.write() = Some(provenance);
                 *state.catalog.write() = Some(cat);
+                commands::catalog::publish_catalog_projection(
+                    &state,
+                    state.catalog.read().as_ref(),
+                    state.catalog_provenance.read().as_ref(),
+                    dlssync_contracts::CatalogSource::Cache,
+                    dlssync_contracts::CatalogRemoteResult::Never,
+                    None,
+                );
                 tracing::info!(
                     path = %app_paths.catalog_cache.display(),
                     "catalog loaded from cache",
@@ -464,6 +527,14 @@ pub fn run() {
                                 Some(dll_catalog::FALLBACK_MANIFEST_COMMIT_SHA.into()),
                             ));
                         *state.catalog.write() = Some(cat);
+                        commands::catalog::publish_catalog_projection(
+                            &state,
+                            state.catalog.read().as_ref(),
+                            state.catalog_provenance.read().as_ref(),
+                            dlssync_contracts::CatalogSource::Embedded,
+                            dlssync_contracts::CatalogRemoteResult::Never,
+                            None,
+                        );
                         tracing::info!("catalog loaded from embedded fallback");
                     }
                     Err(e) => {
@@ -509,8 +580,18 @@ pub fn run() {
             commands::catalog::list_releases,
             commands::journal::journal_list,
             commands::journal::journal_export,
+            local_recipe_commands::list_owned_recipes,
+            local_recipe_commands::preview_local_recipe,
+            local_recipe_commands::apply_local_recipe,
+            local_recipe_commands::configure_local_recipe,
+            local_recipe_commands::remove_owned_recipe,
+            recipe_commands::list_known_recipes,
+            recipe_commands::validate_recipe,
+            recipe_commands::preview_recipe_conflicts,
+            recipe_commands::remove_recipe,
             commands::apply::apply_update,
             commands::apply::apply_update_batch,
+            commands::apply::preview_update_plan,
             commands::apply::cancel_apply,
             commands::apply::cancel_all_applies,
             commands::streamline_set::apply_streamline_set,
@@ -542,6 +623,7 @@ pub fn run() {
             commands::drivers::list_driver_history,
             commands::drivers::install_driver,
             commands::system_drivers::scan_system_drivers,
+            commands::system_drivers::get_system_devices,
             commands::system_drivers::install_system_driver,
             commands::system_drivers::restore_system_driver,
             commands::system_drivers::system_driver_versions,
@@ -554,6 +636,8 @@ pub fn run() {
             commands::dlss_profile::find_game_executable,
             commands::runtime::runtime_mode,
             commands::runtime::open_devtools,
+            commands::runtime::state_snapshot,
+            commands::runtime::state_watermark,
             commands::background::tray_set_pending,
             commands::ui_prefs::set_efficiency_mode,
             commands::ui_prefs::hide_main_window,

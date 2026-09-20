@@ -464,6 +464,26 @@
     "desc": "Driver-install stage: install failed. Source: DRIVER_INSTALL_STAGE_LABEL.failed.",
     "where": "Drivers view system-driver install card."
   },
+  "installStage.launching": {
+    "en": "Launching",
+    "desc": "Driver install stage published by the backend: the vendor installer is being started.",
+    "where": "frontend/src/views/Drivers.svelte install progress; frontend/src/lib/stores.ts stage labels."
+  },
+  "installStage.cancelled": {
+    "en": "Cancelled",
+    "desc": "Driver install stage published by the backend: the install was cancelled. Not a success and not a percentage.",
+    "where": "frontend/src/views/Drivers.svelte install progress; frontend/src/lib/stores.ts stage labels."
+  },
+  "installStage.queued": {
+    "en": "Queued",
+    "desc": "Driver install stage published by the backend: the install is queued and has not started.",
+    "where": "frontend/src/views/Drivers.svelte install progress; frontend/src/lib/stores.ts stage labels."
+  },
+  "installStage.verifying": {
+    "en": "Verifying",
+    "desc": "Driver install stage published by the backend: the downloaded package is being checked before it is launched.",
+    "where": "frontend/src/views/Drivers.svelte install progress; frontend/src/lib/stores.ts stage labels."
+  },
   "driverStatus.update_available": {
     "en": "Update available",
     "desc": "GPU-driver status: a newer driver exists. Source: drivers.ts STATUS_LABEL.update_available.",
@@ -1348,6 +1368,11 @@
     "en": "Checking GitHub Releases…",
     "desc": "Update banner — while checking for updates",
     "where": "frontend/src/views/About.svelte"
+  },
+  "view.about.update.status.indeterminate": {
+    "en": "The check returned no usable answer, so availability is not determined",
+    "desc": "About surface banner: the update check answered with a shape that states nothing. Must not read as up to date.",
+    "where": "frontend/src/lib/appUpdateStatus.ts; About update banner."
   },
   "view.about.update.available": {
     "en": "Update available: v{version}. Visit the releases page to download.",
@@ -2304,6 +2329,11 @@
     "desc": "Fallback label for a system-driver install stage when the enum is unrecognised.",
     "where": "frontend/src/views/Drivers.svelte"
   },
+  "view.drivers.installFailedNote": {
+    "en": "Install failed",
+    "desc": "Shown instead of a progress bar when a driver install ends in a failed or cancelled stage. No percentage is shown for a failure.",
+    "where": "frontend/src/views/Drivers.svelte (GPU install card and system driver install card)."
+  },
   "view.drivers.readingDriverStore": {
     "en": "Reading the local driver store…",
     "desc": "Loading message while fetching a driver's version history.",
@@ -3038,6 +3068,41 @@
     "en": "Update check failed: {error}",
     "desc": "Toast when the update check throws",
     "where": "frontend/src/views/Settings.svelte"
+  },
+  "view.settings.updates.status.manualOnly": {
+    "en": "{distribution} build: manual app updates, no automatic check",
+    "desc": "App update availability on a channel without a self-updater. {distribution} is the channel name and is not translated. States that no automatic check runs.",
+    "where": "frontend/src/lib/appUpdateStatus.ts; Settings update row on the Nexus channel."
+  },
+  "view.settings.updates.status.indeterminate": {
+    "en": "The check returned no usable answer, so availability is not determined",
+    "desc": "App update availability: the check answered with a shape that states nothing. Must not read as up to date and must not read as a failure.",
+    "where": "frontend/src/lib/appUpdateStatus.ts; Settings update row."
+  },
+  "view.settings.updates.status.error": {
+    "en": "Update check failed: {error}",
+    "desc": "App update availability: the check threw. {error} is the raw error text and is not translated.",
+    "where": "frontend/src/lib/appUpdateStatus.ts; Settings update row."
+  },
+  "view.settings.updates.status.available": {
+    "en": "Update available: v{version}",
+    "desc": "App update availability: a release was published. {version} is the release version string and is not translated. Keep the literal v before it.",
+    "where": "frontend/src/lib/appUpdateStatus.ts; Settings update row."
+  },
+  "view.settings.updates.status.upToDate": {
+    "en": "Up to date (v{version})",
+    "desc": "App update availability: the check returned the documented empty answer. {version} is the installed app version and is not translated.",
+    "where": "frontend/src/lib/appUpdateStatus.ts; Settings update row."
+  },
+  "view.settings.updates.status.unchecked": {
+    "en": "Not checked in this session",
+    "desc": "App update availability: no check has run in this session. Not a statement that the app is up to date.",
+    "where": "frontend/src/lib/appUpdateStatus.ts; Settings > About this app update row."
+  },
+  "view.settings.updates.status.checking": {
+    "en": "Checking…",
+    "desc": "App update availability: a check is running now.",
+    "where": "frontend/src/lib/appUpdateStatus.ts; Settings update row."
   },
   "view.settings.toast.overlayEnabled": {
     "en": "DLSS Debug Overlay enabled",
@@ -4299,6 +4364,16 @@
     "desc": "Feature/file status when the installed version is not tracked by the catalog.",
     "where": "GameDetailDrawer.svelte"
   },
+  "component.gameDrawer.status.externallyManaged": {
+    "en": "Managed outside DLSSync",
+    "desc": "Feature bucket status when the backend published externally_managed for a component: another tool owns these files. Never presented as an update or as up to date.",
+    "where": "frontend/src/components/GameDetailDrawer.svelte feature bucket status chip."
+  },
+  "component.gameDrawer.status.incompatible": {
+    "en": "Reported as not compatible",
+    "desc": "Feature bucket status when the backend published incompatible for a component. Reports the published status; the app states no independent compatibility verdict.",
+    "where": "frontend/src/components/GameDetailDrawer.svelte feature bucket status chip."
+  },
   "component.gameDrawer.status.disabled": {
     "en": "Disabled",
     "desc": "Feature status chip when the feature family is disabled for this game.",
@@ -5104,6 +5179,96 @@
     "desc": "DLSS Frame Generation group title; feature name kept English",
     "where": "DlssOverridePanel.svelte"
   },
+  "component.dlss.blocked.preset_runtime_mapping_unknown": {
+    "en": "The preset-to-runtime mapping was not observed.",
+    "desc": "CapabilityBlockReason preset_runtime_mapping_unknown. The mapping between the chosen preset and the runtime was not observed.",
+    "where": "frontend/src/components/DlssOverridePanel.svelte blocked-reason list."
+  },
+  "component.dlss.blocked.preset_runtime_mapping_incompatible": {
+    "en": "The preset-to-runtime mapping was observed as incompatible.",
+    "desc": "CapabilityBlockReason preset_runtime_mapping_incompatible. Reports an observation about the preset-to-runtime mapping.",
+    "where": "frontend/src/components/DlssOverridePanel.svelte blocked-reason list."
+  },
+  "component.dlss.blocked.runtime_stack_unknown": {
+    "en": "The runtime stack was not observed.",
+    "desc": "CapabilityBlockReason runtime_stack_unknown. The runtime stack in use was not observed.",
+    "where": "frontend/src/components/DlssOverridePanel.svelte blocked-reason list."
+  },
+  "component.dlss.blocked.runtime_stack_incompatible": {
+    "en": "The runtime stack was observed as incompatible.",
+    "desc": "CapabilityBlockReason runtime_stack_incompatible. Reports an observation about the runtime stack.",
+    "where": "frontend/src/components/DlssOverridePanel.svelte blocked-reason list."
+  },
+  "component.dlss.blocked.game_integration_unknown": {
+    "en": "The game's integration was not observed.",
+    "desc": "CapabilityBlockReason game_integration_unknown. The game's integration was not observed.",
+    "where": "frontend/src/components/DlssOverridePanel.svelte blocked-reason list."
+  },
+  "component.dlss.blocked.game_integration_incompatible": {
+    "en": "The game's integration was observed as incompatible.",
+    "desc": "CapabilityBlockReason game_integration_incompatible. Reports an observation about the game's integration.",
+    "where": "frontend/src/components/DlssOverridePanel.svelte blocked-reason list."
+  },
+  "component.dlss.blocked.provider_applicability_unknown": {
+    "en": "Whether the provider applies here was not observed.",
+    "desc": "CapabilityBlockReason provider_applicability_unknown. Whether the provider applies was not observed.",
+    "where": "frontend/src/components/DlssOverridePanel.svelte blocked-reason list."
+  },
+  "component.dlss.blocked.provider_incompatible": {
+    "en": "The provider reported this combination as incompatible.",
+    "desc": "CapabilityBlockReason provider_incompatible. Reports what the provider stated; the app makes no independent compatibility claim.",
+    "where": "frontend/src/components/DlssOverridePanel.svelte blocked-reason list."
+  },
+  "component.dlss.blocked.adapter_class_unknown": {
+    "en": "The adapter class was not observed.",
+    "desc": "CapabilityBlockReason adapter_class_unknown. The adapter class was not observed.",
+    "where": "frontend/src/components/DlssOverridePanel.svelte blocked-reason list."
+  },
+  "component.dlss.blocked.hardware_unrecognized": {
+    "en": "This hardware was not matched against a known adapter record.",
+    "desc": "CapabilityBlockReason hardware_unrecognized. No known adapter record matched; not a claim that the hardware is unsupported.",
+    "where": "frontend/src/components/DlssOverridePanel.svelte blocked-reason list."
+  },
+  "component.dlss.blocked.adapter_not_nvidia": {
+    "en": "This adapter is not an NVIDIA adapter.",
+    "desc": "CapabilityBlockReason adapter_not_nvidia. States the observed adapter vendor only.",
+    "where": "frontend/src/components/DlssOverridePanel.svelte blocked-reason list."
+  },
+  "component.dlss.blocked.nvidia_driver_version_unknown": {
+    "en": "The installed NVIDIA driver version was not observed.",
+    "desc": "CapabilityBlockReason nvidia_driver_version_unknown. The installed driver version was not observed; this is not a statement that the driver is old.",
+    "where": "frontend/src/components/DlssOverridePanel.svelte blocked-reason list."
+  },
+  "component.dlss.blocked.nvapi_unavailable": {
+    "en": "The NVIDIA driver API did not load on this system.",
+    "desc": "CapabilityBlockReason nvapi_unavailable. The NVIDIA driver API did not load. Do not suggest bypassing anything.",
+    "where": "frontend/src/components/DlssOverridePanel.svelte blocked-reason list."
+  },
+  "component.dlss.blocked.nvapi_version_unknown": {
+    "en": "The NVIDIA driver API loaded but reported no verified version.",
+    "desc": "CapabilityBlockReason nvapi_version_unknown. The API loaded but no verified version was reported.",
+    "where": "frontend/src/components/DlssOverridePanel.svelte blocked-reason list."
+  },
+  "component.dlss.capabilityUnknown": {
+    "en": "No capability answer was obtained, so nothing is offered to write.",
+    "desc": "Shown when no capability answer was obtained at all. Neither a support claim nor a refusal claim.",
+    "where": "frontend/src/components/DlssOverridePanel.svelte blocked surface."
+  },
+  "component.dlss.blocked.host_not_windows": {
+    "en": "This host is not Windows, so the driver profile API was not used.",
+    "desc": "CapabilityBlockReason host_not_windows. States an observation about the host, not about the hardware.",
+    "where": "frontend/src/components/DlssOverridePanel.svelte blocked-reason list."
+  },
+  "component.dlss.neuralRendering": {
+    "en": "Neural Rendering",
+    "desc": "Title of the fourth preset registry, shown read-only. A feature name — keep the vendor meaning.",
+    "where": "frontend/src/components/DlssOverridePanel.svelte registry list."
+  },
+  "component.dlss.writeUnavailable": {
+    "en": "Driver profile changes are unavailable: the required capability evidence was not established.",
+    "desc": "Heading of the blocked write surface. States that no driver profile change is offered because the capability evidence was not established. Do not turn this into a compatibility claim in either direction.",
+    "where": "frontend/src/components/DlssOverridePanel.svelte blocked surface."
+  },
   "component.dlss.rayReconstruction": {
     "en": "Ray Reconstruction",
     "desc": "DLSS Overrides panel section title for Ray Reconstruction (issue #32).",
@@ -5793,6 +5958,21 @@
     "en": "Start with Windows (minimized to tray)",
     "desc": "Run-at-startup toggle label. Keep Windows.",
     "where": "Settings > General > Background updates."
+  },
+  "view.settings.general.background.runAtStartup.readFailed": {
+    "en": "Could not read the Windows startup entry: {error}",
+    "desc": "Sub-line shown when reading the Windows startup entry threw. {error} is the raw error text and is not translated. The stored preference is left untouched.",
+    "where": "frontend/src/views/Settings.svelte startup row."
+  },
+  "view.settings.general.background.runAtStartup.notVerified": {
+    "en": "Windows startup entry not verified",
+    "desc": "Sub-line shown when the Windows startup entry could not be read back, so the displayed value is the stored preference only.",
+    "where": "frontend/src/views/Settings.svelte startup row and its warning toast."
+  },
+  "view.settings.general.background.runAtStartup.mismatch": {
+    "en": "Windows reports a different value than the one requested; the value shown is the one read back from Windows",
+    "desc": "Sub-line shown when the read-back value differs from the requested one. The displayed control value is the one Windows reported.",
+    "where": "frontend/src/views/Settings.svelte startup row and its warning toast."
   },
   "view.settings.general.background.runAtStartup.sub": {
     "en": "Launch DLSSync hidden in the tray when Windows starts — no visible window until you open it.",

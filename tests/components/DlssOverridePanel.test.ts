@@ -7,15 +7,15 @@ import * as api from "@/lib/api";
 const globalScope = { scope: "global" } as const;
 
 describe("DlssOverridePanel", () => {
-  it("renders all three feature groups and the reversible / anti-cheat note", () => {
+  it("renders all three feature groups and the profile persistence and in-game effect boundary", () => {
     const { getByText, container } = render(DlssOverridePanel, {
       props: { scope: globalScope, driverPacked: 61047 },
     });
     expect(getByText("Super Resolution")).toBeTruthy();
     expect(getByText("Frame Generation")).toBeTruthy();
     const text = (container.textContent ?? "").replace(/\s+/g, " ");
-    expect(text).toContain("Fully reversible");
-    expect(text).toContain("anti-cheat may flag");
+    expect(text).toContain("Reset removes these local overrides");
+    expect(text).toContain("depend on the game and GPU");
   });
 
   it("renders the Ray Reconstruction group (issue #32)", () => {
@@ -40,11 +40,12 @@ describe("DlssOverridePanel", () => {
     expect(container.querySelector('input[type="checkbox"]')).toBeNull();
   });
 
-  it("warns when the driver is too old for DLSS 4", () => {
+  it("does not infer compatibility from a local driver threshold", () => {
     const { container } = render(DlssOverridePanel, {
       props: { scope: globalScope, driverPacked: 57000 },
     });
-    expect(container.textContent).toContain("572.16 or newer");
+    expect(container.textContent).not.toContain("572.16 or newer");
+    expect(container.querySelectorAll("button[disabled]").length).toBeGreaterThan(0);
   });
 
   it("hydrates the form from read_dlss_override_config and labels the source (forum #1)", async () => {
@@ -52,6 +53,8 @@ describe("DlssOverridePanel", () => {
       config: { ...emptyDlssConfig(), enable_sr_dll_override: true, sr_preset: "k" },
       source: "global",
       active_count: 1,
+      observations: [],
+      observation_complete: false,
     };
     const spy = vi.spyOn(api, "readDlssOverrideConfig").mockResolvedValue(readback);
     const { findByText } = render(DlssOverridePanel, {
@@ -67,6 +70,8 @@ describe("DlssOverridePanel", () => {
       config: { ...emptyDlssConfig(), enable_rr_dll_override: true, rr_preset: "k" },
       source: "global",
       active_count: 2,
+      observations: [],
+      observation_complete: false,
     };
     const spy = vi.spyOn(api, "readDlssOverrideConfig").mockResolvedValue(readback);
     const { findAllByText } = render(DlssOverridePanel, {

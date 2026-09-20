@@ -1,108 +1,40 @@
-# Code signing & SmartScreen — the honest reality
+# Verify a download before responding to Windows warnings
 
-This document records, with sources, why DLSSync still triggers a Windows
-"unknown publisher" prompt, what this release does to reduce the friction
-**without any certificate or paid account**, and the two real fixes kept on file
-for when we choose to enable them.
+Check the source and exact downloaded file before running DLSSync. Windows code signing, Tauri app-update signatures and vendor DLL signatures are different checks. None is a guarantee of harmless behavior, game compatibility or the absence of a Windows warning.
 
-## The honest truth
+## What the repository establishes
 
-**Without a code-signing certificate, the SmartScreen / "Windows protected your
-PC" prompt cannot be fully removed.** Everything else is friction reduction, not
-elimination.
+The [release workflow](../.github/workflows/release.yml) has two explicit Windows signing lanes, selected by the repository variable `SIGNPATH_ENABLED`. With `true`, it signs the exact artifact set through SignPath and refuses to continue unless every file reports a valid Authenticode signature. Otherwise it publishes the same files unsigned, refuses any file that unexpectedly carries a signature, and records the real per-file state in `AUTHENTICODE-STATE.json`. Publication and the release notes both require a state that one of those lanes actually read, so a release cannot describe a signature that was never verified. A workflow that can sign is still not proof that the file you downloaded is signed: check the file itself.
 
-- **Self-signed certificates do nothing for SmartScreen.** A self-signed cert is
-  treated exactly like no signature — it carries no reputation and no trusted
-  chain. (Microsoft Learn, *SmartScreen* + *Authenticode* docs.)
-- **There is no stealthy / automatic / "black-hat" way to manufacture a trusted
-  signature.** The only mechanisms that produce a *trusted* Authenticode
-  signature are (a) a real, identity-validated code-signing certificate from a
-  CA, or (b) the Microsoft Store's re-signing of an MSIX. Anything else that
-  claims to "auto-generate a trusted signature" or "bypass SmartScreen" is
-  fraudulent or malware:
-  - The *Fox Tempest* "Malware-Signing-as-a-Service" operation abused Azure
-    Trusted Signing with fraudulent identities to sign malware — **Microsoft
-    dismantled it (May 2026)**. Using stolen/fraudulent certs is a criminal
-    supply-chain compromise, not an option.
-  - "SmartScreen bypass" / "FUD crypter" tools are themselves malware. Shipping
-    that fingerprint gets DLSSync **classified as malware** by Defender — the
-    exact opposite of building user trust, and **irreversible** once the
-    reputation is poisoned.
+An unsigned release is labeled as unsigned. Windows shows an unknown-publisher warning for it, that warning is correct, and no DLSSync release asks you to turn off SmartScreen, Windows Defender or any other protection to install it.
 
-So: we do **not** self-sign, and we do **not** ship any evasion fingerprint.
-That would actively harm the project. Instead we minimize friction honestly and
-let reputation accrue.
+The Standard app updater signs its payload with an Ed25519 key in both lanes, and publication fails without a nonempty matching signature in `latest.json`. A Tauri update signature is not the installer's Windows Authenticode signature. Likewise, an NVIDIA/AMD/Intel/Microsoft signature on a downloaded game DLL does not sign the DLSSync application.
 
-## What this release does (no cert, no account)
+DLSSync's own signature state does not change how it treats game DLLs. The apply path still requires a trusted Authenticode publisher for a downloaded DLL before it replaces a file. Check the published release notes and the file itself for the signature state of the version you downloaded. Claims about guaranteed warning removal, reputation thresholds or prompts occurring once per version are not supported here.
 
-1. **A clean, well-formed MSI** (alongside the NSIS installer and the portable
-   zip). The MSI is a standard Windows Installer package with a stable
-   **UpgradeCode** (`ebeac857-6d46-4dea-aeb1-cc5254ffae31`) so upgrades and
-   uninstalls are clean, and it is **smoke-installed in CI** (silent install +
-   uninstall) on every release so a broken package never ships.
-2. **Pristine PE metadata + app manifest, no packers/obfuscation.** Correct
-   version-info, company/product strings, and execution-level/DPI/long-path
-   awareness so Defender's *antivirus* heuristics don't false-positive. We never
-   pack or obfuscate the binary (packers are a malware signal).
-3. **A stable download URL + artifact naming family**, release to release, so
-   SmartScreen reputation accrues to a steady hash lineage instead of resetting
-   every version. The portable zip is offered as a lower-friction alternative
-   (no installer elevation).
-4. **Honest first-run guidance** (README + below) for the one-time
-   *More info → Run anyway* step, so users aren't scared off while reputation
-   builds.
+## Check the intended artifact
 
-### MSI vs NSIS — which to download
+1. Start from [GitHub Releases](https://github.com/xt0n1-t3ch/DLSSync/releases/latest) for Standard or [Nexus Mods, mod 1922](https://www.nexusmods.com/site/mods/1922) for Nexus. Check the version, channel and Windows x64 format.
+2. Inspect the exact file's Windows signature, not a screenshot or another asset's signature. Check the publisher and signature status if present.
+3. Compare a published digest when one is available from a trusted release source. Matching a digest establishes byte equality with that reference, not universal safety or compatibility.
+4. If the source, signature or warning is unexpected, stop and ask the maintainer. Do not disable antivirus/SmartScreen or use a repack to bypass it.
 
-- **NSIS `*-setup.exe` (recommended for most users):** per-user install
-  (`currentUser`, no admin elevation), tray integration, and **in-place
-  auto-update** via the Tauri updater.
-- **MSI `*.msi`:** a standard Windows Installer package for users and IT who
-  prefer MSI (Group Policy / `msiexec` deployment). It is per-machine (the MSI
-  norm) and does not participate in the in-app auto-updater.
-- **Portable `*-portable.zip`:** no installer at all; lowest friction.
+You can inspect a downloaded installer in PowerShell, replacing the placeholder with the actual relative filename:
 
-> Note on per-user MSI: a per-user MSI requires a hand-authored WiX template
-> (`InstallScope=perUser`). We deliberately did **not** hand-roll one this
-> release — an untested custom installer template is a worse risk than shipping
-> the standard per-machine MSI, and the per-user need is already covered by the
-> NSIS installer. Per-user MSI is a documented future option.
+```powershell
+Get-AuthenticodeSignature -LiteralPath '.\downloaded_installer.exe' |
+  Format-List Status, StatusMessage, SignerCertificate
+Get-FileHash -LiteralPath '.\downloaded_installer.exe' -Algorithm SHA256
+```
 
-## First run — getting past the prompt (one time)
+A missing signature, invalid signature and valid signature are different results. This guide does not advise clicking through a Windows warning solely because the app is open source or because a previous release was trusted.
 
-When you launch the installer the first time, Windows SmartScreen may show
-*"Windows protected your PC"*. This is expected for any app from a publisher
-without an established reputation yet — it is **not** a virus warning.
+## Choose the format separately from trust
 
-1. Click **More info**.
-2. Click **Run anyway**.
+NSIS is the configured current-user installer and normal Standard updater route. MSI is a Windows Installer deployment format. Portable ZIP avoids an app installation step but still contains executable code; extraction does not establish trust. Portable mode disables in-app app updates and uses executable-relative data when its marker is present.
 
-You only do this once per version. You can verify the download first: every
-DLSSync binary keeps its original **vendor Authenticode signature** on the
-redistributed DLLs, and release artifacts are published only from the tagged CI
-build at `github.com/xt0n1-t3ch/DLSSync/releases`.
+See [installation](../README.md#download) and [Nexus channel rules](nexus-build.md). Neither a package format nor optional signing configuration guarantees that Windows will omit a reputation or security prompt.
 
-## The real fixes (deferred, on file)
+## Maintainer boundary
 
-When we choose to invest, either of these removes the prompt for real:
-
-- **SignPath.io OSS (free for open-source).** An identity-validated
-  Authenticode certificate; SmartScreen reputation then builds against a trusted
-  publisher. The CI is already wired for it — the `sign-windows` job runs only
-  when the `SIGNPATH_ENABLED` repo variable is `true` (see
-  [`.github/workflows/SIGNPATH.md`](../.github/workflows/SIGNPATH.md)). It stays
-  dormant until enabled.
-- **Microsoft Store (MSIX).** The Store re-signs the package with a trusted
-  chain and there is no SmartScreen prompt at all; the Store also handles
-  updates. Requires a one-time developer account.
-
-Both are intentionally **out of scope for this release** (no account/cert this
-time) and documented here so the decision is explicit and reversible.
-
-## Sources
-
-- Microsoft Learn — *Microsoft Defender SmartScreen overview*; *Authenticode*;
-  *MSIX app signing*.
-- Microsoft Security Blog / MSRC — *Fox Tempest* Trusted-Signing abuse takedown
-  (May 2026).
-- SignPath.io — *Open-source code signing* program documentation.
+Verify signatures and source identity on the actual artifacts before publishing claims about them. The [SignPath configuration notes](../.github/workflows/SIGNPATH.md) describe setup, not proof that a release was signed. No external signing-program claims, reputation metrics or warning-removal promises are relied on here.

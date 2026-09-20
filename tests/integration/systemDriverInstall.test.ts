@@ -70,7 +70,7 @@ describe("system driver install — shared store state machine", () => {
     applySystemDriverProgress({ stage: "installing", message: "Installing", fraction: null });
     expect(get(systemDriverInstall).stage).toBe("installing");
 
-    complete({ success: true, reboot_required: false, result_code: 2, message: "ok" });
+    complete({ success: true, verification: "active_version_verified", reboot_required: false, result_code: 2, message: "ok" });
     await p;
     expect(get(systemDriverInstall).updateId).toBeNull();
     expect(get(toasts).at(-1)?.kind).toBe("success");
@@ -82,15 +82,15 @@ describe("system driver install — shared store state machine", () => {
     expect(get(systemDriverInstall).updateId).toBe("u-1:1");
     await startSystemDriverInstall(update("u-2:1"));
     expect(get(systemDriverInstall).updateId).toBe("u-1:1");
-    complete({ success: true, reboot_required: false, result_code: 2, message: "done" });
+    complete({ success: true, verification: "active_version_verified", reboot_required: false, result_code: 2, message: "done" });
     await first;
   });
 
-  it("surfaces a reboot hint in the success toast", async () => {
+  it("keeps a reboot-pending install separate from verified active driver success", async () => {
     const p = startSystemDriverInstall(update("u-1:1"));
-    complete({ success: true, reboot_required: true, result_code: 2, message: "ok" });
+    complete({ success: true, verification: "reboot_pending", reboot_required: true, result_code: 2, message: "Restart is required; active version not yet verified." });
     await p;
-    expect(get(toasts).at(-1)?.kind).toBe("success");
+    expect(get(toasts).at(-1)?.kind).toBe("warning");
     expect(get(toasts).at(-1)?.message).toMatch(/restart/i);
   });
 

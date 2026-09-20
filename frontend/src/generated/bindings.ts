@@ -7,8 +7,8 @@ export const commands = {
 	scanLibraries: (launchers: LauncherKind[]) => __TAURI_INVOKE<DetectedGame[]>("scan_libraries", { launchers }),
 	detectDlls: (installDir: string) => __TAURI_INVOKE<DllRecord[]>("detect_dlls", { installDir }),
 	detectDlssEnabler: (installDir: string) => __TAURI_INVOKE<boolean>("detect_dlss_enabler", { installDir }),
-	enrichGameArt: (name: string, apiKey: string) => __TAURI_INVOKE<GameArt>("enrich_game_art", { name, apiKey }),
-	fetchSteamArt: (name: string) => __TAURI_INVOKE<GameArt>("fetch_steam_art", { name }),
+	enrichGameArt: (game: DetectedGame, apiKey: string, trigger: ArtResolveTrigger) => __TAURI_INVOKE<GameArt>("enrich_game_art", { game, apiKey, trigger }),
+	fetchSteamArt: (appId: string, trigger: ArtResolveTrigger) => __TAURI_INVOKE<GameArt>("fetch_steam_art", { appId, trigger }),
 	openPath: (path: string) => __TAURI_INVOKE<null>("open_path", { path }),
 	revealPath: (path: string) => __TAURI_INVOKE<null>("reveal_path", { path }),
 	refreshCatalog: (trigger: "automatic" | "manual_user" | null) => __TAURI_INVOKE<CatalogRefreshResult>("refresh_catalog", { trigger }),
@@ -28,8 +28,34 @@ export const commands = {
 	status: OperationStatus | null,
 	limit: number | null,
 } | null) => __TAURI_INVOKE<string>("journal_export", { filter }),
+	listOwnedRecipes: (request: OwnedRecipeListRequest) => __TAURI_INVOKE<OwnedRecipeListResult>("list_owned_recipes", { request }),
+	previewLocalRecipe: (request: RecipeLocalPreviewRequest) => __TAURI_INVOKE<RecipeLocalPreviewResult>("preview_local_recipe", { request }),
+	applyLocalRecipe: (request: RecipeApplyRequest) => __TAURI_INVOKE<RecipeOperationResult>("apply_local_recipe", { request }),
+	configureLocalRecipe: (request: RecipeConfigureRequest) => __TAURI_INVOKE<RecipeOperationResult>("configure_local_recipe", { request }),
+	removeOwnedRecipe: (request: RecipeDurableRemovalRequest) => __TAURI_INVOKE<RecipeOperationResult>("remove_owned_recipe", { request }),
+	listKnownRecipes: () => __TAURI_INVOKE<RecipeCatalog>("list_known_recipes"),
+	validateRecipe: (request: RecipeValidationRequest) => __TAURI_INVOKE<RecipeValidationResult>("validate_recipe", { request }),
+	previewRecipeConflicts: (request: RecipeConflictPreviewRequest) => __TAURI_INVOKE<RecipeConflictPreviewResult>("preview_recipe_conflicts", { request }),
+	removeRecipe: (request: RecipeRemovalRequest) => __TAURI_INVOKE<RecipeRemovalResult>("remove_recipe", { request }),
 	applyUpdate: (request: ApplyRequest) => __TAURI_INVOKE<ApplyResult>("apply_update", { request }),
 	applyUpdateBatch: (request: ApplyBatchRequest) => __TAURI_INVOKE<ApplyBatchResult>("apply_update_batch", { request }),
+	previewUpdatePlan: (items: ApplyRequest[], baseline: {
+	id: string,
+	/**  Zero identifies a persisted plan from a previous, unverified planner. */
+	schema_version?: number,
+	created_at: string,
+	catalog_generated_at: string,
+	/**
+	 *  Digest of canonical catalog content used by the planner.
+	 *  Signature provenance is recorded separately.
+	 */
+	catalog_revision?: string,
+	fingerprint: string,
+	stale: boolean,
+	items: UpdatePlanItem[],
+	/**  File observations, exact artifacts and coherent-set dependencies. */
+	changes?: PlannedChange[],
+} | null) => __TAURI_INVOKE<UpdatePlan>("preview_update_plan", { items, baseline }),
 	cancelApply: (applyId: string) => __TAURI_INVOKE<boolean>("cancel_apply", { applyId }),
 	cancelAllApplies: () => __TAURI_INVOKE<number>("cancel_all_applies"),
 	/**
@@ -85,6 +111,7 @@ export const commands = {
 	 *  the installed driver.
 	 */
 	scanSystemDrivers: () => __TAURI_INVOKE<DeviceGroup[]>("scan_system_drivers"),
+	getSystemDevices: () => __TAURI_INVOKE<SystemDevice[]>("get_system_devices"),
 	/**
 	 *  Download + install one driver update by its `UpdateID:RevisionNumber`,
 	 *  emitting `system_driver_install_progress` events along the way. `context`
@@ -98,13 +125,13 @@ export const commands = {
 	deviceClass: string | null,
 	provider: string | null,
 	currentVersion: string | null,
-} | null) => __TAURI_INVOKE<SystemDriverOutcome>("install_system_driver", { updateId, context }),
+} | null) => __TAURI_INVOKE<SystemDriverOutcome_Serialize>("install_system_driver", { updateId, context }),
 	/**
 	 *  Roll a System & Components driver back to a previously-snapshotted version by
 	 *  re-installing its exported DriverStore package (`pnputil /add-driver
 	 *  /install`) via an elevated child. Marks the backup restored on success.
 	 */
-	restoreSystemDriver: (backupId: string) => __TAURI_INVOKE<SystemDriverOutcome>("restore_system_driver", { backupId }),
+	restoreSystemDriver: (backupId: string) => __TAURI_INVOKE<SystemDriverOutcome_Serialize>("restore_system_driver", { backupId }),
 	/**
 	 *  List the DriverStore versions (current + superseded) of the driver package
 	 *  published as `inf_name` (`oemNN.inf`), newest-first, so the UI can show the
@@ -115,13 +142,15 @@ export const commands = {
 	systemDriverVersions: (infName: string) => __TAURI_INVOKE<DriverStoreVersion[]>("system_driver_versions", { infName }),
 	detectAnticheat: (installDir: string, appId: string | null, name: string) => __TAURI_INVOKE<AntiCheatReport>("detect_anticheat", { installDir, appId, name }),
 	dlssOverridesSupported: () => __TAURI_INVOKE<boolean>("dlss_overrides_supported"),
-	dlssCapabilities: () => __TAURI_INVOKE<DlssCapability[]>("dlss_capabilities"),
-	applyDlssOverride: (scope: OverrideScope, config: DlssOverrideConfig) => __TAURI_INVOKE<DlssApplyOutcome>("apply_dlss_override", { scope, config }),
+	dlssCapabilities: () => __TAURI_INVOKE<DlssCapabilitySnapshot_Serialize>("dlss_capabilities"),
+	applyDlssOverride: (scope: OverrideScope, config: DlssPresetWriteConfig, changedSettingIds: number[] | null) => __TAURI_INVOKE<DlssApplyOutcome>("apply_dlss_override", { scope, config, changedSettingIds }),
 	resetDlssOverride: (scope: OverrideScope) => __TAURI_INVOKE<null>("reset_dlss_override", { scope }),
 	readDlssOverrideConfig: (scope: OverrideScope) => __TAURI_INVOKE<DlssOverrideReadback>("read_dlss_override_config", { scope }),
 	findGameExecutable: (installDir: string) => __TAURI_INVOKE<string | null>("find_game_executable", { installDir }),
 	runtimeMode: () => __TAURI_INVOKE<RuntimeMode>("runtime_mode"),
 	openDevtools: () => __TAURI_INVOKE<void>("open_devtools"),
+	stateSnapshot: () => __TAURI_INVOKE<AuthoritativeSnapshot>("state_snapshot"),
+	stateWatermark: () => __TAURI_INVOKE<StateWatermark>("state_watermark"),
 	traySetPending: (count: number) => __TAURI_INVOKE<void>("tray_set_pending", { count }),
 	setEfficiencyMode: (enable: boolean) => __TAURI_INVOKE<null>("set_efficiency_mode", { enable }),
 	hideMainWindow: () => __TAURI_INVOKE<null>("hide_main_window"),
@@ -129,12 +158,26 @@ export const commands = {
 };
 
 /* Types */
+export type AdapterClass = "dedicated" | "integrated" | "unknown";
+
+export type AdapterObservation = {
+	class: AdapterClass,
+	provider: AdapterProvider,
+	hardware_recognized: boolean,
+};
+
+export type AdapterProvider = { provider: "nvidia"; driver_version: NvidiaDriverVersion | null } | { provider: "amd"; driver_version: AmdDriverVersion | null } | { provider: "intel"; driver_version: IntelDriverVersion | null } | { provider: "unknown"; detail: string };
+
 export type AdvancedConfig = {
 	dlss_debug_overlay?: boolean,
 	verbose_logs?: boolean,
 	allow_unsigned_dlls?: boolean,
 	prefer_stable_channel?: boolean,
 	apply_concurrency?: number,
+};
+
+export type AmdDriverVersion = {
+	vendor_text: string,
 };
 
 export type AntiCheatReport = {
@@ -179,8 +222,12 @@ export type AppSettings = {
 	background?: BackgroundConfig,
 };
 
+export type ApplicabilityStatus = "applicable" | "not_applicable" | "unknown";
+
 export type ApplyBatchRequest = {
 	items: ApplyRequest[],
+	plan?: UpdatePlan | null,
+	actor?: OperationActor | null,
 };
 
 export type ApplyBatchResult = {
@@ -243,6 +290,7 @@ export type ApplyRequest = {
 	 *  When absent, the running-game check falls back to the DLL's parent folder.
 	 */
 	install_dir?: string | null,
+	observed_sha256?: string | null,
 };
 
 export type ApplyResult = {
@@ -256,6 +304,12 @@ export type ApplyResult = {
 export type ApplyStage = "download" | "verify_sha" | "verify_signature" | "backup" | "replace" | "verify_post" | "complete" | "failed" | "cancelled";
 
 export type Architecture = "x86" | "x64" | "arm64" | "arm64_ec" | "unknown";
+
+export type ArtCacheStatus = "not_checked" | "miss" | "hit" | "stored" | "transient_failure";
+
+export type ArtLocatorKind = "local_file" | "https_url";
+
+export type ArtResolveTrigger = "automatic" | "user_scan" | "explicit_retry";
 
 export type ArtifactDescriptor = {
 	id: string,
@@ -277,6 +331,21 @@ export type ArtifactDescriptor = {
 	checked_at: string,
 };
 
+export type AuthoritativeSnapshot = {
+	schema_version: number,
+	emitter_id: string,
+	sequence?: Counter,
+	revision?: Counter,
+	captured_at: string,
+	games?: GameSnapshot[],
+	operations?: OperationSnapshot[],
+	backups?: BackupView[],
+	history?: HistoryView[],
+	history_sync_pending?: boolean,
+	catalog?: CatalogState,
+	counts?: StateCounts,
+};
+
 export type BackgroundConfig = {
 	enabled?: boolean,
 	interval_hours?: number,
@@ -291,6 +360,8 @@ export type BackgroundConfig = {
 	notify_os_toast?: boolean,
 	auto_apply?: boolean,
 };
+
+export type BackupAvailability = "verified_present" | "verified_absent" | "unverified";
 
 export type BackupEntry = {
 	id: string,
@@ -320,8 +391,47 @@ export type BackupEntry = {
 	driver_provider?: string | null,
 };
 
+export type BackupKind = "game_dll" | "driver_package";
+
+export type BackupView = {
+	id: string,
+	game_id: string | null,
+	component_id: string | null,
+	operation_id: string | null,
+	original_path: string,
+	backup_path: string,
+	sha256: string | null,
+	kind: BackupKind,
+	availability: BackupAvailability,
+	restore_eligibility: RestoreEligibilityView,
+	last_restore: RestoreVerification | null,
+	/**  Compatibility projection. New consumers must use `availability`. */
+	verified_available?: boolean,
+	/**  Compatibility projection. New consumers must use `last_restore`. */
+	restored_at: string | null,
+	revision?: Counter,
+};
+
 /**  Decimal bytes preserve the full u64 range across JSON and JavaScript. */
 export type ByteCount = string;
+
+export type CapabilityAssessment = {
+	provider_documented_namespace: boolean,
+	write_eligible: boolean,
+	block_reasons: CapabilityBlockReason[],
+};
+
+export type CapabilityBlockReason = "host_not_windows" | "nvapi_unavailable" | "nvapi_version_unknown" | "adapter_not_nvidia" | "nvidia_driver_version_unknown" | "adapter_class_unknown" | "hardware_unrecognized" | "provider_applicability_unknown" | "provider_incompatible" | "game_integration_unknown" | "game_integration_incompatible" | "runtime_stack_unknown" | "runtime_stack_incompatible" | "preset_runtime_mapping_unknown" | "preset_runtime_mapping_incompatible";
+
+export type CapabilityEvidence = {
+	host: HostPlatform,
+	nvapi: NvapiRuntime,
+	adapter: AdapterObservation,
+	provider_applicability: SupportState,
+	game_integration: SupportState,
+	runtime_stack: SupportState,
+	preset_runtime_mapping: SupportState,
+};
 
 export type CatalogDelta = {
 	added: number,
@@ -348,6 +458,25 @@ export type CatalogRefreshResult = {
 };
 
 export type CatalogRefreshTrigger = "automatic" | "manual_user";
+
+export type CatalogRemoteResult = "never" | "modified" | "not_modified" | "failed";
+
+export type CatalogSource = "cache" | "embedded" | "remote" | "unavailable";
+
+export type CatalogState = {
+	content_revision: string | null,
+	generated_at: string | null,
+	source?: CatalogSource,
+	signature_verified: boolean,
+	public_key_fingerprint: string | null,
+	automatic_refresh_enabled: boolean,
+	manual_refresh_enabled: boolean,
+	app_updates_enabled: boolean,
+	last_remote_attempt_at: string | null,
+	last_remote_success_at: string | null,
+	last_remote_result?: CatalogRemoteResult,
+	error: ApiError | null,
+};
 
 export type CatalogStatus = {
 	distribution: DistributionChannel,
@@ -398,14 +527,20 @@ export type ComponentResult = {
 };
 
 export type ComponentState = {
+	component_id?: string,
 	identity: ComponentIdentity,
 	observed_version: string | null,
 	observed_hash: ContentHash | null,
 	candidate: ArtifactDescriptor | null,
 	status: ComponentStatus,
 	compatibility: CompatibilityDecision,
+	support?: SupportStatus,
+	applicability?: ApplicabilityStatus,
 	owner: string | null,
-	checked_at: string,
+	checked_at: string | null,
+	observation_complete?: boolean,
+	observation_errors?: ObservationError[],
+	catalog_revision?: string | null,
 	revision: string,
 };
 
@@ -415,6 +550,9 @@ export type ContentHash = {
 	algorithm: HashAlgorithm,
 	digest: string,
 };
+
+/**  Canonical unsigned decimal counter safe for JavaScript consumers. */
+export type Counter = string;
 
 export type CpuInfo = {
 	brand: string,
@@ -440,6 +578,9 @@ export type DetectedGame = {
 	launcher: LauncherKind,
 	install_dir: string,
 	app_id: string | null,
+	native_ids?: { [key in string]: string },
+	art?: GameArt,
+	/**  Compatibility projection for older frontend consumers. New code must use `art`. */
 	image_url: string | null,
 	size_bytes: number | null,
 };
@@ -476,6 +617,8 @@ export type DllRecord = {
 export type DlssApplyOutcome = {
 	needs_elevation: boolean,
 	denied_settings: number[],
+	patches: SettingPatch[],
+	preset_evidence: PresetEvidence,
 };
 
 export type DlssCapability = {
@@ -488,6 +631,34 @@ export type DlssCapability = {
 	ray_reconstruction: boolean,
 	neural_rendering: boolean,
 };
+
+export type DlssCapabilityReport = {
+	adapter_model: string,
+	pci_vendor_id: number,
+	pci_device_id: number,
+	evidence: CapabilityEvidence,
+	assessment: CapabilityAssessment,
+};
+
+export type DlssCapabilitySnapshot = DlssCapabilitySnapshot_Serialize | DlssCapabilitySnapshot_Deserialize;
+
+export type DlssCapabilitySnapshot_Deserialize = {
+	presets: DlssPresetRegistry,
+	adapters: DlssCapabilityReport[],
+	/**  Installed-driver profile persistence. This does not establish in-game support or effects. */
+	profile_access?: DrsProfileAccess | null,
+};
+
+export type DlssCapabilitySnapshot_Serialize = {
+	presets: DlssPresetRegistry,
+	adapters: DlssCapabilityReport[],
+	/**  Installed-driver profile persistence. This does not establish in-game support or effects. */
+	profile_access?: DrsProfileAccess | null,
+};
+
+export type DlssFrameGenCount = "app_controlled" | "x2" | "x3" | "x4";
+
+export type DlssFrameGenMode = "app_controlled" | "fixed" | "dynamic";
 
 export type DlssGeneration = "dlss2" | "dlss3" | "dlss4" | "dlss5";
 
@@ -507,17 +678,40 @@ export type DlssOverrideReadback = {
 	config: DlssOverrideConfig,
 	source: DlssOverrideSource,
 	active_count: number,
+	observations: DrsSettingObservation[],
+	observation_complete: boolean,
 };
 
 export type DlssOverrideSource = "per_game" | "global" | "none";
 
 export type DlssPreset = "default" | "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "recommended";
 
+export type DlssPresetRegistry = {
+	sr: SrPresetRegistry,
+	rr: RrPresetRegistry,
+	fg: FgPresetRegistry,
+	nr: NrPresetRegistry,
+};
+
+export type DlssPresetWriteConfig = {
+	enable_sr_dll_override: boolean,
+	sr_preset: SrPreset | null,
+	enable_rr_dll_override: boolean,
+	rr_preset: RrPreset | null,
+	enable_fg_dll_override: boolean,
+	fg_preset: FgPreset | null,
+	fg_mode: DlssFrameGenMode | null,
+	fg_fixed_count: DlssFrameGenCount | null,
+	fg_dynamic_target_fps: number | null,
+};
+
 export type DriverChangelog = {
 	highlights?: string[],
 	fixed?: string[],
 	notes_page_url?: string | null,
 };
+
+export type DriverHealth = "current" | "outdated" | "unsupported" | "unknown";
 
 /**
  *  Installed-device context the install carries so it can snapshot the current
@@ -554,7 +748,7 @@ export type DriverRelease = {
 	channel: ReleaseChannel,
 	display_version?: string | null,
 	is_beta?: boolean,
-	download_url: string,
+	download_url?: string | null,
 	size_bytes: number,
 	signature_subject: string,
 	released_at: string | null,
@@ -566,7 +760,11 @@ export type DriverStatusReport = {
 	device: DeviceId,
 	installed: DriverVersion,
 	latest: DriverRelease | null,
+	/**  Compatibility projection retained while consumers migrate to `health`. */
 	status: UpdateStatus,
+	health?: DriverHealth,
+	action?: DriverUpdateAction,
+	reboot_pending?: string | null,
 };
 
 /**
@@ -608,6 +806,8 @@ export type DriverUpdate = {
 	support_url: string | null,
 };
 
+export type DriverUpdateAction = { kind: "install"; download_url: string; size_bytes: number } | { kind: "open_page"; url: string } | { kind: "none"; help_url: string | null };
+
 export type DriverVendor = "nvidia" | "amd" | "intel" | "other";
 
 /**
@@ -630,16 +830,60 @@ export type DriverVersion = {
 	raw: string,
 };
 
+export type DrsProfileAccess = {
+	interface_version: string,
+	driver_version: number,
+	driver_branch: string,
+	setting_ids: number[],
+};
+
+export type DrsReadbackState = "not_attempted" | "matched" | "mismatched" | "failed";
+
+export type DrsSettingLocation = "current_application" | "current_global" | "base_profile" | "driver_default" | "unknown";
+
+export type DrsSettingObservation = {
+	setting_id: number,
+	local: LocalSettingState,
+	effective_value: RawDrsValue | null,
+	predefined: boolean,
+	predefined_value: RawDrsValue | null,
+	location: DrsSettingLocation,
+	resolved_profile: string | null,
+	matched_application: string | null,
+};
+
+export type DrsWriteState = "not_attempted" | "accepted" | "rejected" | "indeterminate";
+
 export type Evidence = {
 	source: string,
 	observed_at: string,
 	detail: string,
 };
 
+export type ExistingRecipeFileClaim = {
+	recipe_id: string,
+	path: string,
+	role: RecipeFileRole,
+};
+
 export type FamilySummary = {
 	family: string,
 	latest: string,
 	release_count: number,
+};
+
+export type FgPreset = "off" | "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z" | "default" | "latest";
+
+export type FgPresetDefinition = {
+	preset: FgPreset,
+	raw_value: number,
+	description: string,
+	write_mapping: PresetWriteMapping,
+};
+
+export type FgPresetRegistry = {
+	setting_ids: PresetNamespaceIds,
+	options: FgPresetDefinition[],
 };
 
 export type FilePrecondition = {
@@ -656,15 +900,57 @@ export type FrameGenCount = "app_controlled" | "x2" | "x3" | "x4";
 export type FrameGenMode = "app_controlled" | "fixed" | "dynamic";
 
 export type GameArt = {
-	grid_url: string | null,
-	hero_url: string | null,
-	capsule_url: string | null,
+	state: GameArtState,
+	landscape: GameArtAsset | null,
+	portrait: GameArtAsset | null,
+	candidates?: GameArtCandidate[],
+	error_code: string | null,
+	retryable: boolean,
+	cache_status: ArtCacheStatus,
 };
+
+export type GameArtAsset = {
+	locator: string,
+	locator_kind: ArtLocatorKind,
+	source: GameArtSource,
+	variant: string,
+	width: number,
+	height: number,
+	verified: boolean,
+};
+
+export type GameArtCandidate = {
+	locator: string,
+	source: GameArtSource,
+	variant: string,
+	width: number,
+	height: number,
+};
+
+export type GameArtSource = "steam_library_cache" | "steam_official_cdn" | "epic_manifest" | "epic_catalog" | "gog_registry" | "ubisoft_registry" | "ea_registry" | "xbox_package" | "battlenet_product_db" | "steam_grid_db" | "manual_folder";
+
+export type GameArtState = "resolved" | "pending" | "unavailable" | "source_failed";
 
 export type GamePreference = {
 	disabled_families?: string[],
 	pinned_versions?: { [key in string]: string },
 };
+
+export type GameSnapshot = {
+	id: string,
+	name: string,
+	install_dir: string,
+	launcher?: string | null,
+	art_url?: string | null,
+	revision?: Counter,
+	checked_at?: string | null,
+	observation_complete?: boolean,
+	observation_errors?: ObservationError[],
+	status?: GameStateStatus,
+	components?: ComponentState[],
+};
+
+export type GameStateStatus = "unchecked" | "current" | "update_available" | "unknown" | "no_components" | "non_actionable";
 
 export type GpuInfo = {
 	vendor: GpuVendor,
@@ -709,11 +995,28 @@ export type GroupDownloadProgress = {
 
 export type HashAlgorithm = "sha256" | "md5";
 
+export type HistoryView = {
+	id: string,
+	source_store_id: string,
+	source_record_id: string,
+	historical_at: string | null,
+	operation_id: string | null,
+	game_id: string | null,
+	component_id: string | null,
+	recovery_outcome: OperationStage | null,
+	record: OperationRecord,
+	revision?: Counter,
+};
+
 /**
  *  Where a detection came from: a matched binary filename on disk, the parsed
  *  PE structure of the game executable, or the bundled/manifest dataset.
  */
 export type HitSource = "binary" | "pe" | "dataset";
+
+export type HostPlatform = { platform: "windows" } | { platform: "other"; name: string };
+
+export type InGameBehaviorState = "unknown" | "observed_effective" | "observed_ineffective";
 
 export type InflightSnapshot = {
 	in_flight: number,
@@ -735,6 +1038,10 @@ export type InstallProgress = {
 };
 
 export type InstallStage = "queued" | "downloading" | "verifying" | "launching" | "installing" | "completed" | "failed" | "cancelled";
+
+export type IntelDriverVersion = {
+	vendor_text: string,
+};
 
 export type IssueReport = {
 	url: string,
@@ -766,6 +1073,8 @@ export type ListFilter = {
 	limit: number | null,
 };
 
+export type LocalSettingState = { presence: "absent" } | { presence: "present"; value: RawDrsValue };
+
 export type LogPaths = {
 	logs_dir: string,
 	current_log: string | null,
@@ -776,8 +1085,13 @@ export type MeasuredProgress = {
 	bytes_received: ByteCount,
 	bytes_total: ByteCount | null,
 	files_verified: number,
-	files_total: number,
+	files_total: number | null,
+	measurement_basis?: MeasurementBasis,
+	estimated_seconds_remaining?: number | null,
+	transfer_ids?: string[],
 };
+
+export type MeasurementBasis = "bytes" | "verified_files" | "activity";
 
 export type NetworkConfig = {
 	retry_attempts?: number,
@@ -808,7 +1122,42 @@ export type NotificationEntry = {
 
 export type NotificationKind = "apply_success" | "apply_failure" | "apply_cancelled" | "app_update_available" | "catalog_update_available" | "driver_update_available" | "system_driver_update_available" | "dll_updates_available" | "backup_restored" | "scan_failed" | "catalog_refresh_failed";
 
+export type NrPreset = "off" | "a" | "b" | "c" | "d" | "latest";
+
+export type NrPresetDefinition = {
+	preset: NrPreset,
+	raw_value: number,
+	description: string,
+	write_mapping: PresetWriteMapping,
+};
+
+export type NrPresetRegistry = {
+	setting_ids: PresetNamespaceIds,
+	options: NrPresetDefinition[],
+};
+
+export type NvapiRuntime = { status: "available"; version: string } | { status: "unavailable"; reason: string } | { status: "version_unknown"; detail: string };
+
+export type NvidiaDriverVersion = {
+	branch: number,
+	revision: number,
+};
+
 export type NvidiaGpuArchitecture = "pre_rtx" | "turing" | "ampere" | "ada" | "blackwell" | "future" | "unknown";
+
+export type ObservationError = {
+	code: ObservationErrorCode,
+	path: string | null,
+	detail: string,
+	observed_at: string,
+};
+
+export type ObservationErrorCode = "read_denied" | "missing" | "parse_failed" | "changed_during_read" | "unmeasured" | "inaccessible_directory" | "watcher_lost" | "other";
+
+export type OfficialComponentClaim = {
+	component_id: string,
+	path: string,
+};
 
 export type OperationActor = "gui" | "cli" | "background";
 
@@ -818,12 +1167,12 @@ export type OperationActor = "gui" | "cli" | "background";
  */
 export type OperationEvent = {
 	operation_id: string,
-	sequence: number,
+	sequence: Counter,
 	component: ComponentIdentity | null,
 	snapshot: OperationSnapshot,
 };
 
-export type OperationKind = "scan" | "catalog_refresh" | "plan" | "dll_apply" | "rollback" | "driver_install";
+export type OperationKind = "scan" | "catalog_refresh" | "plan" | "dll_apply" | "rollback" | "driver_install" | "recipe_apply" | "recipe_removal";
 
 export type OperationRecord = {
 	id: string,
@@ -843,7 +1192,11 @@ export type OperationSnapshot = {
 	id: string,
 	plan_id: string,
 	actor: OperationActor,
-	sequence: number,
+	kind?: OperationKind,
+	game_ids?: string[],
+	parent_operation_id?: string | null,
+	started_at?: string | null,
+	sequence: Counter,
 	stage: OperationStage,
 	progress: MeasuredProgress,
 	results: ComponentResult[],
@@ -866,6 +1219,33 @@ export type OsInfo = {
 
 export type OverrideScope = { scope: "global" } | { scope: "per_game"; executable_path: string };
 
+export type OwnedRecipeListRequest = {
+	gameId: string,
+};
+
+export type OwnedRecipeListResult = {
+	gameId: string,
+	recipes: OwnedRecipeReceipt[],
+};
+
+export type OwnedRecipeMember = {
+	relativePath: string,
+	action: RecipePreviewAction,
+	ownedSha256: string,
+	configurationKey: string | null,
+};
+
+export type OwnedRecipeReceipt = {
+	upstreamVersion: string,
+	state: RecipeState,
+	recipeId: string,
+	revision: number,
+	receiptId: string,
+	installationId: string,
+	createdAt: string,
+	members: OwnedRecipeMember[],
+};
+
 export type PlannedChange = {
 	precondition: FilePrecondition,
 	artifact: ArtifactDescriptor,
@@ -874,12 +1254,30 @@ export type PlannedChange = {
 	set_id: string,
 };
 
+export type PresetEvidence = {
+	write: DrsWriteState,
+	readback: DrsReadbackState,
+	provider_documentation: ProviderDocumentationState,
+	in_game_behavior: InGameBehaviorState,
+};
+
+export type PresetNamespaceIds = {
+	override_id: number,
+	preset_id: number,
+};
+
+export type PresetReadOnlyReason = "provider_runtime_write_support_unverified";
+
+export type PresetWriteMapping = { status: "writable" } | { status: "read_only"; reason: PresetReadOnlyReason };
+
 /**
  *  Risk category a detected protection falls into. Drives the warning copy and
  *  tone: anti-cheat carries account-ban risk, anti-tamper carries launch-fail
  *  risk, store DRM is informational.
  */
 export type ProtectionKind = "anti_cheat" | "anti_tamper" | "drm";
+
+export type ProviderDocumentationState = "unknown" | "documented_numeric_definition" | "documented_runtime_applicability" | "not_documented";
 
 export type RamInfo = {
 	total_bytes: number,
@@ -890,6 +1288,182 @@ export type RamModule = {
 	capacity_bytes: number,
 	mhz: number,
 	type_label: string,
+};
+
+export type RawDrsValue = { value_type: "dword"; value: number } | { value_type: "binary"; value: number[] } | { value_type: "unicode"; value: number[] } | { value_type: "unknown"; value: {
+	setting_type: number,
+	bytes: number[],
+} };
+
+export type RecipeApplyRequest = {
+	previewId: string,
+};
+
+export type RecipeCatalog = {
+	schema_version: number,
+	acquisition_requires_user_action: boolean,
+	recipes: RecipeDescriptor[],
+};
+
+export type RecipeCompatibilityState = { status: "unknown" } | { status: "documented_only"; evidence_ids: string[] } | { status: "tested_pass"; evidence_id: string } | { status: "tested_fail"; evidence_id: string } | { status: "stale"; previous_evidence_id: string };
+
+export type RecipeConfigureRequest = {
+	previewId: string,
+};
+
+export type RecipeConflict = {
+	kind: RecipeConflictKind,
+	recipe_id: string,
+	other_party: string,
+	path: string,
+	message: string,
+};
+
+export type RecipeConflictKind = "official_component_path" | "recipe_path" | "unsupported_proxy_filename" | "unsupported_proxy_chain";
+
+export type RecipeConflictPreviewRequest = {
+	recipe_json: string,
+	expected_sha256: string,
+	official_components: OfficialComponentClaim[],
+	existing_recipe_claims: ExistingRecipeFileClaim[],
+};
+
+export type RecipeConflictPreviewResult = {
+	allowed: boolean,
+	conflicts: RecipeConflict[],
+	issue: RecipeIssue | null,
+};
+
+export type RecipeDescriptor = {
+	schema_version: number,
+	id: string,
+	revision: number,
+	upstream_version: string,
+	experimental: boolean,
+	manifest_sha256: string,
+	state: RecipeState,
+};
+
+export type RecipeDurableRemovalRequest = {
+	gameId: string,
+	recipeId: string,
+};
+
+export type RecipeFileRole = "proxy" | "addon" | "shader" | "data" | "notice";
+
+export type RecipeIssue = {
+	code: string,
+	message: string,
+	context: { [key in string]: string },
+};
+
+export type RecipeLocalPreviewRequest = {
+	gameId: string,
+	recipePath: string,
+	sourceDirectory: string | null,
+	intent: RecipePreviewIntent,
+};
+
+export type RecipeLocalPreviewResult = {
+	previewId: string,
+	expiresAt: string,
+	allowed: boolean,
+	recipe: RecipeDescriptor | null,
+	files: RecipePreviewFile[],
+	configEdits: RecipePreviewConfigEdit[],
+	issues: RecipeIssue[],
+};
+
+export type RecipeObservationState = { status: "not_observed" } | { status: "files_detected"; method: string; paths: string[]; hashes: string[]; observed_at: string } | { status: "runtime_detected"; process_identity: string; module_paths: string[]; observed_at: string } | { status: "unknown_or_inaccessible"; reason: string };
+
+export type RecipeOperationResult = {
+	operationId: string,
+	gameId: string,
+	recipeId: string,
+	receiptId: string | null,
+	status: RecipeOperationStatus,
+	changedPaths: string[],
+	retainedPaths: string[],
+	issues: RecipeIssue[],
+};
+
+export type RecipeOperationStatus = "completed" | "failed";
+
+export type RecipeOwnershipState = { status: "none" } | { status: "installed_by_dlssync"; receipt_id: string } | { status: "owned_modified"; paths: string[] } | { status: "owned_missing"; paths: string[] } | { status: "partially_removed"; retained_paths: string[] } | { status: "removed"; receipt_id: string };
+
+export type RecipePreviewAction = "create" | "replace" | "configure";
+
+export type RecipePreviewConfigEdit = {
+	relativePath: string,
+	section: string,
+	key: string,
+	desired: string | null,
+};
+
+export type RecipePreviewFile = {
+	role: RecipeFileRole,
+	relativePath: string,
+	action: RecipePreviewAction,
+	sha256: string,
+	sizeBytes: number,
+};
+
+export type RecipePreviewIntent = "apply" | "configure";
+
+export type RecipeRemovalFailure = {
+	code: string,
+	message: string,
+	path: string | null,
+	expected_sha256: string | null,
+	observed_sha256: string | null,
+};
+
+export type RecipeRemovalRequest = {
+	operation_id: string,
+	recipe_id: string,
+	receipt_id: string,
+	restorations: RecipeRestorationCheck[],
+};
+
+export type RecipeRemovalResult = {
+	operation_id: string,
+	recipe_id: string,
+	receipt_id: string,
+	status: RecipeRemovalStatus,
+	verified_restorations: RecipeVerifiedRestoration[],
+	failures: RecipeRemovalFailure[],
+};
+
+export type RecipeRemovalStatus = "removed" | "failed";
+
+export type RecipeRestorationCheck = {
+	path: string,
+	expected_sha256: string,
+};
+
+export type RecipeState = {
+	ownership: RecipeOwnershipState,
+	observation: RecipeObservationState,
+	compatibility: RecipeCompatibilityState,
+	support: RecipeSupportState,
+};
+
+export type RecipeSupportState = { status: "unknown" } | { status: "experimental" } | { status: "official"; evidence_ids: string[] };
+
+export type RecipeValidationRequest = {
+	recipe_json: string,
+	expected_sha256: string,
+};
+
+export type RecipeValidationResult = {
+	valid: boolean,
+	recipe: RecipeDescriptor | null,
+	issue: RecipeIssue | null,
+};
+
+export type RecipeVerifiedRestoration = {
+	path: string,
+	observed_sha256: string,
 };
 
 export type Release = Release_Serialize | Release_Deserialize;
@@ -948,9 +1522,34 @@ export type Release_Serialize = {
 	zip_entry: string | null,
 };
 
+export type RestoreEligibilityView = {
+	eligible: boolean,
+	reason_code: string | null,
+};
+
+export type RestoreVerification = {
+	verified: boolean,
+	at: string | null,
+	detail: string | null,
+};
+
 export type RollbackPlanResult = {
 	plan_id: string,
 	restored: number,
+};
+
+export type RrPreset = "off" | "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "latest";
+
+export type RrPresetDefinition = {
+	preset: RrPreset,
+	raw_value: number,
+	description: string,
+	write_mapping: PresetWriteMapping,
+};
+
+export type RrPresetRegistry = {
+	setting_ids: PresetNamespaceIds,
+	options: RrPresetDefinition[],
 };
 
 export type RuntimeMode = {
@@ -973,6 +1572,8 @@ export type ScannedGame = {
 	components: ScannedComponent[],
 };
 
+export type SettingPatch = { operation: "keep" } | { operation: "set"; value: RawDrsValue } | { operation: "remove_local" };
+
 export type SgdbConfig = {
 	api_key?: string,
 };
@@ -987,6 +1588,61 @@ export type SourceHealth = {
 	families: string[],
 };
 
+export type SrPreset = "off" | "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "latest";
+
+export type SrPresetDefinition = {
+	preset: SrPreset,
+	raw_value: number,
+	description: string,
+	write_mapping: PresetWriteMapping,
+};
+
+export type SrPresetRegistry = {
+	setting_ids: PresetNamespaceIds,
+	options: SrPresetDefinition[],
+};
+
+export type StateCounts = {
+	actionable_games: number,
+	actionable_components: number,
+	protected_games: number,
+	eligible_restorable_backups: number,
+	active_operations: number,
+};
+
+export type StateDelta = {
+	base_revision?: Counter,
+	affected_game_ids?: string[],
+	games?: GameSnapshot[],
+	removed_game_ids?: string[],
+	operations?: OperationSnapshot[],
+	removed_operation_ids?: string[],
+	backups?: BackupView[],
+	removed_backup_ids?: string[],
+	history?: HistoryView[],
+	removed_history_ids?: string[],
+	catalog: CatalogState | null,
+	counts?: StateCounts,
+};
+
+export type StateEvent = {
+	schema_version: number,
+	id: string,
+	emitter_id: string,
+	sequence: Counter,
+	operation_id: string | null,
+	game_id: string | null,
+	revision: Counter,
+	emitted_at: string,
+	delta: StateDelta,
+};
+
+export type StateWatermark = {
+	emitter_id: string,
+	sequence: Counter,
+	revision: Counter,
+};
+
 export type SteamApiConfig = {
 	api_key?: string,
 	steam_id?: string,
@@ -999,6 +1655,36 @@ export type StreamlineSetResult = {
 	rolled_back: boolean,
 };
 
+export type SupportState = "confirmed" | "incompatible" | "unknown";
+
+export type SupportStatus = "official" | "experimental" | "unsupported" | "unknown";
+
+/**  An installed device + its current driver, from WMI `Win32_PnPSignedDriver`. */
+export type SystemDevice = {
+	name: string,
+	class: SystemDeviceClass,
+	manufacturer: string,
+	driver_version: string | null,
+	/**  ISO `YYYY-MM-DD`. */
+	driver_date: string | null,
+	/**  Raw hardware id (uppercased), e.g. `PCI\VEN_8086&DEV_9A49&SUBSYS_...`. */
+	hardware_id: string,
+	/**  Exact PnP hardware and compatible IDs. `hardware_id` remains the unique device instance ID. */
+	hardware_ids?: string[],
+	problem_code?: number | null,
+	/**
+	 *  The DriverStore published INF name for the installed driver, e.g.
+	 *  `oem47.inf`, from WMI `InfName`. The handle `pnputil /export-driver`
+	 *  needs to snapshot this device's current driver before an update.
+	 */
+	inf_name?: string | null,
+	/**
+	 *  Whether the device is currently present (vs a phantom/ghost of removed
+	 *  hardware). Defaults to `true` so older payloads and tests stay valid.
+	 */
+	present?: boolean,
+};
+
 export type SystemDeviceClass = "audio" | "display" | "monitor" | "network" | "bluetooth" | "input" | "storage" | "printer" | "camera" | "sensor" | "battery" | "smart_card" | "firmware" | "chipset" | "system" | "usb" | "other";
 
 export type SystemDriverInstallProgress = {
@@ -1009,12 +1695,27 @@ export type SystemDriverInstallProgress = {
 
 export type SystemDriverInstallStage = "downloading" | "installing" | "completed" | "failed";
 
-export type SystemDriverOutcome = {
+export type SystemDriverOutcome = SystemDriverOutcome_Serialize | SystemDriverOutcome_Deserialize;
+
+export type SystemDriverOutcome_Deserialize = {
 	success: boolean,
 	reboot_required: boolean,
 	result_code: number,
 	message: string,
+	verification?: SystemDriverVerification | null,
+	observed_version?: string | null,
 };
+
+export type SystemDriverOutcome_Serialize = {
+	success: boolean,
+	reboot_required: boolean,
+	result_code: number,
+	message: string,
+	verification?: SystemDriverVerification | null,
+	observed_version?: string | null,
+};
+
+export type SystemDriverVerification = "active_version_verified" | "reboot_pending" | "unverified";
 
 export type SystemInfo = {
 	os: OsInfo,
@@ -1057,7 +1758,10 @@ export type UpdatePlan = {
 	schema_version?: number,
 	created_at: string,
 	catalog_generated_at: string,
-	/**  Digest of the exact signed catalog bytes used by the planner. */
+	/**
+	 *  Digest of canonical catalog content used by the planner.
+	 *  Signature provenance is recorded separately.
+	 */
 	catalog_revision?: string,
 	fingerprint: string,
 	stale: boolean,
@@ -1116,6 +1820,7 @@ export const COMMANDS = {
   add_favorite_game: "add_favorite_game",
   apply_dll_set: "apply_dll_set",
   apply_dlss_override: "apply_dlss_override",
+  apply_local_recipe: "apply_local_recipe",
   apply_streamline_set: "apply_streamline_set",
   apply_update: "apply_update",
   apply_update_batch: "apply_update_batch",
@@ -1126,6 +1831,7 @@ export const COMMANDS = {
   catalog_status: "catalog_status",
   catalog_summary: "catalog_summary",
   check_driver_updates: "check_driver_updates",
+  configure_local_recipe: "configure_local_recipe",
   delete_backup: "delete_backup",
   detect_anticheat: "detect_anticheat",
   detect_dlls: "detect_dlls",
@@ -1140,6 +1846,7 @@ export const COMMANDS = {
   get_dlss_debug_overlay: "get_dlss_debug_overlay",
   get_log_paths: "get_log_paths",
   get_settings: "get_settings",
+  get_system_devices: "get_system_devices",
   get_system_info: "get_system_info",
   hide_main_window: "hide_main_window",
   install_driver: "install_driver",
@@ -1148,19 +1855,26 @@ export const COMMANDS = {
   journal_list: "journal_list",
   list_backups: "list_backups",
   list_driver_history: "list_driver_history",
+  list_known_recipes: "list_known_recipes",
   list_notifications: "list_notifications",
+  list_owned_recipes: "list_owned_recipes",
   list_releases: "list_releases",
   mark_all_notifications_read: "mark_all_notifications_read",
   mark_notification_read: "mark_notification_read",
   notifications_unread_count: "notifications_unread_count",
   open_devtools: "open_devtools",
   open_path: "open_path",
+  preview_local_recipe: "preview_local_recipe",
+  preview_recipe_conflicts: "preview_recipe_conflicts",
+  preview_update_plan: "preview_update_plan",
   push_notification: "push_notification",
   read_dlss_override_config: "read_dlss_override_config",
   read_recent_logs: "read_recent_logs",
   refresh_catalog: "refresh_catalog",
   remove_blacklist_entry: "remove_blacklist_entry",
   remove_favorite_game: "remove_favorite_game",
+  remove_owned_recipe: "remove_owned_recipe",
+  remove_recipe: "remove_recipe",
   reset_dlss_override: "reset_dlss_override",
   restore_backup: "restore_backup",
   restore_system_driver: "restore_system_driver",
@@ -1173,8 +1887,11 @@ export const COMMANDS = {
   set_dlss_debug_overlay: "set_dlss_debug_overlay",
   set_efficiency_mode: "set_efficiency_mode",
   show_main_window: "show_main_window",
+  state_snapshot: "state_snapshot",
+  state_watermark: "state_watermark",
   system_driver_versions: "system_driver_versions",
   tray_set_pending: "tray_set_pending",
+  validate_recipe: "validate_recipe",
 } as const;
 
 export type CommandName = (typeof COMMANDS)[keyof typeof COMMANDS];
@@ -1184,8 +1901,8 @@ export type CommandArguments = {
   scan_libraries: OptionalNullable<{ launchers: Parameters<typeof commands.scanLibraries>[0]; }>;
   detect_dlls: OptionalNullable<{ installDir: Parameters<typeof commands.detectDlls>[0]; }>;
   detect_dlss_enabler: OptionalNullable<{ installDir: Parameters<typeof commands.detectDlssEnabler>[0]; }>;
-  enrich_game_art: OptionalNullable<{ name: Parameters<typeof commands.enrichGameArt>[0]; apiKey: Parameters<typeof commands.enrichGameArt>[1]; }>;
-  fetch_steam_art: OptionalNullable<{ name: Parameters<typeof commands.fetchSteamArt>[0]; }>;
+  enrich_game_art: OptionalNullable<{ game: Parameters<typeof commands.enrichGameArt>[0]; apiKey: Parameters<typeof commands.enrichGameArt>[1]; trigger: Parameters<typeof commands.enrichGameArt>[2]; }>;
+  fetch_steam_art: OptionalNullable<{ appId: Parameters<typeof commands.fetchSteamArt>[0]; trigger: Parameters<typeof commands.fetchSteamArt>[1]; }>;
   open_path: OptionalNullable<{ path: Parameters<typeof commands.openPath>[0]; }>;
   reveal_path: OptionalNullable<{ path: Parameters<typeof commands.revealPath>[0]; }>;
   refresh_catalog: OptionalNullable<{ trigger: Parameters<typeof commands.refreshCatalog>[0]; }>;
@@ -1195,8 +1912,18 @@ export type CommandArguments = {
   list_releases: OptionalNullable<{ vendor: Parameters<typeof commands.listReleases>[0]; family: Parameters<typeof commands.listReleases>[1]; }>;
   journal_list: OptionalNullable<{ filter: Parameters<typeof commands.journalList>[0]; }>;
   journal_export: OptionalNullable<{ filter: Parameters<typeof commands.journalExport>[0]; }>;
+  list_owned_recipes: OptionalNullable<{ request: Parameters<typeof commands.listOwnedRecipes>[0]; }>;
+  preview_local_recipe: OptionalNullable<{ request: Parameters<typeof commands.previewLocalRecipe>[0]; }>;
+  apply_local_recipe: OptionalNullable<{ request: Parameters<typeof commands.applyLocalRecipe>[0]; }>;
+  configure_local_recipe: OptionalNullable<{ request: Parameters<typeof commands.configureLocalRecipe>[0]; }>;
+  remove_owned_recipe: OptionalNullable<{ request: Parameters<typeof commands.removeOwnedRecipe>[0]; }>;
+  list_known_recipes: OptionalNullable<{ }>;
+  validate_recipe: OptionalNullable<{ request: Parameters<typeof commands.validateRecipe>[0]; }>;
+  preview_recipe_conflicts: OptionalNullable<{ request: Parameters<typeof commands.previewRecipeConflicts>[0]; }>;
+  remove_recipe: OptionalNullable<{ request: Parameters<typeof commands.removeRecipe>[0]; }>;
   apply_update: OptionalNullable<{ request: Parameters<typeof commands.applyUpdate>[0]; }>;
   apply_update_batch: OptionalNullable<{ request: Parameters<typeof commands.applyUpdateBatch>[0]; }>;
+  preview_update_plan: OptionalNullable<{ items: Parameters<typeof commands.previewUpdatePlan>[0]; baseline: Parameters<typeof commands.previewUpdatePlan>[1]; }>;
   cancel_apply: OptionalNullable<{ applyId: Parameters<typeof commands.cancelApply>[0]; }>;
   cancel_all_applies: OptionalNullable<{ }>;
   apply_streamline_set: OptionalNullable<{ items: Parameters<typeof commands.applyStreamlineSet>[0]; }>;
@@ -1228,18 +1955,21 @@ export type CommandArguments = {
   list_driver_history: OptionalNullable<{ model: Parameters<typeof commands.listDriverHistory>[0]; vendor: Parameters<typeof commands.listDriverHistory>[1]; }>;
   install_driver: OptionalNullable<{ vendor: Parameters<typeof commands.installDriver>[0]; downloadUrl: Parameters<typeof commands.installDriver>[1]; }>;
   scan_system_drivers: OptionalNullable<{ }>;
+  get_system_devices: OptionalNullable<{ }>;
   install_system_driver: OptionalNullable<{ updateId: Parameters<typeof commands.installSystemDriver>[0]; context: Parameters<typeof commands.installSystemDriver>[1]; }>;
   restore_system_driver: OptionalNullable<{ backupId: Parameters<typeof commands.restoreSystemDriver>[0]; }>;
   system_driver_versions: OptionalNullable<{ infName: Parameters<typeof commands.systemDriverVersions>[0]; }>;
   detect_anticheat: OptionalNullable<{ installDir: Parameters<typeof commands.detectAnticheat>[0]; appId: Parameters<typeof commands.detectAnticheat>[1]; name: Parameters<typeof commands.detectAnticheat>[2]; }>;
   dlss_overrides_supported: OptionalNullable<{ }>;
   dlss_capabilities: OptionalNullable<{ }>;
-  apply_dlss_override: OptionalNullable<{ scope: Parameters<typeof commands.applyDlssOverride>[0]; config: Parameters<typeof commands.applyDlssOverride>[1]; }>;
+  apply_dlss_override: OptionalNullable<{ scope: Parameters<typeof commands.applyDlssOverride>[0]; config: Parameters<typeof commands.applyDlssOverride>[1]; changedSettingIds: Parameters<typeof commands.applyDlssOverride>[2]; }>;
   reset_dlss_override: OptionalNullable<{ scope: Parameters<typeof commands.resetDlssOverride>[0]; }>;
   read_dlss_override_config: OptionalNullable<{ scope: Parameters<typeof commands.readDlssOverrideConfig>[0]; }>;
   find_game_executable: OptionalNullable<{ installDir: Parameters<typeof commands.findGameExecutable>[0]; }>;
   runtime_mode: OptionalNullable<{ }>;
   open_devtools: OptionalNullable<{ }>;
+  state_snapshot: OptionalNullable<{ }>;
+  state_watermark: OptionalNullable<{ }>;
   tray_set_pending: OptionalNullable<{ count: Parameters<typeof commands.traySetPending>[0]; }>;
   set_efficiency_mode: OptionalNullable<{ enable: Parameters<typeof commands.setEfficiencyMode>[0]; }>;
   hide_main_window: OptionalNullable<{ }>;
@@ -1261,8 +1991,18 @@ export type CommandResults = {
   list_releases: Awaited<ReturnType<typeof commands.listReleases>>;
   journal_list: Awaited<ReturnType<typeof commands.journalList>>;
   journal_export: Awaited<ReturnType<typeof commands.journalExport>>;
+  list_owned_recipes: Awaited<ReturnType<typeof commands.listOwnedRecipes>>;
+  preview_local_recipe: Awaited<ReturnType<typeof commands.previewLocalRecipe>>;
+  apply_local_recipe: Awaited<ReturnType<typeof commands.applyLocalRecipe>>;
+  configure_local_recipe: Awaited<ReturnType<typeof commands.configureLocalRecipe>>;
+  remove_owned_recipe: Awaited<ReturnType<typeof commands.removeOwnedRecipe>>;
+  list_known_recipes: Awaited<ReturnType<typeof commands.listKnownRecipes>>;
+  validate_recipe: Awaited<ReturnType<typeof commands.validateRecipe>>;
+  preview_recipe_conflicts: Awaited<ReturnType<typeof commands.previewRecipeConflicts>>;
+  remove_recipe: Awaited<ReturnType<typeof commands.removeRecipe>>;
   apply_update: Awaited<ReturnType<typeof commands.applyUpdate>>;
   apply_update_batch: Awaited<ReturnType<typeof commands.applyUpdateBatch>>;
+  preview_update_plan: Awaited<ReturnType<typeof commands.previewUpdatePlan>>;
   cancel_apply: Awaited<ReturnType<typeof commands.cancelApply>>;
   cancel_all_applies: Awaited<ReturnType<typeof commands.cancelAllApplies>>;
   apply_streamline_set: Awaited<ReturnType<typeof commands.applyStreamlineSet>>;
@@ -1294,6 +2034,7 @@ export type CommandResults = {
   list_driver_history: Awaited<ReturnType<typeof commands.listDriverHistory>>;
   install_driver: Awaited<ReturnType<typeof commands.installDriver>>;
   scan_system_drivers: Awaited<ReturnType<typeof commands.scanSystemDrivers>>;
+  get_system_devices: Awaited<ReturnType<typeof commands.getSystemDevices>>;
   install_system_driver: Awaited<ReturnType<typeof commands.installSystemDriver>>;
   restore_system_driver: Awaited<ReturnType<typeof commands.restoreSystemDriver>>;
   system_driver_versions: Awaited<ReturnType<typeof commands.systemDriverVersions>>;
@@ -1306,6 +2047,8 @@ export type CommandResults = {
   find_game_executable: Awaited<ReturnType<typeof commands.findGameExecutable>>;
   runtime_mode: Awaited<ReturnType<typeof commands.runtimeMode>>;
   open_devtools: Awaited<ReturnType<typeof commands.openDevtools>>;
+  state_snapshot: Awaited<ReturnType<typeof commands.stateSnapshot>>;
+  state_watermark: Awaited<ReturnType<typeof commands.stateWatermark>>;
   tray_set_pending: Awaited<ReturnType<typeof commands.traySetPending>>;
   set_efficiency_mode: Awaited<ReturnType<typeof commands.setEfficiencyMode>>;
   hide_main_window: Awaited<ReturnType<typeof commands.hideMainWindow>>;

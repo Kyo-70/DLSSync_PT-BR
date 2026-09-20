@@ -1,21 +1,56 @@
 use serde::{Deserialize, Serialize};
 
+use crate::presets::{DlssFeature, FgPreset, NrPreset, RrPreset, SrPreset};
+
 pub mod ids {
+    // NVIDIA NvApiDriverSettings.h, pinned commit
+    // a08f45f737bb142b070f1e23c58466ecbc82e398, observed 2026-09-13.
     pub const DLSS_SR_ENABLE_OVERRIDE: u32 = 0x10E4_1E01;
     pub const DLSS_RR_ENABLE_OVERRIDE: u32 = 0x10E4_1E02;
     pub const DLSS_FG_ENABLE_OVERRIDE: u32 = 0x10E4_1E03;
+    pub const DLSS_NR_ENABLE_OVERRIDE: u32 = 0x10E4_1E04;
     pub const DLSS_SR_FORCED_PRESET: u32 = 0x10E4_1DF3;
     /// NVIDIA NVAPI `NGX_DLSS_RR_OVERRIDE_RENDER_PRESET_SELECTION_ID`.
     pub const DLSS_RR_FORCED_PRESET: u32 = 0x10E4_1DF7;
     pub const DLSS_FG_FORCED_PRESET: u32 = 0x10E4_1DF1;
+    pub const DLSS_NR_FORCED_PRESET: u32 = 0x10E4_1DF8;
+    pub const DLSS_NR_STREAMLINE_OVERRIDE: u32 = 0x10E4_1E05;
     pub const DLSS_FG_FORCED_MODE: u32 = 0x1030_8298;
     pub const DLSS_MFG_FIXED_COUNT: u32 = 0x104D_6667;
     pub const DLSS_MFG_TARGET_FRAME_RATE: u32 = 0x10CF_4125;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FeatureSettingIds {
+    pub feature: DlssFeature,
+    pub override_id: u32,
+    pub preset_id: u32,
+}
+
+pub const FEATURE_SETTING_IDS: [FeatureSettingIds; 4] = [
+    FeatureSettingIds {
+        feature: DlssFeature::Sr,
+        override_id: ids::DLSS_SR_ENABLE_OVERRIDE,
+        preset_id: ids::DLSS_SR_FORCED_PRESET,
+    },
+    FeatureSettingIds {
+        feature: DlssFeature::Rr,
+        override_id: ids::DLSS_RR_ENABLE_OVERRIDE,
+        preset_id: ids::DLSS_RR_FORCED_PRESET,
+    },
+    FeatureSettingIds {
+        feature: DlssFeature::Fg,
+        override_id: ids::DLSS_FG_ENABLE_OVERRIDE,
+        preset_id: ids::DLSS_FG_FORCED_PRESET,
+    },
+    FeatureSettingIds {
+        feature: DlssFeature::Nr,
+        override_id: ids::DLSS_NR_ENABLE_OVERRIDE,
+        preset_id: ids::DLSS_NR_FORCED_PRESET,
+    },
+];
+
 const VALUE_ON: u32 = 0x0000_0001;
-const PRESET_RECOMMENDED: u32 = 0x00FF_FFFF;
-const PRESET_RECOMMENDED_LEGACY: u32 = 0x00FF_FFFE;
 const FRAME_GEN_MODE_FIXED: u32 = 0x0000_0002;
 const FRAME_GEN_MODE_DYNAMIC: u32 = 0x0000_0004;
 
@@ -72,7 +107,7 @@ impl DlssPreset {
             DlssPreset::M => 0x0D,
             DlssPreset::N => 0x0E,
             DlssPreset::O => 0x0F,
-            DlssPreset::Recommended => PRESET_RECOMMENDED,
+            DlssPreset::Recommended => crate::presets::PRESET_LATEST,
         }
     }
 
@@ -94,7 +129,6 @@ impl DlssPreset {
             0x0D => DlssPreset::M,
             0x0E => DlssPreset::N,
             0x0F => DlssPreset::O,
-            PRESET_RECOMMENDED | PRESET_RECOMMENDED_LEGACY => DlssPreset::Recommended,
             _ => return None,
         })
     }
@@ -163,6 +197,36 @@ pub struct DrsSetting {
     pub value: u32,
 }
 
+impl DrsSetting {
+    pub const fn sr_preset(preset: SrPreset) -> Self {
+        Self {
+            id: ids::DLSS_SR_FORCED_PRESET,
+            value: preset.raw_value(),
+        }
+    }
+
+    pub const fn rr_preset(preset: RrPreset) -> Self {
+        Self {
+            id: ids::DLSS_RR_FORCED_PRESET,
+            value: preset.raw_value(),
+        }
+    }
+
+    pub const fn fg_preset(preset: FgPreset) -> Self {
+        Self {
+            id: ids::DLSS_FG_FORCED_PRESET,
+            value: preset.raw_value(),
+        }
+    }
+
+    pub const fn nr_preset(preset: NrPreset) -> Self {
+        Self {
+            id: ids::DLSS_NR_FORCED_PRESET,
+            value: preset.raw_value(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case", tag = "scope")]
 pub enum OverrideScope {
@@ -181,6 +245,71 @@ pub struct DlssOverrideConfig {
     pub fg_mode: Option<FrameGenMode>,
     pub fg_fixed_count: Option<FrameGenCount>,
     pub fg_dynamic_target_fps: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, specta::Type)]
+pub struct TypedDlssOverrideConfig {
+    pub enable_sr_dll_override: bool,
+    pub sr_preset: Option<SrPreset>,
+    pub enable_rr_dll_override: bool,
+    pub rr_preset: Option<RrPreset>,
+    pub enable_fg_dll_override: bool,
+    pub fg_preset: Option<FgPreset>,
+    pub fg_mode: Option<FrameGenMode>,
+    pub fg_fixed_count: Option<FrameGenCount>,
+    pub fg_dynamic_target_fps: Option<u32>,
+}
+
+impl TypedDlssOverrideConfig {
+    pub fn to_drs_settings(&self) -> Vec<DrsSetting> {
+        let mut settings = Vec::new();
+        if self.enable_sr_dll_override {
+            settings.push(DrsSetting {
+                id: ids::DLSS_SR_ENABLE_OVERRIDE,
+                value: VALUE_ON,
+            });
+        }
+        if let Some(preset) = self.sr_preset {
+            settings.push(DrsSetting::sr_preset(preset));
+        }
+        if self.enable_rr_dll_override {
+            settings.push(DrsSetting {
+                id: ids::DLSS_RR_ENABLE_OVERRIDE,
+                value: VALUE_ON,
+            });
+        }
+        if let Some(preset) = self.rr_preset {
+            settings.push(DrsSetting::rr_preset(preset));
+        }
+        if self.enable_fg_dll_override {
+            settings.push(DrsSetting {
+                id: ids::DLSS_FG_ENABLE_OVERRIDE,
+                value: VALUE_ON,
+            });
+        }
+        if let Some(preset) = self.fg_preset {
+            settings.push(DrsSetting::fg_preset(preset));
+        }
+        if let Some(mode) = self.fg_mode {
+            settings.push(DrsSetting {
+                id: ids::DLSS_FG_FORCED_MODE,
+                value: mode.to_value(),
+            });
+        }
+        if let Some(count) = self.fg_fixed_count {
+            settings.push(DrsSetting {
+                id: ids::DLSS_MFG_FIXED_COUNT,
+                value: count.to_value(),
+            });
+        }
+        if let Some(target_fps) = self.fg_dynamic_target_fps.filter(|&fps| fps != 0) {
+            settings.push(DrsSetting {
+                id: ids::DLSS_MFG_TARGET_FRAME_RATE,
+                value: target_fps,
+            });
+        }
+        settings
+    }
 }
 
 impl DlssOverrideConfig {
@@ -430,22 +559,15 @@ mod tests {
             DlssPreset::M,
             DlssPreset::N,
             DlssPreset::O,
-            DlssPreset::Recommended,
         ] {
             assert_eq!(DlssPreset::from_value(preset.to_value()), Some(preset));
         }
     }
 
     #[test]
-    fn preset_from_value_accepts_both_recommended_sentinels() {
-        assert_eq!(
-            DlssPreset::from_value(0x00FF_FFFE),
-            Some(DlssPreset::Recommended)
-        );
-        assert_eq!(
-            DlssPreset::from_value(0x00FF_FFFF),
-            Some(DlssPreset::Recommended)
-        );
+    fn legacy_shared_preset_does_not_claim_provider_sentinels() {
+        assert_eq!(DlssPreset::from_value(0x00FF_FFFE), None);
+        assert_eq!(DlssPreset::from_value(0x00FF_FFFF), None);
     }
 
     #[test]

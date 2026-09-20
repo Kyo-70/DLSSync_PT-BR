@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import { fly } from "svelte/transition";
+  import { portal } from "../actions/portal";
+  import { motionDuration } from "../lib/ux";
   import { focusTrap } from "../actions/focusTrap";
 
   let {
@@ -27,6 +29,8 @@
 
   function handleKey(e: KeyboardEvent): void {
     if (e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
     if (onEscape) {
       onEscape(e);
     } else {
@@ -37,6 +41,7 @@
 
 <div
   class="flyout-backdrop"
+  use:portal
   style:--flyout-backdrop-alpha={backdropOpacity}
   style:--flyout-backdrop-blur="{backdropBlur}px"
   style:z-index={zIndex}
@@ -48,7 +53,7 @@
 
 <div
   class="flyout glass-dialog"
-  transition:fly={{ y: -8, duration: 160 }}
+  transition:fly={{ y: -8, duration: motionDuration(160) }}
   style:--edge-color={accent}
   style:--flyout-width={width}
   style:z-index={zIndex + 1}
@@ -57,7 +62,8 @@
   aria-label={ariaLabel}
   tabindex="-1"
   onkeydown={handleKey}
-  use:focusTrap
+  use:portal
+  use:focusTrap={{ initialFocusRing: false }}
 >
   {@render children()}
 </div>
@@ -75,7 +81,10 @@
     left: 50%;
     transform: translate(-50%, -50%);
     width: min(var(--flyout-width, 720px), 92vw);
-    max-height: 84vh;
+    max-height: calc(100dvh - 48px);
+    background: var(--bg-card);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
     display: flex;
     flex-direction: column;
   }

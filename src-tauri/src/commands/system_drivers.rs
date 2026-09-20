@@ -18,16 +18,16 @@ const MAX_UPDATE_ID_LEN: usize = 128;
 /// cannot break out of its quoted token to inject extra flags into the elevated
 /// child. Defence-in-depth on top of [`driver_install::launch::build_command_line`].
 fn is_valid_update_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= MAX_UPDATE_ID_LEN
-        && id.contains(':')
-        && id
-            .chars()
-            .all(|c| c.is_ascii_hexdigit() || matches!(c, '-' | ':' | '{' | '}'))
-        && id
-            .rsplit(':')
-            .next()
-            .is_some_and(|rev| !rev.is_empty() && rev.chars().all(|c| c.is_ascii_digit()))
+    if id.len() > MAX_UPDATE_ID_LEN {
+        return false;
+    }
+    let Some((guid, revision)) = id.rsplit_once(':') else {
+        return false;
+    };
+    uuid::Uuid::parse_str(guid).is_ok()
+        && !revision.is_empty()
+        && revision.bytes().all(|byte| byte.is_ascii_digit())
+        && revision.parse::<u32>().is_ok()
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -36,6 +36,71 @@ pub struct SystemDriverOutcome {
     pub reboot_required: bool,
     pub result_code: i32,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification: Option<SystemDriverVerification>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemDriverVerification {
+    ActiveVersionVerified,
+    RebootPending,
+    Unverified,
+}
+
+#[cfg(windows)]
+fn inventory_blocking() -> Result<Vec<system_drivers::SystemDevice>, String> {
+    use system_drivers::DeviceCatalog;
+    system_drivers::WmiInventory
+        .inventory()
+        .map_err(|error| error.to_string())
+}
+#[cfg(not(windows))]
+fn inventory_blocking() -> Result<Vec<system_drivers::SystemDevice>, String> {
+    Err("Device inventory requires Windows".into())
+}
+
+#[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
+pub async fn get_system_devices() -> AppResult<Vec<system_drivers::SystemDevice>> {
+    tokio::task::spawn_blocking(inventory_blocking)
+        .await
+        .map_err(|error| AppError::Other(error.to_string()))?
+        .map_err(AppError::Other)
+}
+
+fn verify_active_version(
+    outcome: &mut SystemDriverOutcome,
+    devices: &[system_drivers::SystemDevice],
+    instance_id: Option<&str>,
+    expected: Option<&str>,
+) {
+    if !outcome.success {
+        return;
+    }
+    let observed = instance_id
+        .and_then(|id| {
+            devices
+                .iter()
+                .find(|device| device.present && device.hardware_id.eq_ignore_ascii_case(id))
+        })
+        .and_then(|device| device.driver_version.clone());
+    outcome.observed_version = observed.clone();
+    if expected.is_some() && observed.as_deref() == expected {
+        outcome.verification = Some(SystemDriverVerification::ActiveVersionVerified);
+        outcome.message = format!(
+            "Windows reports the requested active driver version {}.",
+            expected.unwrap_or_default()
+        );
+    } else if outcome.reboot_required {
+        outcome.verification = Some(SystemDriverVerification::RebootPending);
+        outcome.message = "Windows accepted the package. Restart is required; the requested active version is not yet verified.".into();
+    } else {
+        outcome.verification = Some(SystemDriverVerification::Unverified);
+        outcome.message = "Windows accepted the package, but the requested active driver version could not be verified. Rescan the device before retrying.".into();
+    }
 }
 
 /// Installed-device context the install carries so it can snapshot the current
@@ -97,6 +162,7 @@ fn install_blocking(
     app: &AppHandle,
     update_id: &str,
     context: &DriverInstallContext,
+    expected_version: Option<&str>,
 ) -> Result<SystemDriverOutcome, String> {
     let emit = |stage: InstallStage, message: &str, fraction: Option<f64>| {
         let _ = app.emit(
@@ -116,20 +182,12 @@ fn install_blocking(
     );
 
     let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
-    let safe: String = update_id
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect();
-    let tmp = std::env::temp_dir();
-    let probe = tmp.join(format!("dlssync-probe-{safe}.tmp"));
-    if let Err(e) = std::fs::write(&probe, b"x") {
-        return Err(format!("temp dir is not writable ({}): {e}", tmp.display()));
-    }
-    let _ = std::fs::remove_file(&probe);
-    let result_path = tmp.join(format!("dlssync-wua-{safe}.json"));
-    let progress_path = tmp.join(format!("dlssync-wua-{safe}.progress.json"));
-    let _ = std::fs::remove_file(&result_path);
-    let _ = std::fs::remove_file(&progress_path);
+    let exchange = tempfile::Builder::new()
+        .prefix("dlssync-wua-")
+        .tempdir()
+        .map_err(|error| error.to_string())?;
+    let result_path = exchange.path().join("result.json");
+    let progress_path = exchange.path().join("progress.json");
 
     let snapshot = plan_driver_snapshot(app, context);
 
@@ -175,6 +233,8 @@ fn install_blocking(
         emit(InstallStage::Failed, msg, Some(1.0));
         let _ = std::fs::remove_file(&progress_path);
         return Ok(SystemDriverOutcome {
+            verification: None,
+            observed_version: None,
             success: false,
             reboot_required: false,
             result_code: code,
@@ -182,15 +242,19 @@ fn install_blocking(
         });
     }
 
-    let outcome = match std::fs::read_to_string(&result_path) {
+    let mut outcome = match std::fs::read_to_string(&result_path) {
         Ok(json) => match serde_json::from_str::<InstallReport>(&json) {
             Ok(r) => SystemDriverOutcome {
+                verification: None,
+                observed_version: None,
                 success: r.success,
                 reboot_required: r.reboot_required,
                 result_code: r.result_code,
                 message: r.message,
             },
             Err(e) => SystemDriverOutcome {
+                verification: None,
+                observed_version: None,
                 success: false,
                 reboot_required: false,
                 result_code: code,
@@ -210,6 +274,8 @@ fn install_blocking(
                 )
             };
             SystemDriverOutcome {
+                verification: None,
+                observed_version: None,
                 success: false,
                 reboot_required: false,
                 result_code: code,
@@ -220,10 +286,23 @@ fn install_blocking(
     let _ = std::fs::remove_file(&result_path);
     let _ = std::fs::remove_file(&progress_path);
 
-    if outcome.success {
-        if let Some((inf, dest, stamp)) = snapshot {
-            record_driver_backup(app, context, &inf, &dest, stamp);
+    // Keep a valid pre-update snapshot even when installation failed.
+    if let Some((inf, dest, stamp)) = snapshot {
+        record_driver_backup(app, context, &inf, &dest, stamp);
+    }
+    match inventory_blocking() {
+        Ok(devices) => verify_active_version(
+            &mut outcome,
+            &devices,
+            context.hardware_id.as_deref(),
+            expected_version,
+        ),
+        Err(error) if outcome.success => {
+            outcome.verification = Some(SystemDriverVerification::Unverified);
+            outcome.message =
+                format!("Windows accepted the package; device readback failed: {error}");
         }
+        Err(_) => {}
     }
 
     emit(
@@ -265,7 +344,11 @@ fn plan_driver_snapshot(
     let dest = root
         .join("driver-backups")
         .join(backup_store::sanitize_folder_name(key))
-        .join(stamp.format("%Y-%m-%d %H-%M-%S").to_string());
+        .join(format!(
+            "{}-{}",
+            stamp.format("%Y-%m-%d %H-%M-%S"),
+            uuid::Uuid::new_v4()
+        ));
     Some((inf.to_string(), dest, stamp))
 }
 
@@ -281,12 +364,9 @@ fn record_driver_backup(
     stamp: chrono::DateTime<chrono::Utc>,
 ) {
     use tauri::Manager;
-    let has_files = std::fs::read_dir(dest)
-        .map(|mut it| it.next().is_some())
-        .unwrap_or(false);
-    if !has_files {
+    let Ok(size_bytes) = system_drivers::verify_driver_snapshot(dest) else {
         return;
-    }
+    };
     let hardware_id = context
         .hardware_id
         .clone()
@@ -306,7 +386,7 @@ fn record_driver_backup(
         previous_sha256: None,
         created_at: stamp,
         restored_at: None,
-        size_bytes: None,
+        size_bytes: Some(size_bytes),
         backup_type: "driver_package".to_string(),
         device_class: Some(device_class),
         hardware_id: Some(hardware_id),
@@ -326,6 +406,7 @@ fn install_blocking(
     _app: &AppHandle,
     _update_id: &str,
     _context: &DriverInstallContext,
+    _expected_version: Option<&str>,
 ) -> Result<SystemDriverOutcome, String> {
     Err("driver install requires Windows".to_string())
 }
@@ -360,11 +441,29 @@ pub async fn install_system_driver(
             "rejected malformed WUA update id: {update_id:?}"
         )));
     }
-    let context = context.unwrap_or_default();
-    tokio::task::spawn_blocking(move || install_blocking(&app, &update_id, &context))
-        .await
-        .map_err(|e| AppError::Other(format!("system driver install task: {e}")))?
-        .map_err(AppError::Other)
+    // The renderer's old context is a hint only. Re-resolve the offered update and device before elevation.
+    let _ = context;
+    tokio::task::spawn_blocking(move || {
+        let update = scan_blocking()?
+            .into_iter()
+            .flat_map(|group| group.updates)
+            .find(|update| update.update_id == update_id)
+            .ok_or_else(|| {
+                "This driver update is no longer offered for this PC. Rescan to refresh the list."
+                    .to_string()
+            })?;
+        let context = DriverInstallContext {
+            inf_name: update.target_inf,
+            hardware_id: update.target_hardware_id,
+            device_class: Some(format!("{:?}", update.class)),
+            provider: Some(update.provider),
+            current_version: update.current_version,
+        };
+        install_blocking(&app, &update_id, &context, update.driver_version.as_deref())
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("system driver install task: {e}")))?
+    .map_err(AppError::Other)
 }
 
 /// Roll a System & Components driver back to a previously-snapshotted version by
@@ -392,8 +491,24 @@ pub async fn restore_system_driver(
         .map_err(|e| AppError::Validation(e.to_string()))?;
     crate::paths::PathGuard::assert_not_symlink(&entry.backup_path)
         .map_err(|e| AppError::Validation(e.to_string()))?;
-    let outcome = restore_blocking(entry.backup_path.clone()).await?;
-    if outcome.success {
+    system_drivers::verify_driver_snapshot(&entry.backup_path).map_err(AppError::Validation)?;
+    let mut outcome = restore_blocking(entry.backup_path.clone()).await?;
+    let devices = tokio::task::spawn_blocking(inventory_blocking)
+        .await
+        .map_err(|error| AppError::Other(error.to_string()))?
+        .map_err(AppError::Other)?;
+    verify_active_version(
+        &mut outcome,
+        &devices,
+        entry.hardware_id.as_deref(),
+        entry.previous_version.as_deref(),
+    );
+    if outcome.success
+        && matches!(
+            outcome.verification,
+            Some(SystemDriverVerification::ActiveVersionVerified)
+        )
+    {
         let guard = state.backups.read();
         if let Some(store) = guard.as_ref() {
             store.mark_restored(&backup_id, chrono::Utc::now())?;
@@ -410,9 +525,11 @@ async fn restore_blocking(dir: std::path::PathBuf) -> AppResult<SystemDriverOutc
             return Err(format!("snapshot folder is missing: {}", dir.display()));
         }
         let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
-        let tmp = std::env::temp_dir();
-        let result_path = tmp.join(format!("dlssync-restore-{}.json", std::process::id()));
-        let _ = std::fs::remove_file(&result_path);
+        let exchange = tempfile::Builder::new()
+            .prefix("dlssync-driver-restore-")
+            .tempdir()
+            .map_err(|error| error.to_string())?;
+        let result_path = exchange.path().join("result.json");
         let args = driver_install::launch::build_command_line([
             "--restore-driver",
             &dir.display().to_string(),
@@ -429,6 +546,8 @@ async fn restore_blocking(dir: std::path::PathBuf) -> AppResult<SystemDriverOutc
         .map_err(|e| e.to_string())?;
         if code == driver_install::launch::UAC_DECLINED_EXIT {
             return Ok(SystemDriverOutcome {
+                verification: None,
+                observed_version: None,
                 success: false,
                 reboot_required: false,
                 result_code: code,
@@ -439,12 +558,16 @@ async fn restore_blocking(dir: std::path::PathBuf) -> AppResult<SystemDriverOutc
         let outcome = match std::fs::read_to_string(&result_path) {
             Ok(json) => match serde_json::from_str::<InstallReport>(&json) {
                 Ok(r) => SystemDriverOutcome {
+                    verification: None,
+                    observed_version: None,
                     success: r.success,
                     reboot_required: r.reboot_required,
                     result_code: r.result_code,
                     message: r.message,
                 },
                 Err(e) => SystemDriverOutcome {
+                    verification: None,
+                    observed_version: None,
                     success: false,
                     reboot_required: false,
                     result_code: code,
@@ -454,6 +577,8 @@ async fn restore_blocking(dir: std::path::PathBuf) -> AppResult<SystemDriverOutc
                 },
             },
             Err(e) => SystemDriverOutcome {
+                verification: None,
+                observed_version: None,
                 success: false,
                 reboot_required: false,
                 result_code: code,
@@ -535,7 +660,47 @@ fn enum_driver_versions(inf_name: &str) -> Result<Vec<DriverStoreVersion>, Strin
 
 #[cfg(test)]
 mod tests {
-    use super::is_valid_update_id;
+    use super::*;
+
+    #[test]
+    fn process_success_does_not_establish_the_active_driver_version() {
+        let mut outcome = SystemDriverOutcome {
+            success: true,
+            reboot_required: false,
+            result_code: 0,
+            message: String::new(),
+            verification: None,
+            observed_version: None,
+        };
+        verify_active_version(&mut outcome, &[], Some("DEVICE"), Some("2.0"));
+        assert!(matches!(
+            outcome.verification,
+            Some(SystemDriverVerification::Unverified)
+        ));
+        outcome.reboot_required = true;
+        verify_active_version(&mut outcome, &[], Some("DEVICE"), Some("2.0"));
+        assert!(matches!(
+            outcome.verification,
+            Some(SystemDriverVerification::RebootPending)
+        ));
+        let device = system_drivers::SystemDevice {
+            name: "Test".into(),
+            class: system_drivers::DeviceClass::Audio,
+            manufacturer: "Vendor".into(),
+            driver_version: Some("2.0".into()),
+            driver_date: None,
+            hardware_id: "DEVICE".into(),
+            hardware_ids: Vec::new(),
+            problem_code: Some(0),
+            inf_name: None,
+            present: true,
+        };
+        verify_active_version(&mut outcome, &[device], Some("DEVICE"), Some("2.0"));
+        assert!(matches!(
+            outcome.verification,
+            Some(SystemDriverVerification::ActiveVersionVerified)
+        ));
+    }
 
     #[test]
     fn accepts_real_wua_update_ids() {

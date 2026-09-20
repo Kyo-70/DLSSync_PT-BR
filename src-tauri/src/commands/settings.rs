@@ -2,6 +2,7 @@ use crate::error::AppResult;
 use crate::paths::AppPaths;
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use tauri::State;
 
@@ -322,6 +323,72 @@ impl AppSettings {
     }
 }
 
+pub(crate) fn projection_settings(
+    settings: &AppSettings,
+    game_id: &str,
+) -> dlssync_application::scan::ProjectionSettings {
+    let prefs = &settings.update_prefs;
+    let mut disabled_families = BTreeSet::new();
+    let mut disable = |enabled: bool, families: &[&str]| {
+        if !enabled {
+            disabled_families.extend(families.iter().map(|family| (*family).to_string()));
+        }
+    };
+    disable(prefs.update_dlss, &["dlss_sr"]);
+    disable(prefs.update_dlss_fg, &["dlss_fg"]);
+    disable(prefs.update_dlss_rr, &["dlss_rr"]);
+    disable(
+        prefs.update_streamline,
+        &[
+            "sl_dlss_sr",
+            "sl_dlss_fg",
+            "sl_dlss_rr",
+            "streamline",
+            "streamline_common",
+            "streamline_pcl",
+            "streamline_nis",
+            "streamline_direct_sr",
+            "reflex",
+        ],
+    );
+    disable(prefs.update_reflex, &["reflex"]);
+    disable(
+        prefs.update_xess,
+        &["xess_sr", "xess_sr_dx11", "xess_fg", "xell"],
+    );
+    disable(
+        prefs.update_fsr,
+        &[
+            "fsr_upscaler",
+            "fsr_upscaler_vk",
+            "fsr_fg",
+            "fsr_loader",
+            "fsr_denoiser",
+        ],
+    );
+    disable(
+        prefs.update_direct_storage,
+        &["direct_storage", "direct_storage_core"],
+    );
+
+    let pinned_versions = settings
+        .game_preferences
+        .get(game_id)
+        .map(|game| {
+            disabled_families.extend(game.disabled_families.iter().cloned());
+            game.pinned_versions
+                .iter()
+                .map(|(key, version)| (key.clone(), version.clone()))
+                .collect::<BTreeMap<_, _>>()
+        })
+        .unwrap_or_default();
+
+    dlssync_application::scan::ProjectionSettings {
+        disabled_families,
+        pinned_versions,
+    }
+}
+
 fn settings_path_from(paths: &AppPaths) -> AppResult<PathBuf> {
     std::fs::create_dir_all(&paths.settings_dir)?;
     Ok(paths.settings_file.clone())
@@ -412,8 +479,45 @@ pub async fn get_settings(state: State<'_, AppState>) -> AppResult<AppSettings> 
 #[tauri::command]
 #[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn save_settings(state: State<'_, AppState>, settings: AppSettings) -> AppResult<()> {
+    let _projection_guard = dlssync_application::scan::projection_guard();
     persist(&state, &settings)?;
-    *state.settings.write() = settings;
+    let ticket = state
+        .authoritative_state
+        .begin_observation(dlssync_application::scan::GAME_PROJECTION_SCOPE);
+    *state.settings.write() = settings.clone();
+    let catalog = state.catalog.read().clone();
+    let snapshot = state.authoritative_state.snapshot();
+    let games = snapshot
+        .games
+        .iter()
+        .map(|game| {
+            dlssync_application::scan::reproject_game_snapshot(
+                game,
+                catalog.as_ref(),
+                &projection_settings(&settings, &game.id),
+            )
+        })
+        .collect::<Vec<_>>();
+    let affected_game_ids = games.iter().map(|game| game.id.clone()).collect();
+    if !games.is_empty() {
+        let receipt = state
+            .authoritative_state
+            .commit_observation(
+                ticket,
+                dlssync_application::state::StateCommit {
+                    delta: dlssync_contracts::StateDelta {
+                        affected_game_ids,
+                        games,
+                        ..dlssync_contracts::StateDelta::default()
+                    },
+                    ..dlssync_application::state::StateCommit::default()
+                },
+            )
+            .map_err(|error| crate::error::AppError::Other(error.to_string()))?;
+        if let Some(error) = receipt.delivery_error {
+            tracing::warn!(%error, "settings game reprojection event delivery failed");
+        }
+    }
     Ok(())
 }
 
@@ -544,6 +648,34 @@ mod ui_prefs_tests {
         assert_eq!(
             back.command_palette_recent,
             vec!["action.apply_all_outdated"]
+        );
+    }
+
+    #[test]
+    fn scan_projection_includes_global_switches_and_per_game_policy() {
+        let mut settings = AppSettings::default();
+        settings.game_preferences.insert(
+            "game-a".into(),
+            GamePreference {
+                disabled_families: vec!["xess_sr".into()],
+                pinned_versions: std::collections::HashMap::from([(
+                    "dlss_sr|C:\\Games\\A\\nvngx_dlss.dll".into(),
+                    "310.4.0".into(),
+                )]),
+            },
+        );
+
+        let projection = projection_settings(&settings, "game-a");
+
+        assert!(projection.disabled_families.contains("sl_dlss_fg"));
+        assert!(projection.disabled_families.contains("reflex"));
+        assert!(projection.disabled_families.contains("xess_sr"));
+        assert_eq!(
+            projection
+                .pinned_versions
+                .get("dlss_sr|C:\\Games\\A\\nvngx_dlss.dll")
+                .map(String::as_str),
+            Some("310.4.0")
         );
     }
 }

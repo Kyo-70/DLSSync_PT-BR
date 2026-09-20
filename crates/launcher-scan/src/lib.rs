@@ -1,5 +1,13 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
+
+pub mod art;
+
+pub use art::{
+    ArtCacheStatus, ArtLocatorKind, ArtResolveTrigger, GameArt, GameArtAsset, GameArtCandidate,
+    GameArtSource, GameArtState,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ScanError {
@@ -31,6 +39,11 @@ pub struct DetectedGame {
     pub launcher: LauncherKind,
     pub install_dir: PathBuf,
     pub app_id: Option<String>,
+    #[serde(default)]
+    pub native_ids: BTreeMap<String, String>,
+    #[serde(default)]
+    pub art: GameArt,
+    /// Compatibility projection for older frontend consumers. New code must use `art`.
     pub image_url: Option<String>,
     pub size_bytes: Option<u64>,
 }

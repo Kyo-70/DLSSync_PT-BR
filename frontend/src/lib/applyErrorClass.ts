@@ -47,6 +47,9 @@ export function classifyApplyError(message: string | null | undefined, code?: st
   const raw = (message ?? "").trim();
   const lower = raw.toLowerCase();
   const kind = normalizeErrorClass(code);
+  if (lower.includes("rollback_failed:")) {
+    return { kind: "backup", short: "Restore needs attention", hint: "Open Backups to restore your files.", retryable: false, action: "none" };
+  }
   if (kind === "architecture" || lower.includes("incompatible binary architecture")) {
     return { kind: "architecture", short: "Incompatible binary", hint: "The file architecture does not match the game. Refresh the catalog and review the compatible candidate.", retryable: false, action: "report" };
   }

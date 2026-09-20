@@ -35,7 +35,7 @@ test.describe("marketing screenshots", () => {
     await page.locator(".plan-modal .close").click();
 
     await gotoView(page, "catalog");
-    await expect(page.getByRole("heading", { name: "Trust Center", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Trust Center", exact: true })).toHaveCount(0);
     await page.screenshot({ path: join(gallery, "04-catalog-trust.png"), animations: "disabled" });
 
     await gotoView(page, "drivers");
@@ -43,7 +43,8 @@ test.describe("marketing screenshots", () => {
     await page.screenshot({ path: join(gallery, "05-drivers.png"), animations: "disabled" });
 
     await gotoView(page, "journal");
-    await expect(page.getByRole("heading", { name: "Operation Journal", exact: true })).toBeVisible();
+    // The journal moved under Backups as the "Activity" tab; `view.journal.title` is its heading.
+    await expect(page.getByRole("heading", { name: "Activity", exact: true })).toBeVisible();
     await page.screenshot({ path: join(gallery, "06-journal.png"), animations: "disabled" });
 
     await gotoView(page, "settings");

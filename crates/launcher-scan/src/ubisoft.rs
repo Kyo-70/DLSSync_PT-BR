@@ -1,4 +1,5 @@
-use crate::{DetectedGame, LauncherKind, LauncherScanner, ScanError};
+use crate::{DetectedGame, GameArt, GameArtSource, LauncherKind, LauncherScanner, ScanError};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use winreg::enums::HKEY_LOCAL_MACHINE;
 use winreg::RegKey;
@@ -36,12 +37,31 @@ impl LauncherScanner for UbisoftScanner {
                     name: display,
                     launcher: LauncherKind::Ubisoft,
                     install_dir: p,
-                    app_id: Some(id),
+                    app_id: Some(id.clone()),
+                    native_ids: BTreeMap::from([("install_id".to_string(), id.clone())]),
+                    art: launcher_art(),
                     image_url: None,
                     size_bytes: None,
                 });
             }
         }
         Ok(games)
+    }
+}
+
+fn launcher_art() -> GameArt {
+    GameArt::unavailable(GameArtSource::UbisoftRegistry, "no_cover_metadata")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::GameArtState;
+
+    #[test]
+    fn ubisoft_registry_without_cover_metadata_is_explicitly_unavailable() {
+        let art = launcher_art();
+        assert_eq!(art.state, GameArtState::Unavailable);
+        assert!(!art.retryable);
     }
 }

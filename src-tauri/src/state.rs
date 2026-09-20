@@ -9,8 +9,11 @@ use backup_store::BackupStore;
 use dll_catalog::{Catalog, DownloadCache};
 use dlssync_application::{product_config, DistributionPolicy};
 use dlssync_contracts::{CatalogProvenance, DistributionChannel, InstallMode};
+use driver_catalog::{DeviceId, DriverRelease, DriverVersion};
 use notifications_store::NotificationsStore;
 use operation_journal::JournalStore;
+use serde::{Deserialize, Serialize};
+use tauri::Emitter;
 
 use crate::commands::settings::AppSettings;
 use crate::paths::AppPaths;
@@ -66,6 +69,36 @@ impl ApplyRegistry {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct DriverInstallTarget {
+    pub device: DeviceId,
+    pub installed: DriverVersion,
+}
+
+#[derive(Debug, Clone)]
+pub struct DriverInstallCandidate {
+    pub release: DriverRelease,
+    pub targets: Vec<DriverInstallTarget>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DriverRebootEvidence {
+    pub device: DeviceId,
+    pub expected_version: DriverVersion,
+    pub baseline_version: DriverVersion,
+    pub observed_after_install: Option<DriverVersion>,
+    pub expected_size_bytes: u64,
+    pub downloaded_bytes: u64,
+    pub installer_sha256: String,
+    pub signer_subject: Option<String>,
+    pub signer_status: String,
+    #[serde(default)]
+    pub revocation_bypassed: bool,
+    pub installer_exit_code: i32,
+    pub recorded_at: String,
+    pub boot_time_secs: u64,
+}
+
 pub struct AppState {
     pub catalog: Arc<RwLock<Option<Catalog>>>,
     pub catalog_provenance: Arc<RwLock<Option<CatalogProvenance>>>,
@@ -77,6 +110,9 @@ pub struct AppState {
     pub settings: Arc<RwLock<AppSettings>>,
     pub paths: Arc<RwLock<Option<AppPaths>>>,
     pub system_info: Arc<RwLock<Option<SystemInfo>>>,
+    pub driver_install_candidates: Arc<RwLock<HashMap<String, DriverInstallCandidate>>>,
+    pub driver_reboot_pending: Arc<RwLock<HashMap<String, DriverRebootEvidence>>>,
+    pub driver_reboot_state_loaded: Arc<Mutex<bool>>,
     /// Coordinator for `ensure_system_info` so two concurrent callers don't both
     /// pay the WMI/DXGI collection cost. Holding the lock guarantees only one
     /// `collect` runs at a time; the cached value behind `system_info` is the
@@ -87,6 +123,25 @@ pub struct AppState {
     pub http_art: reqwest::Client,
     pub download_cache: Arc<DownloadCache>,
     pub apply_registry: Arc<ApplyRegistry>,
+    pub authoritative_state: Arc<dlssync_application::state::StateCoordinator>,
+    event_handle: Arc<RwLock<Option<tauri::AppHandle>>>,
+}
+
+struct TauriStatePublisher {
+    handle: Arc<RwLock<Option<tauri::AppHandle>>>,
+}
+
+impl dlssync_application::ports::StateEventPublisher for TauriStatePublisher {
+    fn publish(&self, event: &dlssync_contracts::StateEvent) -> Result<(), String> {
+        let handle = self
+            .handle
+            .read()
+            .clone()
+            .ok_or_else(|| "Tauri application handle is not installed".to_string())?;
+        handle
+            .emit("state:event", event)
+            .map_err(|error| error.to_string())
+    }
 }
 
 impl AppState {
@@ -119,6 +174,13 @@ impl AppState {
             .redirect(reqwest::redirect::Policy::limited(HTTP_ART_REDIRECTS))
             .build()
             .expect("reqwest art client");
+        let event_handle = Arc::new(RwLock::new(None));
+        let authoritative_state = Arc::new(dlssync_application::state::StateCoordinator::new(
+            Arc::new(TauriStatePublisher {
+                handle: event_handle.clone(),
+            }),
+            Arc::new(dlssync_application::ports::SystemStateClock),
+        ));
         Self {
             catalog: Arc::new(RwLock::new(None)),
             catalog_provenance: Arc::new(RwLock::new(None)),
@@ -130,13 +192,22 @@ impl AppState {
             settings: Arc::new(RwLock::new(AppSettings::default())),
             paths: Arc::new(RwLock::new(None)),
             system_info: Arc::new(RwLock::new(None)),
+            driver_install_candidates: Arc::new(RwLock::new(HashMap::new())),
+            driver_reboot_pending: Arc::new(RwLock::new(HashMap::new())),
+            driver_reboot_state_loaded: Arc::new(Mutex::new(false)),
             collect_system_info_lock: Arc::new(tokio::sync::Mutex::new(())),
             http_catalog,
             http_downloads,
             http_art,
             download_cache: Arc::new(DownloadCache::new()),
             apply_registry: Arc::new(ApplyRegistry::default()),
+            authoritative_state,
+            event_handle,
         }
+    }
+
+    pub fn install_event_handle(&self, handle: tauri::AppHandle) {
+        *self.event_handle.write() = Some(handle);
     }
 }
 

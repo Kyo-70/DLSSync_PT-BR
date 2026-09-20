@@ -154,7 +154,11 @@ fn parse_download_info(info: &serde_json::Value) -> Option<DriverRelease> {
         },
         display_version,
         is_beta,
-        download_url: info["DownloadURL"].as_str().unwrap_or_default().to_string(),
+        download_url: info["DownloadURL"]
+            .as_str()
+            .map(str::trim)
+            .filter(|url| !url.is_empty())
+            .map(str::to_string),
         size_bytes: parse_size(info["DownloadURLFileSize"].as_str().unwrap_or_default()),
         signature_subject: c::PUBLISHER_SUBJECT.to_string(),
         released_at: parse_release_date(info["ReleaseDateTime"].as_str().unwrap_or_default()),
@@ -510,7 +514,10 @@ mod tests {
         let release = parse_lookup_response(body).unwrap().expect("release");
         assert_eq!(release.version.display, "572.16");
         assert_eq!(release.version.packed, 57216);
-        assert!(release.download_url.ends_with("dch-whql.exe"));
+        assert!(release
+            .download_url
+            .as_deref()
+            .is_some_and(|url| url.ends_with("dch-whql.exe")));
         assert!(release.size_bytes > 800 * 1024 * 1024);
         assert_eq!(release.signature_subject, "NVIDIA Corporation");
         assert!(release.released_at.is_some());

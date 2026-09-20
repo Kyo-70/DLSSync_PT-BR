@@ -1,10 +1,11 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { tick } from "svelte";
-import { render } from "@testing-library/svelte";
+import { render, fireEvent } from "@testing-library/svelte";
+import { get } from "svelte/store";
 import CommandPalette from "@/components/CommandPalette.svelte";
-import { commandPaletteOpen } from "@/lib/stores";
+import { commandPaletteOpen, games, drawerGameId } from "@/lib/stores";
 
-afterEach(() => commandPaletteOpen.set(false));
+afterEach(() => { commandPaletteOpen.set(false); games.set([]); drawerGameId.set(null); });
 
 function press(el: Element, key: string): void {
   el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
@@ -17,16 +18,29 @@ describe("CommandPalette popup (rendered)", () => {
     expect(container.querySelector(".palette")).toBeNull();
   });
 
-  it("renders the boxed search field, an Esc chip and the category chips", async () => {
+  it("renders the combined search field and an accessible close control", async () => {
     commandPaletteOpen.set(true);
     const { container } = render(CommandPalette);
     await tick();
     const input = container.querySelector(".palette-search input") as HTMLInputElement;
     expect(input).not.toBeNull();
-    expect(input.getAttribute("placeholder")).toContain("Search commands");
-    expect(container.querySelector(".palette-search-kbd")?.textContent).toContain("Esc");
-    const cats = Array.from(container.querySelectorAll(".category")).map((c) => c.textContent?.trim());
-    expect(cats).toEqual(expect.arrayContaining(["All", "Navigate", "Action", "Settings"]));
+    expect(input.getAttribute("placeholder")).toBe("Search games and commands");
+    expect(container.querySelector(".palette-close")?.getAttribute("aria-label")).toBe("Close");
+    expect(container.querySelector(".palette-categories")).toBeNull();
+  });
+
+  it("finds a real inventory entry and opens that exact game", async () => {
+    games.set([{ id: "epic-test", name: "inZOI ModKit", launcher: "epic", install_dir: "C:/Games/ModKit" } as import("@/lib/api").DetectedGame]);
+    commandPaletteOpen.set(true);
+    const { container } = render(CommandPalette);
+    await tick();
+    await fireEvent.input(container.querySelector(".palette-search input")!, { target: { value: "ModKit" } });
+    const result = container.querySelector('.result-group[data-cat="games"] .result')!;
+    expect(result.textContent).toContain("inZOI ModKit");
+    expect(result.textContent).toContain("Epic Games");
+    await fireEvent.click(result);
+    expect(get(drawerGameId)).toBe("epic-test");
+    expect(get(commandPaletteOpen)).toBe(false);
   });
 
   it("groups commands under section headers, each row with a category-tinted icon", async () => {

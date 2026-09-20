@@ -8,8 +8,9 @@
 use async_trait::async_trait;
 use driver_catalog::sources::DriverSource;
 use driver_catalog::{
-    DeviceClass, DeviceId, DriverError, DriverRegistry, DriverRelease, DriverVendor, DriverVersion,
-    OsFamily, OsTarget, ReleaseChannel, UpdateStatus,
+    DeviceClass, DeviceId, DriverError, DriverHealth, DriverRegistry, DriverRelease,
+    DriverUpdateAction, DriverVendor, DriverVersion, OsFamily, OsTarget, ReleaseChannel,
+    UpdateStatus,
 };
 
 struct FakeSource {
@@ -54,7 +55,7 @@ fn release(vendor: DriverVendor, version: DriverVersion) -> DriverRelease {
         channel: ReleaseChannel::Stable,
         display_version: None,
         is_beta: false,
-        download_url: "https://vendor/driver.exe".into(),
+        download_url: Some("https://vendor/driver.exe".into()),
         size_bytes: 1,
         signature_subject: "subject".into(),
         released_at: None,
@@ -133,6 +134,15 @@ async fn nvidia_pipeline_reports_update_available_when_latest_is_newer() {
         .await
         .expect("resolve");
     assert_eq!(report.status, UpdateStatus::UpdateAvailable);
+    assert_eq!(report.health, DriverHealth::Outdated);
+    assert_eq!(
+        report.action,
+        DriverUpdateAction::Install {
+            download_url: "https://vendor/driver.exe".into(),
+            size_bytes: 1,
+        }
+    );
+    assert_eq!(report.reboot_pending, None);
     assert_eq!(report.latest.unwrap().version.display, "610.47");
 }
 
@@ -149,6 +159,8 @@ async fn amd_pipeline_reports_up_to_date_when_installed_matches_latest() {
         .await
         .expect("resolve");
     assert_eq!(report.status, UpdateStatus::UpToDate);
+    assert_eq!(report.health, DriverHealth::Current);
+    assert_eq!(report.action, DriverUpdateAction::None { help_url: None });
 }
 
 #[tokio::test]
@@ -164,6 +176,11 @@ async fn intel_pipeline_is_unknown_when_installed_version_is_unparseable() {
         .await
         .expect("resolve");
     assert_eq!(report.status, UpdateStatus::Unknown);
+    assert_eq!(report.health, DriverHealth::Unknown);
+    assert!(matches!(
+        report.action,
+        DriverUpdateAction::None { help_url: Some(_) }
+    ));
     assert!(
         report.latest.is_some(),
         "a candidate release is still surfaced"
@@ -183,7 +200,32 @@ async fn unsupported_vendor_resolves_without_a_source() {
         .await
         .expect("resolve");
     assert_eq!(report.status, UpdateStatus::Unsupported);
+    assert_eq!(report.health, DriverHealth::Unsupported);
+    assert!(matches!(
+        report.action,
+        DriverUpdateAction::None { help_url: Some(_) }
+    ));
     assert!(report.latest.is_none());
+}
+
+#[tokio::test]
+async fn report_preserves_backend_owned_reboot_pending_version() {
+    let client = reqwest::Client::new();
+    let report = registry()
+        .resolve_with_reboot_pending(
+            &client,
+            &device(
+                DriverVendor::Nvidia,
+                0x2705,
+                "NVIDIA GeForce RTX 4070 Ti SUPER",
+            ),
+            &os(),
+            DriverVersion::nvidia("591.74"),
+            Some("610.47".into()),
+        )
+        .await
+        .expect("resolve");
+    assert_eq!(report.reboot_pending.as_deref(), Some("610.47"));
 }
 
 #[tokio::test]

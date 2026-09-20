@@ -9,6 +9,8 @@ specta.workspace = true
 serde = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 tracing.workspace = true
+sha2.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
@@ -22,4 +24,5 @@ windows = { workspace = true, features = [
     "Win32_System_Variant",
     "Win32_System_UpdateAgent",
     "Win32_System_Restore",
+    "Win32_System_SystemInformation",
 ] }

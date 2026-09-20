@@ -4,7 +4,7 @@
   import {
     currentView,
     settings,
-    persistSettings,
+    persistUiPreferences,
     sidebarCounts,
     languageMenuOpen,
     drawerGameId,
@@ -58,9 +58,14 @@
   function switchView(id: string): void {
     drawerGameId.set(null);
     currentView.set(id);
+    compactExpanded = false;
   }
 
-  let collapsed = $derived($settings?.ui_prefs.sidebar_collapsed ?? false);
+  let viewportWidth = $state(typeof window === "undefined" ? 1200 : window.innerWidth);
+  let compactExpanded = $state(false);
+  let compactViewport = $derived(viewportWidth <= 960);
+  let collapsed = $derived(compactViewport ? !compactExpanded : ($settings?.ui_prefs.sidebar_collapsed ?? false));
+  $effect(() => { if (!compactViewport) compactExpanded = false; });
 
   function counterValue(item: NavItem): number {
     if (!item.counterKey) return 0;
@@ -76,15 +81,18 @@
   }
 
   async function toggleCollapsed(): Promise<void> {
+    if (compactViewport) { compactExpanded = !compactExpanded; return; }
     if (!$settings) return;
-    await persistSettings({
-      ...$settings,
-      ui_prefs: { ...$settings.ui_prefs, sidebar_collapsed: !collapsed },
-    });
+    await persistUiPreferences({ sidebar_collapsed: !collapsed });
   }
 </script>
 
-<aside class="sidebar" class:collapsed>
+<svelte:window bind:innerWidth={viewportWidth} onkeydown={(event) => { if (event.key === "Escape") compactExpanded = false; }} />
+
+{#if compactViewport && compactExpanded}
+  <button class="sidebar-shade" aria-label={$t("component.chrome.sidebar.collapse")} onclick={() => (compactExpanded = false)}></button>
+{/if}
+<aside class="sidebar" class:collapsed class:compact-overlay={compactViewport && compactExpanded}>
   <div class="sidebar-brand" data-tauri-drag-region>
     <span class="brand-pill" aria-hidden="true">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -102,7 +110,7 @@
 
   {#snippet navItem(item: NavItem, staggerIndex: number)}
     {@const count = counterValue(item)}
-    <button class="nav-pill" class:active={$currentView === item.id || (item.id === "backups" && $currentView === "journal")} data-testid="nav-{item.id}" title={$t("view." + item.id + ".title")} onclick={() => switchView(item.id)}>
+    <button class="nav-pill" class:active={$currentView === item.id || (item.id === "backups" && $currentView === "journal")} data-testid="nav-{item.id}" aria-label={$t("view." + item.id + ".title")} title={$t("view." + item.id + ".title")} onclick={() => switchView(item.id)}>
       {#if item.icon === "library"}
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
       {:else if item.icon === "catalog"}
@@ -128,18 +136,18 @@
     </button>
   {/snippet}
 
-  {#snippet navGroup(items: NavItem[], labelKey: string, baseIndex: number)}
-    {#if !collapsed}<div class="nav-label">{$t(labelKey)}</div>{/if}
+  {#snippet navGroup(items: NavItem[], baseIndex: number)}
     {#each items as item, i (item.id)}
       {@render navItem(item, baseIndex + i)}
     {/each}
   {/snippet}
 
   <nav class="sidebar-nav">
-    {@render navGroup(libraryGroup, "component.chrome.sidebar.libraryGroup", 0)}
-    {@render navGroup(catalogGroup, "component.chrome.sidebar.catalogGroup", libraryGroup.length)}
-    {@render navGroup(historyGroup, "component.chrome.sidebar.historyGroup", libraryGroup.length + catalogGroup.length)}
-    {@render navGroup(settingsSection, "component.chrome.sidebar.generalGroup", libraryGroup.length + catalogGroup.length + historyGroup.length)}
+    {@render navGroup(libraryGroup, 0)}
+    {@render navGroup(catalogGroup, libraryGroup.length)}
+    {@render navGroup(historyGroup, libraryGroup.length + catalogGroup.length)}
+    <div class="nav-divider" aria-hidden="true"></div>
+    {@render navGroup(settingsSection, libraryGroup.length + catalogGroup.length + historyGroup.length)}
   </nav>
 
   <button
@@ -173,6 +181,9 @@
 </aside>
 
 <style>
+  .sidebar-shade { position: fixed; inset: 0; z-index: 85; background: rgb(0 0 0 / 20%); }
+  .sidebar.compact-overlay { position: fixed; inset: 0 auto 0 0; width: var(--sidebar-width); z-index: 90; background: var(--bg-sidebar); box-shadow: var(--shadow-lg); }
+  .nav-divider { height: 1px; background: var(--border); margin: 16px 0; width: 100%; }
   .sidebar {
     position: relative;
     flex-shrink: 0;
@@ -186,7 +197,7 @@
     display: flex;
     flex-direction: column;
     z-index: 2;
-    transition: width var(--dur-normal) var(--ease);
+    transition: none;
   }
   @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .sidebar { background: var(--glass-fallback); }
@@ -231,15 +242,6 @@
     overflow-y: auto;
   }
   .sidebar.collapsed .sidebar-nav { padding: var(--space-4) var(--space-2); align-items: center; }
-  .nav-label {
-    font-size: var(--fs-2xs);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: var(--letter-wider);
-    color: var(--text-muted);
-    padding: var(--space-3) var(--space-3) var(--space-1);
-  }
-  .nav-label:not(:first-child) { margin-top: var(--space-2); }
   .nav-pill {
     position: relative;
     display: flex;

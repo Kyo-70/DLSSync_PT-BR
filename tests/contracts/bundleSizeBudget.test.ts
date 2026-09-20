@@ -9,6 +9,17 @@ const distDir = resolve(here, "../../frontend/dist/assets");
 
 const BUDGET_JS_GZIP_BYTES = 250 * 1024;
 const BUDGET_CSS_GZIP_BYTES = 75 * 1024;
+/** Views deferred by `frontend/src/lib/lazyViews.ts`: downloaded only when the user opens them. */
+const DEFERRED_VIEW_PREFIXES = [
+  "About-",
+  "Backups-",
+  "Catalog-",
+  "Drivers-",
+  "Journal-",
+  "Settings-",
+];
+/** Extended locales loaded on demand by `frontend/src/lib/i18n/index.ts`; `en` and `es` are inlined. */
+const DEFERRED_LOCALE_PREFIXES = ["pt-BR-", "de-", "fr-", "ja-", "ru-", "zh-CN-"];
 const KNOWN_CHUNK_PREFIXES = [
   "index-",
   "image-",
@@ -18,12 +29,10 @@ const KNOWN_CHUNK_PREFIXES = [
   "svelte-",
   "tauri-",
   "vendor-",
-  "pt-BR-",
-  "de-",
-  "fr-",
-  "ja-",
-  "ru-",
-  "zh-CN-",
+  "stores-",
+  "FlyoutShell-",
+  ...DEFERRED_VIEW_PREFIXES,
+  ...DEFERRED_LOCALE_PREFIXES,
 ];
 const STEALTH_CHUNK_MIN_BYTES = 1024;
 
@@ -99,6 +108,35 @@ describe.skipIf(!existsSync(distDir))(
         surprises,
         `unknown >${fmt(STEALTH_CHUNK_MIN_BYTES)} JS chunks: ${surprises.join(", ")} — add the prefix to KNOWN_CHUNK_PREFIXES intentionally after reviewing what's inside`,
       ).toEqual([]);
+    });
+
+    it("the startup JS payload stays under the budget for every shipped language", () => {
+      const jsFiles: string[] = readdirSync(distDir).filter((f: string) => f.endsWith(".js"));
+      const isDeferred = (name: string): boolean =>
+        [...DEFERRED_VIEW_PREFIXES, ...DEFERRED_LOCALE_PREFIXES].some((p) => name.startsWith(p));
+
+      const startupBytes = jsFiles
+        .filter((f: string) => !isDeferred(f))
+        .reduce((total: number, f: string) => total + gzipBytes(resolve(distDir, f)), 0);
+
+      const localeBytes = jsFiles
+        .filter((f: string) => DEFERRED_LOCALE_PREFIXES.some((p) => f.startsWith(p)))
+        .map((f: string) => ({ name: f, gzip: gzipBytes(resolve(distDir, f)) }))
+        .sort((a, b) => b.gzip - a.gzip);
+
+      expect(localeBytes.length, "no deferred locale chunk found; locale splitting regressed").toBe(
+        DEFERRED_LOCALE_PREFIXES.length,
+      );
+
+      // `en` and `es` are inlined, so their startup cost is already inside the non-deferred total.
+      // Every other language adds exactly one locale chunk, so the worst language sets the ceiling.
+      const worstLocale = localeBytes[0];
+      const worstStartup = startupBytes + worstLocale.gzip;
+
+      expect(
+        worstStartup,
+        `startup JS ${fmt(startupBytes)} + ${worstLocale.name} ${fmt(worstLocale.gzip)} = ${fmt(worstStartup)} gzip exceeds the ${fmt(BUDGET_JS_GZIP_BYTES)} budget`,
+      ).toBeLessThan(BUDGET_JS_GZIP_BYTES);
     });
   },
 );

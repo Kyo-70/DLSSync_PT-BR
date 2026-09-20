@@ -13,6 +13,40 @@ pub enum ScanError {
     Io(#[from] std::io::Error),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservationErrorCause {
+    Walk,
+    Hash,
+    PeParse,
+    AccessDenied,
+    Missing,
+    ChangedDuringRead,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservationStage {
+    Walk,
+    Hash,
+    PeParse,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct InstallObservationError {
+    pub path: PathBuf,
+    pub cause: ObservationErrorCause,
+    pub stage: ObservationStage,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct InstallObservation {
+    pub records: Vec<DllRecord>,
+    pub complete: bool,
+    pub errors: Vec<InstallObservationError>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum DllFamily {
@@ -76,24 +110,33 @@ impl DllFamily {
             DllFamily::SlDlssSr => "sl_dlss_sr",
             DllFamily::SlDlssFg => "sl_dlss_fg",
             DllFamily::SlDlssRr => "sl_dlss_rr",
-            DllFamily::Streamline
-            | DllFamily::StreamlineCommon
-            | DllFamily::StreamlinePcl
-            | DllFamily::StreamlineNis
-            | DllFamily::StreamlineDirectSr => "streamline",
+            // Package membership does not make these distinct DLL identities aliases.
+            DllFamily::Streamline => "streamline",
+            DllFamily::StreamlineCommon => "streamline_common",
+            DllFamily::StreamlinePcl => "streamline_pcl",
+            DllFamily::StreamlineNis => "streamline_nis",
+            DllFamily::StreamlineDirectSr => "streamline_direct_sr",
             DllFamily::Reflex => "reflex",
-            DllFamily::XessSr | DllFamily::XessSrDx11 => "xess_sr",
+            DllFamily::XessSr => "xess_sr",
+            DllFamily::XessSrDx11 => "xess_sr_dx11",
             DllFamily::XessFg => "xess_fg",
             DllFamily::Xell => "xell",
-            DllFamily::FsrUpscaler | DllFamily::FsrUpscalerVk | DllFamily::FsrLoader => {
-                "fsr_upscaler"
-            }
+            DllFamily::FsrUpscaler => "fsr_upscaler",
+            DllFamily::FsrUpscalerVk => "fsr_upscaler_vk",
+            DllFamily::FsrLoader => "fsr_loader",
             DllFamily::FsrFg => "fsr_fg",
             DllFamily::FsrDenoiser => "fsr_denoiser",
             DllFamily::DirectStorage => "direct_storage",
             DllFamily::DirectStorageCore => "direct_storage_core",
         }
     }
+}
+
+/// Resolve both catalog keys and scanner-family keys through the same vendor table.
+pub fn family_vendor(key: &str) -> Option<&'static str> {
+    DllFamily::deserialize(serde::de::value::StrDeserializer::<serde::de::value::Error>::new(key))
+        .ok()
+        .map(|family| family.vendor())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -238,6 +281,14 @@ static KNOWN_DLLS: Lazy<Vec<(&'static str, DllFamily)>> = Lazy::new(|| {
     ]
 });
 
+/// Recognize a catalog-owned DLL name, including files not yet present on disk.
+pub fn known_dll_family(filename: &str) -> Option<DllFamily> {
+    KNOWN_DLLS
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(filename))
+        .map(|(_, family)| *family)
+}
+
 static SKIP_DIRS: Lazy<HashSet<&'static str>> = Lazy::new(|| {
     [
         "$Recycle.Bin",
@@ -255,8 +306,9 @@ static SKIP_DIRS: Lazy<HashSet<&'static str>> = Lazy::new(|| {
     .collect()
 });
 
-pub fn scan_install(root: &Path) -> Result<Vec<DllRecord>, ScanError> {
+pub fn observe_install(root: &Path) -> InstallObservation {
     let mut records = Vec::new();
+    let mut errors = Vec::new();
     let walker = jwalk::WalkDir::new(root)
         .skip_hidden(false)
         .process_read_dir(|_, _, _, children| {
@@ -273,7 +325,23 @@ pub fn scan_install(root: &Path) -> Result<Vec<DllRecord>, ScanError> {
     for entry in walker {
         let entry = match entry {
             Ok(e) => e,
-            Err(_) => continue,
+            Err(error) => {
+                let path = error
+                    .path()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| root.to_path_buf());
+                let kind = error
+                    .io_error()
+                    .map(std::io::Error::kind)
+                    .unwrap_or(std::io::ErrorKind::Other);
+                errors.push(observation_io_error(
+                    path,
+                    ObservationStage::Walk,
+                    kind,
+                    error.to_string(),
+                ));
+                continue;
+            }
         };
         if !entry.file_type().is_file() {
             continue;
@@ -286,12 +354,8 @@ pub fn scan_install(root: &Path) -> Result<Vec<DllRecord>, ScanError> {
         for (known, family) in KNOWN_DLLS.iter() {
             if lname == *known {
                 let path = entry.path();
-                let (current_version, file_description) = match pe_version::read_dll_version(&path)
-                {
-                    Ok(v) => (Some(v.file_version), v.file_description),
-                    Err(_) => (None, None),
-                };
-                let sha256 = hash_file_capped(&path).ok().flatten();
+                let (current_version, file_description, sha256) =
+                    observe_known_dll(&path, &mut errors);
                 records.push(DllRecord {
                     family: *family,
                     path,
@@ -303,7 +367,168 @@ pub fn scan_install(root: &Path) -> Result<Vec<DllRecord>, ScanError> {
             }
         }
     }
-    Ok(records)
+    InstallObservation {
+        complete: errors.is_empty(),
+        records,
+        errors,
+    }
+}
+
+pub fn scan_install(root: &Path) -> Result<Vec<DllRecord>, ScanError> {
+    Ok(observe_install(root).records)
+}
+
+fn observe_known_dll(
+    path: &Path,
+    errors: &mut Vec<InstallObservationError>,
+) -> (Option<String>, Option<String>, Option<String>) {
+    let before = match std::fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            errors.push(observation_io_error(
+                path.to_path_buf(),
+                ObservationStage::Hash,
+                error.kind(),
+                error.to_string(),
+            ));
+            return (None, None, None);
+        }
+    };
+    if before.len() > SHA_SKIP_THRESHOLD_BYTES {
+        errors.push(InstallObservationError {
+            path: path.to_path_buf(),
+            cause: ObservationErrorCause::Hash,
+            stage: ObservationStage::Hash,
+            message: format!(
+                "file is {} bytes; hashing is capped at {} bytes",
+                before.len(),
+                SHA_SKIP_THRESHOLD_BYTES
+            ),
+        });
+        return observe_version_without_hash(path, errors);
+    }
+
+    let mut bytes = Vec::with_capacity(before.len() as usize);
+    let read_result = std::fs::File::open(path).and_then(|mut file| file.read_to_end(&mut bytes));
+    if let Err(error) = read_result {
+        errors.push(observation_io_error(
+            path.to_path_buf(),
+            ObservationStage::Hash,
+            error.kind(),
+            error.to_string(),
+        ));
+        return (None, None, None);
+    }
+
+    let after = match std::fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            errors.push(observation_io_error(
+                path.to_path_buf(),
+                ObservationStage::Hash,
+                error.kind(),
+                error.to_string(),
+            ));
+            return (None, None, None);
+        }
+    };
+    if file_changed_during_read(&before, &after, bytes.len()) {
+        errors.push(InstallObservationError {
+            path: path.to_path_buf(),
+            cause: ObservationErrorCause::ChangedDuringRead,
+            stage: ObservationStage::Hash,
+            message: "file metadata changed while it was being read".into(),
+        });
+        return (None, None, None);
+    }
+
+    let sha256 = Some(hex_sha256(&bytes));
+    match pe_version::parse_bytes(&bytes) {
+        Ok(version) => (Some(version.file_version), version.file_description, sha256),
+        Err(error) => {
+            errors.push(InstallObservationError {
+                path: path.to_path_buf(),
+                cause: ObservationErrorCause::PeParse,
+                stage: ObservationStage::PeParse,
+                message: error.to_string(),
+            });
+            (None, None, sha256)
+        }
+    }
+}
+
+fn observe_version_without_hash(
+    path: &Path,
+    errors: &mut Vec<InstallObservationError>,
+) -> (Option<String>, Option<String>, Option<String>) {
+    match pe_version::read_dll_version(path) {
+        Ok(version) => (Some(version.file_version), version.file_description, None),
+        Err(pe_version::VersionError::Io(error)) => {
+            errors.push(observation_io_error(
+                path.to_path_buf(),
+                ObservationStage::PeParse,
+                error.kind(),
+                error.to_string(),
+            ));
+            (None, None, None)
+        }
+        Err(error) => {
+            errors.push(InstallObservationError {
+                path: path.to_path_buf(),
+                cause: ObservationErrorCause::PeParse,
+                stage: ObservationStage::PeParse,
+                message: error.to_string(),
+            });
+            (None, None, None)
+        }
+    }
+}
+
+fn file_changed_during_read(
+    before: &std::fs::Metadata,
+    after: &std::fs::Metadata,
+    bytes_read: usize,
+) -> bool {
+    before.len() != after.len()
+        || after.len() != bytes_read as u64
+        || before.modified().ok() != after.modified().ok()
+}
+
+fn observation_io_error(
+    path: PathBuf,
+    stage: ObservationStage,
+    kind: std::io::ErrorKind,
+    message: String,
+) -> InstallObservationError {
+    InstallObservationError {
+        path,
+        cause: classify_observation_io(stage, kind),
+        stage,
+        message,
+    }
+}
+
+fn classify_observation_io(
+    stage: ObservationStage,
+    kind: std::io::ErrorKind,
+) -> ObservationErrorCause {
+    match kind {
+        std::io::ErrorKind::PermissionDenied => ObservationErrorCause::AccessDenied,
+        std::io::ErrorKind::NotFound => ObservationErrorCause::Missing,
+        _ if stage == ObservationStage::Walk => ObservationErrorCause::Walk,
+        _ if stage == ObservationStage::PeParse => ObservationErrorCause::PeParse,
+        _ => ObservationErrorCause::Hash,
+    }
+}
+
+fn hex_sha256(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut out = String::with_capacity(64);
+    for byte in digest {
+        use std::fmt::Write as _;
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
 }
 
 pub fn hash_file_capped(path: &Path) -> std::io::Result<Option<String>> {
@@ -333,6 +558,90 @@ pub fn hash_file_capped(path: &Path) -> std::io::Result<Option<String>> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn phase4_partial_observation_keeps_records_and_distinguishes_all_causes() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("nvngx_dlss.dll"), b"not a PE").unwrap();
+
+        let observation = observe_install(root.path());
+        assert_eq!(observation.records.len(), 1);
+        assert!(!observation.complete);
+        assert!(observation
+            .errors
+            .iter()
+            .any(|error| error.cause == ObservationErrorCause::PeParse));
+
+        let causes = [
+            classify_observation_io(ObservationStage::Walk, std::io::ErrorKind::Other),
+            classify_observation_io(ObservationStage::Hash, std::io::ErrorKind::Other),
+            ObservationErrorCause::PeParse,
+            classify_observation_io(ObservationStage::Hash, std::io::ErrorKind::PermissionDenied),
+            classify_observation_io(ObservationStage::Hash, std::io::ErrorKind::NotFound),
+            ObservationErrorCause::ChangedDuringRead,
+        ];
+        assert_eq!(
+            causes,
+            [
+                ObservationErrorCause::Walk,
+                ObservationErrorCause::Hash,
+                ObservationErrorCause::PeParse,
+                ObservationErrorCause::AccessDenied,
+                ObservationErrorCause::Missing,
+                ObservationErrorCause::ChangedDuringRead,
+            ]
+        );
+
+        let metadata = std::fs::metadata(root.path().join("nvngx_dlss.dll")).unwrap();
+        assert!(!file_changed_during_read(
+            &metadata,
+            &metadata,
+            metadata.len() as usize
+        ));
+        assert!(file_changed_during_read(
+            &metadata,
+            &metadata,
+            metadata.len() as usize + 1
+        ));
+    }
+
+    #[test]
+    fn phase4_scan_install_compatibility_matches_observation_records() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("nvngx_dlss.dll"), b"not a PE").unwrap();
+        std::fs::write(root.path().join("ordinary.txt"), b"ignored").unwrap();
+
+        let legacy = scan_install(root.path()).unwrap();
+        let observation = observe_install(root.path());
+        assert_eq!(legacy.len(), 1);
+        assert_eq!(legacy[0].family, DllFamily::DlssSr);
+        assert!(legacy[0].current_version.is_none());
+        assert!(legacy[0].file_description.is_none());
+        assert!(legacy[0].sha256.is_some());
+        assert_eq!(legacy.len(), observation.records.len());
+        assert_eq!(legacy[0].family, observation.records[0].family);
+        assert_eq!(legacy[0].path, observation.records[0].path);
+        assert_eq!(
+            legacy[0].current_version,
+            observation.records[0].current_version
+        );
+        assert_eq!(
+            legacy[0].file_description,
+            observation.records[0].file_description
+        );
+        assert_eq!(legacy[0].sha256, observation.records[0].sha256);
+
+        let missing = root.path().join("missing-root");
+        let legacy_missing = scan_install(&missing).unwrap();
+        let observed_missing = observe_install(&missing);
+        assert!(legacy_missing.is_empty());
+        assert!(observed_missing.records.is_empty());
+        assert!(!observed_missing.complete);
+        assert!(observed_missing
+            .errors
+            .iter()
+            .any(|error| error.cause == ObservationErrorCause::Missing));
+    }
 
     #[test]
     fn hash_file_capped_returns_hex_for_normal_file() {

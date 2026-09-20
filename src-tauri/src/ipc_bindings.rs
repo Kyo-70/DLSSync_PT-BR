@@ -13,6 +13,9 @@ pub fn export_typescript_bindings() {
         .register::<system_drivers::SystemDriverInstallProgress>()
         .register::<ComponentState>()
         .register::<OperationEvent>()
+        .register::<StateEvent>()
+        .register::<AuthoritativeSnapshot>()
+        .register::<StateWatermark>()
         .register::<DriverInstallPlan>()
         .register::<PlannedChange>()
         .register::<ApplyErrorClass>()
@@ -63,8 +66,20 @@ pub fn export_typescript_bindings() {
         crate::commands::catalog::list_releases,
         crate::commands::journal::journal_list,
         crate::commands::journal::journal_export,
+        // Recipe commands live at `commands/recipes.rs` but are mounted as `recipe_commands`
+        // in `lib.rs`, so the collector must use that path to avoid a second module definition.
+        crate::local_recipe_commands::list_owned_recipes,
+        crate::local_recipe_commands::preview_local_recipe,
+        crate::local_recipe_commands::apply_local_recipe,
+        crate::local_recipe_commands::configure_local_recipe,
+        crate::local_recipe_commands::remove_owned_recipe,
+        crate::recipe_commands::list_known_recipes,
+        crate::recipe_commands::validate_recipe,
+        crate::recipe_commands::preview_recipe_conflicts,
+        crate::recipe_commands::remove_recipe,
         crate::commands::apply::apply_update,
         crate::commands::apply::apply_update_batch,
+        crate::commands::apply::preview_update_plan,
         crate::commands::apply::cancel_apply,
         crate::commands::apply::cancel_all_applies,
         crate::commands::streamline_set::apply_streamline_set,
@@ -96,6 +111,7 @@ pub fn export_typescript_bindings() {
         crate::commands::drivers::list_driver_history,
         crate::commands::drivers::install_driver,
         crate::commands::system_drivers::scan_system_drivers,
+        crate::commands::system_drivers::get_system_devices,
         crate::commands::system_drivers::install_system_driver,
         crate::commands::system_drivers::restore_system_driver,
         crate::commands::system_drivers::system_driver_versions,
@@ -108,6 +124,8 @@ pub fn export_typescript_bindings() {
         crate::commands::dlss_profile::find_game_executable,
         crate::commands::runtime::runtime_mode,
         crate::commands::runtime::open_devtools,
+        crate::commands::runtime::state_snapshot,
+        crate::commands::runtime::state_watermark,
         crate::commands::background::tray_set_pending,
         crate::commands::ui_prefs::set_efficiency_mode,
         crate::commands::ui_prefs::hide_main_window,

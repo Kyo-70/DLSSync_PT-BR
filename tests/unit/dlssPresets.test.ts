@@ -7,11 +7,9 @@ import {
   FG_COUNT_OPTIONS,
   emptyDlssConfig,
   presetLabel,
-  dlss4Available,
   dynamicMfgAvailable,
   dlss5Available,
   hasActiveOverride,
-  DLSS4_MIN_DRIVER_PACKED,
   DYNAMIC_MFG_MIN_DRIVER_PACKED,
   DLSS5_MIN_DRIVER_PACKED,
 } from "@/lib/dlss";
@@ -41,12 +39,6 @@ describe("dlss override option tables", () => {
 });
 
 describe("driver-version gating", () => {
-  it("requires 572.16 for DLSS 4 overrides", () => {
-    expect(dlss4Available(DLSS4_MIN_DRIVER_PACKED)).toBe(true);
-    expect(dlss4Available(DLSS4_MIN_DRIVER_PACKED - 1)).toBe(false);
-    expect(dlss4Available(59174)).toBe(true);
-  });
-
   it("requires 595.97 for dynamic multi frame generation", () => {
     expect(DYNAMIC_MFG_MIN_DRIVER_PACKED).toBe(59597);
     expect(dynamicMfgAvailable(DYNAMIC_MFG_MIN_DRIVER_PACKED)).toBe(true);

@@ -3,8 +3,8 @@ import path from "node:path";
 import process from "node:process";
 
 const root = process.cwd();
-const generatedConfigPath = path.join(root, "target", "nexus", "tauri.conf.json");
-const generatedCapabilityPath = path.join(root, "target", "nexus", "default.capability.json");
+const generatedConfigPath = path.join(root, "target", "channels", "nexus", "config", "tauri.conf.json");
+const generatedCapabilityPath = path.join(root, "target", "channels", "nexus", "config", "default.capability.json");
 const frontendEnvPath = path.join(root, "frontend", ".env.nexus");
 const libPath = path.join(root, "src-tauri", "src", "lib.rs");
 
@@ -14,13 +14,18 @@ function assert(condition, message) {
 
 const configText = await readFile(generatedConfigPath, "utf8");
 const config = JSON.parse(configText);
-assert(config.plugins?.updater?.active === false, "Nexus config must disable plugins.updater.active");
-assert(Array.isArray(config.plugins.updater.endpoints) && config.plugins.updater.endpoints.length === 0, "Nexus config must remove updater endpoints");
+assert(config.productName === "NexusBuild-DLSSync", "Nexus config must use the NexusBuild-DLSSync product identity");
+assert(config.plugins?.updater === null, "Nexus overlay must explicitly delete the Standard updater configuration");
 assert(!configText.includes("latest.json"), "Nexus config must not contain latest.json");
+assert(config.build?.frontendDist === "../frontend/dist-nexus", "Nexus frontend output must be isolated in dist-nexus");
 
 const capabilityText = await readFile(generatedCapabilityPath, "utf8");
 const capability = JSON.parse(capabilityText);
 assert(!capability.permissions.includes("updater:default"), "Nexus capability must remove updater:default");
+assert(
+  JSON.stringify(config.app?.security?.capabilities) === JSON.stringify([capability]),
+  "Nexus config must select the derived updater-free capability inline",
+);
 
 const frontendEnv = await readFile(frontendEnvPath, "utf8");
 assert(frontendEnv.includes("VITE_DLSSYNC_DISTRIBUTION=nexus"), "frontend/.env.nexus must set the nexus distribution");

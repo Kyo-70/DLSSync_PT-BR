@@ -1,8 +1,10 @@
 <script lang="ts">
+  import "./styles/layout.css";
   import { onMount } from "svelte";
   import { get } from "svelte/store";
   import { invokeCommand as transport, COMMANDS } from "./generated/bindings";
   import { fade, fly } from "svelte/transition";
+  import { portal } from "./actions/portal";
   import Sidebar from "./components/Sidebar.svelte";
   import TopBar from "./components/TopBar.svelte";
   import Toast from "./components/Toast.svelte";
@@ -18,18 +20,21 @@
   import UpdatePlanModal from "./widgets/UpdatePlanModal.svelte";
   import Library from "./views/Library.svelte";
   import GameDetailDrawer from "./components/GameDetailDrawer.svelte";
-  import Catalog from "./views/Catalog.svelte";
-  import Backups from "./views/Backups.svelte";
-  import Drivers from "./views/Drivers.svelte";
-  import Settings from "./views/Settings.svelte";
-  import About from "./views/About.svelte";
-  import Journal from "./views/Journal.svelte";
+  import {
+    loadAboutView,
+    loadBackupsView,
+    loadCatalogView,
+    loadDriversView,
+    loadJournalView,
+    loadSettingsView,
+  } from "./lib/lazyViews";
   import {
     currentView,
     drawerGameId,
     loadSettings,
     settings,
-    persistSettings,
+    persistUiPreferences,
+    ensureSystemInfo,
     bootstrapCatalog,
     requestThemeToggle,
     applyModalOpen,
@@ -39,6 +44,7 @@
   import { activeArt, clearActiveArt } from "./lib/artContext";
   import { coverAccent } from "./lib/coverAccent";
   import { installApplyEventListeners } from "./lib/applyEvents";
+  import { startStateSync } from "./lib/stateSync";
   import { installBackgroundScanListeners } from "./lib/backgroundScan";
   import {
     installDriverInstallListener,
@@ -59,14 +65,12 @@
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("dlssync-theme", theme);
     if ($settings) {
-      void persistSettings({
-        ...$settings,
-        ui_prefs: { ...$settings.ui_prefs, theme },
-      });
+      void persistUiPreferences({ theme });
     }
   }
 
-  let collapsed = $derived($settings?.ui_prefs.sidebar_collapsed ?? false);
+  let viewportWidth = $state(typeof window === "undefined" ? 1200 : window.innerWidth);
+  let collapsed = $derived(viewportWidth <= 960 || ($settings?.ui_prefs.sidebar_collapsed ?? false));
   let railGameId = $derived($currentView === "library" ? $drawerGameId : null);
 
   const navHistory = createAppNavigationHistory({
@@ -107,21 +111,30 @@
       } else {
         const guess = localeFromNavigator();
         await loadLocale(guess);
-        void persistSettings({
-          ...$settings,
-          ui_prefs: { ...$settings.ui_prefs, language: guess },
-        });
+        void persistUiPreferences({ language: guess });
       }
     }
     document.documentElement.setAttribute("data-theme", theme);
+    // Authoritative state first: the listener is installed and the snapshot is loaded before any
+    // dispatch, so a command response can never land on an uninitialised local view of state.
+    // A failure here leaves the legacy listeners working instead of blocking startup.
+    try {
+      await startStateSync();
+    } catch (error) {
+      console.error("authoritative state sync unavailable", error);
+    }
     void installApplyEventListeners();
     void installBackgroundScanListeners();
     void installDriverInstallListener();
     void installSystemDriverListener();
     void bootstrapCatalog();
+    void ensureSystemInfo().catch(() => undefined);
   });
 
   let lastThemeSignal = $state(0);
+  // Bumped by the retry control when a deferred view chunk fails to load, so the keyed block
+  // re-evaluates the loader instead of showing the previous rejection.
+  let viewAttempt = $state(0);
   $effect(() => {
     const n = $requestThemeToggle;
     if (n !== lastThemeSignal) {
@@ -168,7 +181,8 @@
   });
 </script>
 
-<div class="app-shell" class:rail-open={!!railGameId} class:sidebar-collapsed={collapsed}>
+<svelte:window bind:innerWidth={viewportWidth} />
+<div class="app-shell layout-refined" class:sidebar-collapsed={collapsed}>
   <div class="app-ambient" aria-hidden="true" style:--game-accent={gameAccent}>
     <div class="ambient-mesh"></div>
     {#if $activeArt}
@@ -182,33 +196,55 @@
   <Sidebar />
   <TopBar onToggleTheme={toggleTheme} {theme} />
   <div class="app-main">
-    <main class="main-content">
+    <main class="main-content" class:dialog-open={!!railGameId}>
       <div class="main-inner">
         <div class="main-primary">
-          {#if $currentView === "library"}
-            <div in:fly={{ y: 8, duration: motionDuration(200) }} data-testid="view-library"><Library /></div>
-          {:else if $currentView === "catalog"}
-            <div in:fly={{ y: 8, duration: motionDuration(200) }} data-testid="view-catalog"><Catalog /></div>
-          {:else if $currentView === "backups"}
-            <div in:fly={{ y: 8, duration: motionDuration(200) }} data-testid="view-backups"><Backups /></div>
-          {:else if $currentView === "journal"}
-            <div in:fly={{ y: 8, duration: motionDuration(200) }} data-testid="view-journal"><Journal /></div>
-          {:else if $currentView === "drivers"}
-            <div in:fly={{ y: 8, duration: motionDuration(200) }} data-testid="view-drivers"><Drivers /></div>
-          {:else if $currentView === "settings"}
-            <div in:fly={{ y: 8, duration: motionDuration(200) }} data-testid="view-settings">
-              <Settings onToggleTheme={toggleTheme} currentTheme={theme} />
+          {#snippet viewLoadFailed()}
+            <div class="view-load-failed" role="alert">
+              <button type="button" class="view-load-retry" onclick={() => (viewAttempt += 1)}>
+                {$t("common.retry")}
+              </button>
             </div>
-          {:else if $currentView === "about"}
-            <div in:fly={{ y: 8, duration: motionDuration(200) }} data-testid="view-about"><About /></div>
-          {/if}
+          {/snippet}
+          {#key viewAttempt}
+            {#if $currentView === "library"}
+              <div in:fly={{ y: 8, duration: motionDuration(200) }} data-testid="view-library"><Library /></div>
+            {:else if $currentView === "catalog"}
+              <div in:fly={{ y: 8, duration: motionDuration(200) }} data-testid="view-catalog">
+                {#await loadCatalogView() then Catalog}<Catalog />{:catch}{@render viewLoadFailed()}{/await}
+              </div>
+            {:else if $currentView === "backups"}
+              <div in:fly={{ y: 8, duration: motionDuration(200) }} data-testid="view-backups">
+                {#await loadBackupsView() then Backups}<Backups />{:catch}{@render viewLoadFailed()}{/await}
+              </div>
+            {:else if $currentView === "journal"}
+              <div in:fly={{ y: 8, duration: motionDuration(200) }} data-testid="view-journal">
+                {#await loadJournalView() then Journal}<Journal />{:catch}{@render viewLoadFailed()}{/await}
+              </div>
+            {:else if $currentView === "drivers"}
+              <div in:fly={{ y: 8, duration: motionDuration(200) }} data-testid="view-drivers">
+                {#await loadDriversView() then Drivers}<Drivers />{:catch}{@render viewLoadFailed()}{/await}
+              </div>
+            {:else if $currentView === "settings"}
+              <div in:fly={{ y: 8, duration: motionDuration(200) }} data-testid="view-settings">
+                {#await loadSettingsView() then Settings}<Settings
+                    onToggleTheme={toggleTheme}
+                    currentTheme={theme}
+                  />{:catch}{@render viewLoadFailed()}{/await}
+              </div>
+            {:else if $currentView === "about"}
+              <div in:fly={{ y: 8, duration: motionDuration(200) }} data-testid="view-about">
+                {#await loadAboutView() then About}<About />{:catch}{@render viewLoadFailed()}{/await}
+              </div>
+            {/if}
+          {/key}
         </div>
       </div>
     </main>
   </div>
   {#if railGameId}
-    <button class="rail-scrim" aria-label={$t("common.close")} onclick={() => drawerGameId.set(null)}></button>
-    <aside class="detail-rail" class:has-rail={!!railGameId} in:fly={{ x: 24, duration: motionDuration(220) }}>
+    <button class="rail-scrim" use:portal aria-label={$t("common.close")} onclick={() => drawerGameId.set(null)}></button>
+    <aside class="game-detail-dialog" use:portal in:fade={{ duration: motionDuration(160) }}>
       <GameDetailDrawer
         gameId={railGameId}
         onClose={() => drawerGameId.set(null)}
@@ -245,16 +281,10 @@
     grid-template-columns: var(--sidebar-width) minmax(0, 1fr) 0fr;
     overflow: hidden;
     background: transparent;
-    transition: grid-template-columns var(--dur-normal) var(--ease-out);
+    transition: none;
   }
   .app-shell.sidebar-collapsed {
     grid-template-columns: var(--sidebar-width-collapsed) minmax(0, 1fr) 0fr;
-  }
-  .app-shell.rail-open {
-    grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--drawer-width);
-  }
-  .app-shell.rail-open.sidebar-collapsed {
-    grid-template-columns: var(--sidebar-width-collapsed) minmax(0, 1fr) var(--drawer-width);
   }
   .app-shell :global(.sidebar) {
     grid-row: 1 / -1;
@@ -337,68 +367,55 @@
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    scrollbar-gutter: stable;
+    scrollbar-gutter: auto;
     background: transparent;
   }
+  @media (max-width: 960px) {
+    .app-shell, .app-shell.sidebar-collapsed { grid-template-columns: var(--sidebar-width-collapsed) minmax(0, 1fr) 0fr; }
+    }
   .main-inner {
     max-width: var(--content-max);
     padding: clamp(18px, 2.4vw, 36px) clamp(18px, 3.2vw, 48px) clamp(16px, 2vw, 28px);
     margin: 0 auto;
   }
   .main-primary { min-width: 0; }
+  .main-content.dialog-open { overflow: hidden; }
+  .view-load-failed {
+    display: flex;
+    justify-content: center;
+    padding: var(--space-6, 1.5rem);
+  }
+  .view-load-retry {
+    border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.24));
+    border-radius: var(--radius-md, 8px);
+    background: var(--bg-elevated, rgba(255, 255, 255, 0.06));
+    color: var(--text-primary, #fff);
+    padding: var(--space-2, 0.5rem) var(--space-4, 1rem);
+    font-size: var(--text-sm, 0.875rem);
+    cursor: pointer;
+  }
 
-  .detail-rail {
-    grid-row: 2;
-    grid-column: 3;
-    position: relative;
-    z-index: 2;
-    height: 100%;
-    width: var(--drawer-width);
+  .game-detail-dialog {
+    position: fixed;
+    inset: 50% auto auto 50%;
+    transform: translate(-50%, -50%);
+    width: min(960px, calc(100vw - 40px));
+    height: min(900px, calc(100dvh - 48px));
+    z-index: 121;
+    border-radius: 16px;
+    background: var(--bg-card);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, .38);
     overflow: hidden;
-    border-inline-start: 1px solid var(--border);
   }
-  .detail-rail :global(.detail-view) { width: 100%; height: 100%; }
-  .rail-scrim { display: none; }
-
-  /* Side-by-side (drawer as a real column) only when the window is wide enough to
-     keep the content column comfortable (~630px+). Below that the drawer overlays
-     instead of crushing the library — see the max-width rule below. */
-  @media (min-width: 1400px) {
-    .app-shell.rail-open {
-      grid-template-columns: var(--sidebar-width) minmax(var(--rail-width), 1fr) var(--drawer-width);
-    }
-    .app-shell.rail-open.sidebar-collapsed {
-      grid-template-columns: var(--sidebar-width-collapsed) minmax(var(--rail-width), 1fr) var(--drawer-width);
-    }
+  .rail-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 120;
+    border: none;
+    background: rgba(0, 0, 0, .62);
   }
-
-  @media (max-width: 1399px) {
-    .app-shell.rail-open,
-    .app-shell.rail-open.sidebar-collapsed {
-      grid-template-columns: var(--sidebar-width) minmax(0, 1fr) 0fr;
-    }
-    .app-shell.rail-open.sidebar-collapsed {
-      grid-template-columns: var(--sidebar-width-collapsed) minmax(0, 1fr) 0fr;
-    }
-    .rail-scrim {
-      display: block;
-      position: fixed;
-      inset: var(--topbar-height) 0 0 0;
-      z-index: 59;
-      background: var(--bg-overlay);
-      border: none;
-      cursor: pointer;
-    }
-    .detail-rail {
-      position: fixed;
-      top: var(--topbar-height);
-      right: 0;
-      bottom: 0;
-      width: min(95vw, var(--drawer-width));
-      height: auto;
-      z-index: 60;
-      border-inline-start: 1px solid var(--border);
-    }
+  @media (max-width: 600px) {
+    .game-detail-dialog { width: calc(100vw - 16px); height: calc(100dvh - 16px); border-radius: 12px; }
   }
 
   @media (max-width: 720px) {

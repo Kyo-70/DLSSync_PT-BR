@@ -76,22 +76,37 @@ impl DriverRegistry {
         os: &OsTarget,
         installed: DriverVersion,
     ) -> Result<DriverStatusReport, DriverError> {
+        self.resolve_with_reboot_pending(client, device, os, installed, None)
+            .await
+    }
+
+    pub async fn resolve_with_reboot_pending(
+        &self,
+        client: &reqwest::Client,
+        device: &DeviceId,
+        os: &OsTarget,
+        installed: DriverVersion,
+        reboot_pending: Option<String>,
+    ) -> Result<DriverStatusReport, DriverError> {
         let Some(source) = self.source_for(device) else {
-            return Ok(DriverStatusReport {
-                device: device.clone(),
+            let status = UpdateStatus::Unsupported;
+            return Ok(DriverStatusReport::new(
+                device.clone(),
                 installed,
-                latest: None,
-                status: UpdateStatus::Unsupported,
-            });
+                None,
+                status,
+                reboot_pending,
+            ));
         };
         let latest = source.latest(client, device, os).await?;
         let status = update_status(&installed, latest.as_ref());
-        Ok(DriverStatusReport {
-            device: device.clone(),
+        Ok(DriverStatusReport::new(
+            device.clone(),
             installed,
             latest,
             status,
-        })
+            reboot_pending,
+        ))
     }
 
     /// Historical compatible drivers for the device, newest-first, deduped by
@@ -185,7 +200,7 @@ mod tests {
             channel: ReleaseChannel::Stable,
             display_version: None,
             is_beta: false,
-            download_url: format!("https://x/{v}.exe"),
+            download_url: Some(format!("https://x/{v}.exe")),
             size_bytes: 0,
             signature_subject: "NVIDIA Corporation".into(),
             released_at: None,

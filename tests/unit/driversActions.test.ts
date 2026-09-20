@@ -29,6 +29,13 @@ function report(
         }
       : null,
     status,
+    health: status === "update_available" ? "outdated" : status === "up_to_date" ? "current" : status,
+    action: status !== "update_available" ? { kind: "none", help_url: null }
+      : opts.download ? { kind: "install", download_url: opts.download, size_bytes: 0 }
+      : (opts.notes === undefined ? "https://vendor.test/notes" : opts.notes)
+        ? { kind: "open_page", url: opts.notes ?? "https://vendor.test/notes" }
+        : { kind: "none", help_url: null },
+    reboot_pending: null,
   };
 }
 

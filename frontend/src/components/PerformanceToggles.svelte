@@ -55,10 +55,16 @@
         {$t("component.perf.efficiency.label")}
         <span class="chip chip-success small-pill">EcoQoS</span>
       </span>
-      <span class="perf-sub">{$t("component.perf.efficiency.sub")}</span>
+      <span class="perf-sub" id="perf-efficiency-sub">{$t("component.perf.efficiency.sub")}</span>
     </div>
     <label class="toggle">
-      <input type="checkbox" checked={efficiencyEnabled} onchange={(e) => toggleEfficiency((e.target as HTMLInputElement).checked)} />
+      <input
+        type="checkbox"
+        checked={efficiencyEnabled}
+        aria-label={$t("component.perf.efficiency.label")}
+        aria-describedby="perf-efficiency-sub"
+        onchange={(e) => toggleEfficiency((e.target as HTMLInputElement).checked)}
+      />
       <span class="toggle-slider"></span>
     </label>
   </div>

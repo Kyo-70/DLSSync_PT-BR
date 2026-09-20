@@ -7,9 +7,17 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 pub mod execution;
+pub mod planning;
+pub mod policy;
 pub mod ports;
+pub mod recipes;
+pub mod refresh;
 pub mod scan;
+pub mod state;
+pub mod transaction;
+pub mod watch;
 pub use execution::{apply_update_plan, rollback_update_plan, ExecutionError};
+pub use planning::{build_verified_update_plan, validate_update_plan};
 pub use scan::{plan_items, scan_installed_games, scan_path, ScanUseCaseError};
 
 const PRODUCT_CONFIG: &str = include_str!("../../../product.toml");

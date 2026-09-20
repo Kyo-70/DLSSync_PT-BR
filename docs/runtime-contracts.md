@@ -69,3 +69,9 @@ bytes; preserve `rollback_failed` and its recovery evidence.
 
 This document defines the target boundary. Migration progress and acceptance
 evidence belong to the local implementation plan, not to product claims.
+
+## Driver presentation evidence
+
+`DlssCapabilitySnapshot.profile_access` reports the installed driver API and exposed profile setting IDs. It authorizes profile persistence, not in-game compatibility. The conservative game/runtime assessment remains separate. Apply requests can identify changed setting IDs; unmodified settings stay untouched. A profile-success message requires fresh DRS readback.
+
+`get_system_devices` returns present PnP instances with hardware IDs, observed versions and problem codes. System-driver install outcomes keep the Windows package result separate from `active_version_verified`, `reboot_pending` and `unverified`. Driver snapshot restoration is recorded only after the device reports the saved version.

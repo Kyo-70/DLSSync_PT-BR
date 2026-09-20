@@ -1,11 +1,17 @@
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
+import { fileURLToPath } from "node:url";
 
 const host = process.env.TAURI_DEV_HOST;
 const webviewTarget = "chrome105";
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [svelte()],
+  resolve: {
+    alias: mode === "nexus" || process.env.VITE_DLSSYNC_DISTRIBUTION === "nexus"
+      ? [{ find: "@tauri-apps/plugin-updater", replacement: fileURLToPath(new URL("./src/lib/noAppUpdater.ts", import.meta.url)) }]
+      : [],
+  },
   clearScreen: false,
   server: {
     port: 1420,
@@ -32,4 +38,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

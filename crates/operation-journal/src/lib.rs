@@ -18,9 +18,63 @@ pub enum JournalError {
     InvalidRow(String),
 }
 
+impl JournalError {
+    pub fn is_missing_record(&self) -> bool {
+        matches!(self, Self::Sqlite(rusqlite::Error::QueryReturnedNoRows))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct JournalStore {
     db_path: PathBuf,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RecoveryMember {
+    pub target: PathBuf,
+    pub backup: PathBuf,
+    pub previous_sha256: String,
+    pub expected_sha256: String,
+    pub stage: dlssync_contracts::OperationStage,
+    #[serde(default)]
+    pub game_id: Option<String>,
+    #[serde(default)]
+    pub component_id: Option<String>,
+    #[serde(default)]
+    pub backup_id: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RecoveryRecord {
+    pub id: String,
+    pub plan_id: String,
+    pub actor: dlssync_contracts::OperationActor,
+    pub stage: dlssync_contracts::OperationStage,
+    pub members: Vec<RecoveryMember>,
+    pub error: Option<String>,
+    #[serde(default)]
+    pub source_store_id: Option<String>,
+    #[serde(default)]
+    pub operation_id: Option<String>,
+    #[serde(default)]
+    pub game_ids: Vec<String>,
+    #[serde(default)]
+    pub kind: RecoveryKind,
+    #[serde(default)]
+    pub started_at: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoveryKind {
+    #[default]
+    Apply,
+    ExplicitRestore,
+    RollbackOnError,
+    StartupRecovery,
+    Unknown,
 }
 
 impl JournalStore {
@@ -34,13 +88,32 @@ impl JournalStore {
     }
 
     fn connection(&self) -> Result<rusqlite::Connection, JournalError> {
-        Ok(rusqlite::Connection::open(&self.db_path)?)
+        let connection = rusqlite::Connection::open(&self.db_path)?;
+        connection.busy_timeout(std::time::Duration::from_secs(5))?;
+        connection.execute_batch("PRAGMA synchronous = FULL;")?;
+        Ok(connection)
     }
 
     fn ensure_schema(&self) -> Result<(), JournalError> {
         self.connection()?.execute_batch(
             "PRAGMA journal_mode = WAL;
-             CREATE TABLE IF NOT EXISTS operations (
+             CREATE TABLE IF NOT EXISTS file_transactions (
+                 id TEXT PRIMARY KEY,
+                 stage TEXT NOT NULL,
+                 payload TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS recovery_supersessions (
+                 id TEXT NOT NULL, target TEXT NOT NULL, decision TEXT NOT NULL,
+                 original_payload TEXT NOT NULL,
+                 PRIMARY KEY(id, target)
+             );
+             CREATE TABLE IF NOT EXISTS pending_targets (
+                 journal TEXT NOT NULL, id TEXT NOT NULL, target TEXT NOT NULL,
+                 decision TEXT,
+                 PRIMARY KEY(journal, id, target)
+             );
+             CREATE INDEX IF NOT EXISTS idx_pending_targets_target ON pending_targets(target);
+              CREATE TABLE IF NOT EXISTS operations (
                  id TEXT PRIMARY KEY,
                  created_at TEXT NOT NULL,
                  actor TEXT NOT NULL,
@@ -57,10 +130,219 @@ impl JournalStore {
                  ON operations(created_at DESC);
              CREATE INDEX IF NOT EXISTS idx_operations_target
                  ON operations(target, created_at DESC);
-             CREATE INDEX IF NOT EXISTS idx_operations_kind_status
-                 ON operations(kind, status, created_at DESC);",
+              CREATE INDEX IF NOT EXISTS idx_operations_kind_status
+                  ON operations(kind, status, created_at DESC);
+              CREATE TABLE IF NOT EXISTS projection_ledger (
+                  source_store_id TEXT NOT NULL,
+                  source_record_id TEXT NOT NULL,
+                  projection_id TEXT NOT NULL,
+                  projected_at TEXT NOT NULL,
+                  tombstoned INTEGER NOT NULL DEFAULT 0,
+                  PRIMARY KEY(source_store_id, source_record_id)
+              );",
         )?;
         Ok(())
+    }
+
+    /// The complete recovery record commits before each write boundary.
+    /// This table is deliberately independent of history pruning.
+    pub fn save_recovery(&self, record: &RecoveryRecord) -> Result<(), JournalError> {
+        self.connection()?.execute(
+            "INSERT INTO file_transactions(id, stage, payload) VALUES (?1, ?2, ?3)
+             ON CONFLICT(id) DO UPDATE SET stage=excluded.stage, payload=excluded.payload",
+            params![
+                record.id,
+                serde_json::to_string(&record.stage)?,
+                serde_json::to_string(record)?
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn path(&self) -> &std::path::Path {
+        &self.db_path
+    }
+
+    /// An additive audit trail: original recovery payloads and errors stay intact.
+    pub fn supersede_member(
+        &self,
+        id: &str,
+        target: &str,
+        decision: &str,
+    ) -> Result<(), JournalError> {
+        self.connection()?.execute(
+            "INSERT OR IGNORE INTO recovery_supersessions(id,target,decision,original_payload)
+             SELECT ?1,?2,?3,payload FROM file_transactions WHERE id=?1",
+            params![id, target, decision],
+        )?;
+        Ok(())
+    }
+
+    pub fn member_superseded(&self, id: &str, target: &str) -> Result<bool, JournalError> {
+        Ok(self.connection()?.query_row(
+            "SELECT EXISTS(SELECT 1 FROM recovery_supersessions WHERE id=?1 AND target=?2)",
+            params![id, target],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// The shared index is committed before the owning journal/write boundary.
+    pub fn register_target(
+        &self,
+        journal: &str,
+        id: &str,
+        target: &str,
+    ) -> Result<(), JournalError> {
+        self.connection()?.execute(
+            "INSERT OR IGNORE INTO pending_targets(journal,id,target) VALUES (?1,?2,?3)",
+            params![journal, id, target],
+        )?;
+        Ok(())
+    }
+
+    pub fn indexed_targets(
+        &self,
+        target: &str,
+    ) -> Result<Vec<(String, String, Option<String>)>, JournalError> {
+        let connection = self.connection()?;
+        let mut query = connection
+            .prepare("SELECT journal,id,decision FROM pending_targets WHERE target=?1")?;
+        let rows = query.query_map([target], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn supersede_target(
+        &self,
+        journal: &str,
+        id: &str,
+        target: &str,
+        decision: &str,
+    ) -> Result<(), JournalError> {
+        self.connection()?.execute(
+            "UPDATE pending_targets SET decision=?4 WHERE journal=?1 AND id=?2 AND target=?3 AND decision IS NULL",
+            params![journal, id, target, decision],
+        )?;
+        Ok(())
+    }
+
+    pub fn recovery_record(&self, id: &str) -> Result<RecoveryRecord, JournalError> {
+        let payload: String = self.connection()?.query_row(
+            "SELECT payload FROM file_transactions WHERE id=?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        Ok(serde_json::from_str(&payload)?)
+    }
+
+    pub fn pending_recovery(&self) -> Result<Vec<RecoveryRecord>, JournalError> {
+        let connection = self.connection()?;
+        let mut query = connection.prepare("SELECT payload FROM file_transactions ORDER BY id")?;
+        let rows = query.query_map([], |row| row.get::<_, String>(0))?;
+        let mut pending = Vec::new();
+        for row in rows {
+            let record: RecoveryRecord = serde_json::from_str(&row?)?;
+            if !record.stage.is_terminal()
+                || record.stage == dlssync_contracts::OperationStage::RollbackFailed
+            {
+                let mut unresolved = false;
+                for member in &record.members {
+                    if !self.member_superseded(&record.id, &member.target.to_string_lossy())? {
+                        unresolved = true;
+                        break;
+                    }
+                }
+                if unresolved {
+                    pending.push(record);
+                }
+            }
+        }
+        Ok(pending)
+    }
+
+    pub fn all_recovery_records(&self) -> Result<Vec<RecoveryRecord>, JournalError> {
+        let connection = self.connection()?;
+        let mut query = connection.prepare("SELECT payload FROM file_transactions ORDER BY id")?;
+        let rows = query.query_map([], |row| row.get::<_, String>(0))?;
+        rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+    }
+
+    pub fn source_store_id(&self) -> Result<String, JournalError> {
+        let connection = self.connection()?;
+        connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS store_identity (
+                 singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                 id TEXT NOT NULL
+             );",
+        )?;
+        if let Ok(id) = connection.query_row(
+            "SELECT id FROM store_identity WHERE singleton=1",
+            [],
+            |row| row.get::<_, String>(0),
+        ) {
+            return Ok(id);
+        }
+        let id = format!("store-{}", new_identity_suffix());
+        connection.execute(
+            "INSERT OR IGNORE INTO store_identity(singleton,id) VALUES (1,?1)",
+            [&id],
+        )?;
+        Ok(connection.query_row(
+            "SELECT id FROM store_identity WHERE singleton=1",
+            [],
+            |row| row.get(0),
+        )?)
+    }
+
+    pub fn project_recovery_once(
+        &self,
+        source_store_id: &str,
+        recovery: &RecoveryRecord,
+        record: &OperationRecord,
+    ) -> Result<bool, JournalError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let exists: bool = transaction.query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM projection_ledger
+                 WHERE source_store_id=?1 AND source_record_id=?2
+             )",
+            params![source_store_id, recovery.id],
+            |row| row.get(0),
+        )?;
+        if exists {
+            return Ok(false);
+        }
+        transaction.execute(
+            "INSERT INTO operations
+             (id,created_at,actor,kind,status,target,summary,details_json,duration_ms,backup_id,error)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
+             ON CONFLICT(id) DO UPDATE SET
+               created_at=excluded.created_at,actor=excluded.actor,kind=excluded.kind,
+               status=excluded.status,target=excluded.target,summary=excluded.summary,
+               details_json=excluded.details_json,duration_ms=excluded.duration_ms,
+               backup_id=excluded.backup_id,error=excluded.error",
+            params![
+                record.id,
+                record.created_at,
+                record.actor.as_str(),
+                record.kind.as_str(),
+                record.status.as_str(),
+                record.target,
+                record.summary,
+                serde_json::to_string(&record.details)?,
+                record.duration_ms,
+                record.backup_id,
+                record.error,
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO projection_ledger
+             (source_store_id,source_record_id,projection_id,projected_at,tombstoned)
+             VALUES (?1,?2,?3,?4,0)",
+            params![source_store_id, recovery.id, record.id, record.created_at],
+        )?;
+        transaction.commit()?;
+        Ok(true)
     }
 
     pub fn append(&self, record: &OperationRecord) -> Result<(), JournalError> {
@@ -119,6 +401,17 @@ impl JournalStore {
         Ok(records)
     }
 
+    pub fn list_all(&self) -> Result<Vec<OperationRecord>, JournalError> {
+        let connection = self.connection()?;
+        let mut query = connection.prepare(
+            "SELECT id, created_at, actor, kind, status, target, summary, details_json,
+                    duration_ms, backup_id, error
+             FROM operations ORDER BY created_at DESC, id DESC",
+        )?;
+        let rows = query.query_map([], row_to_record)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
     pub fn export_redacted_json(&self, filter: &JournalFilter) -> Result<String, JournalError> {
         let mut records = self.list(filter)?;
         for record in &mut records {
@@ -159,6 +452,17 @@ impl JournalStore {
         )?;
         Ok(changed)
     }
+}
+
+fn new_identity_suffix() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let sequence = NEXT.fetch_add(1, Ordering::Relaxed);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("{now:032x}-{sequence:016x}")
 }
 
 fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<OperationRecord> {
@@ -316,6 +620,69 @@ mod tests {
     }
 
     #[test]
+    fn legacy_recovery_schema_upgrades_and_supersession_keeps_evidence(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use dlssync_contracts::OperationStage;
+        let dir = tempdir()?;
+        let path = dir.path().join("legacy.db");
+        let record = RecoveryRecord {
+            id: "failed".into(),
+            plan_id: "plan".into(),
+            actor: OperationActor::Gui,
+            stage: OperationStage::RollbackFailed,
+            error: Some("original rollback failure".into()),
+            source_store_id: None,
+            operation_id: None,
+            game_ids: Vec::new(),
+            kind: RecoveryKind::Unknown,
+            started_at: None,
+            updated_at: None,
+            members: vec![RecoveryMember {
+                target: dir.path().join("game.dll"),
+                backup: dir.path().join("backup.dll"),
+                previous_sha256: "previous".into(),
+                expected_sha256: "expected".into(),
+                stage: OperationStage::RollbackFailed,
+                game_id: None,
+                component_id: None,
+                backup_id: None,
+            }],
+        };
+        let payload = serde_json::to_string(&record)?;
+        {
+            let connection = rusqlite::Connection::open(&path)?;
+            connection.execute_batch("CREATE TABLE file_transactions(id TEXT PRIMARY KEY, stage TEXT NOT NULL, payload TEXT NOT NULL);")?;
+            connection.execute(
+                "INSERT INTO file_transactions VALUES (?1,?2,?3)",
+                params![record.id, serde_json::to_string(&record.stage)?, payload],
+            )?;
+        }
+        let journal = JournalStore::open(path)?;
+        assert_eq!(journal.pending_recovery()?.len(), 1);
+        let target = record.members[0].target.to_string_lossy();
+        journal.supersede_member(&record.id, &target, "verified restore: new-operation")?;
+        assert!(journal.pending_recovery()?.is_empty());
+        assert_eq!(journal.recovery_record(&record.id)?.error, record.error);
+        // A later recovery of a different package member cannot erase the snapshot.
+        let mut later = record.clone();
+        later.error = Some("later diagnostic".into());
+        journal.save_recovery(&later)?;
+        journal.supersede_member(&record.id, &target, "second decision")?;
+        let (decision, original): (String, String) = journal.connection()?.query_row(
+            "SELECT decision,original_payload FROM recovery_supersessions WHERE id=?1 AND target=?2",
+            params![record.id, target], |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(decision, "verified restore: new-operation");
+        assert_eq!(original, payload);
+        let synchronous: i64 =
+            journal
+                .connection()?
+                .query_row("PRAGMA synchronous", [], |row| row.get(0))?;
+        assert_eq!(synchronous, 2);
+        Ok(())
+    }
+
+    #[test]
     fn append_list_filter_and_redacted_export_round_trip() {
         let dir = tempdir().unwrap();
         let store = JournalStore::open(dir.path().join("journal.db")).unwrap();
@@ -329,6 +696,19 @@ mod tests {
         assert!(export.contains("[redacted-target]"));
         assert!(export.contains("[redacted]"));
         assert!(!export.contains("Tony"));
+    }
+
+    #[test]
+    fn authoritative_list_all_is_not_capped_by_the_ui_limit() {
+        let dir = tempdir().unwrap();
+        let store = JournalStore::open(dir.path().join("journal.db")).unwrap();
+        for index in 0..=DEFAULT_LIMIT {
+            let mut item = record(&format!("all-{index:03}"), None);
+            item.created_at = format!("2026-09-18T00:{:02}:{:02}Z", (index / 60) % 60, index % 60);
+            store.append(&item).unwrap();
+        }
+        assert_eq!(store.list(&JournalFilter::default()).unwrap().len(), 200);
+        assert_eq!(store.list_all().unwrap().len(), 201);
     }
 
     fn record_with(
@@ -443,5 +823,67 @@ mod tests {
         assert!(rows
             .iter()
             .any(|row| row.backup_id.as_deref() == Some("backup-3")));
+    }
+
+    #[test]
+    fn phase4_projection_is_idempotent_and_survives_history_pruning() {
+        let dir = tempdir().unwrap();
+        let recovery_store = JournalStore::open(dir.path().join("recovery.db")).unwrap();
+        let history_store = JournalStore::open(dir.path().join("history.db")).unwrap();
+        let source_store_id = recovery_store.source_store_id().unwrap();
+        let recovery = RecoveryRecord {
+            id: "recovery-1".into(),
+            plan_id: "plan-1".into(),
+            actor: OperationActor::Gui,
+            stage: dlssync_contracts::OperationStage::Completed,
+            members: Vec::new(),
+            error: None,
+            source_store_id: Some(source_store_id.clone()),
+            operation_id: Some("operation-1".into()),
+            game_ids: vec!["game-1".into()],
+            kind: RecoveryKind::Apply,
+            started_at: Some("2026-09-17T00:00:00Z".into()),
+            updated_at: Some("2026-09-17T00:00:01Z".into()),
+        };
+        recovery_store.save_recovery(&recovery).unwrap();
+        let projected = OperationRecord {
+            id: "projection:recovery-1".into(),
+            created_at: "2026-09-17T00:00:00Z".into(),
+            actor: OperationActor::Gui,
+            kind: OperationKind::DllApply,
+            status: OperationStatus::Succeeded,
+            target: Some("game-1".into()),
+            summary: "Recovered durable apply".into(),
+            details: BTreeMap::new(),
+            duration_ms: None,
+            backup_id: None,
+            error: None,
+        };
+
+        assert!(history_store
+            .project_recovery_once(&source_store_id, &recovery, &projected)
+            .unwrap());
+        assert!(!history_store
+            .project_recovery_once(&source_store_id, &recovery, &projected)
+            .unwrap());
+        assert_eq!(history_store.prune_unlinked(0).unwrap(), 1);
+        assert!(!history_store
+            .project_recovery_once(&source_store_id, &recovery, &projected)
+            .unwrap());
+        assert_eq!(recovery_store.all_recovery_records().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn phase4_legacy_recovery_payload_defaults_new_metadata() {
+        let payload = r#"{
+            "id":"legacy","plan_id":"plan","actor":"gui","stage":"completed",
+            "members":[],"error":null
+        }"#;
+        let recovery: RecoveryRecord = serde_json::from_str(payload).unwrap();
+        assert_eq!(recovery.kind, RecoveryKind::Apply);
+        assert!(recovery.source_store_id.is_none());
+        assert!(recovery.operation_id.is_none());
+        assert!(recovery.game_ids.is_empty());
+        assert!(recovery.started_at.is_none());
     }
 }

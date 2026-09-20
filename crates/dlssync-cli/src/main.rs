@@ -2,8 +2,8 @@ use backup_store::BackupStore;
 use clap::{Args, Parser, Subcommand};
 use dll_catalog::Catalog;
 use dlssync_application::{
-    apply_update_plan, build_update_plan_at, plan_items, product_config, resolve_data_root,
-    rollback_update_plan, scan_installed_games, scan_path, DistributionPolicy,
+    apply_update_plan, build_verified_update_plan, plan_items, product_config, resolve_data_root,
+    scan_installed_games, scan_path, DistributionPolicy,
 };
 use dlssync_contracts::{
     CatalogProvenance, CatalogRefreshTrigger, DistributionChannel, InstallMode, JournalFilter,
@@ -61,6 +61,8 @@ enum CatalogCommand {
 
 #[derive(Args)]
 struct PlanArgs {
+    #[arg(long, conflicts_with_all = ["game", "all"])]
+    path: Option<PathBuf>,
     #[arg(long, conflicts_with = "all")]
     game: Option<String>,
     #[arg(long)]
@@ -73,6 +75,9 @@ struct ApplyArgs {
     plan: String,
     #[arg(long)]
     yes: bool,
+    /// Explicitly opt in to updating the version-locked NVIDIA Streamline set.
+    #[arg(long)]
+    allow_streamline: bool,
 }
 
 #[derive(Args)]
@@ -132,10 +137,7 @@ async fn main() -> ExitCode {
         }
         Err(error) => {
             if cli.json {
-                println!(
-                    "{}",
-                    serde_json::json!({ "ok": false, "error": error.to_string() })
-                );
+                println!("{}", error_json(&error));
             } else {
                 eprintln!("dlssync: {error}");
             }
@@ -144,9 +146,88 @@ async fn main() -> ExitCode {
     }
 }
 
+fn error_json(error: &CliError) -> serde_json::Value {
+    let code = match error {
+        CliError::Execution(dlssync_application::ExecutionError::UnsafeTarget(_)) => {
+            "unsafe_target"
+        }
+        CliError::Execution(dlssync_application::ExecutionError::Stale(_)) => "stale_plan",
+        CliError::Execution(_) => "execution_failed",
+        _ => "command_failed",
+    };
+    serde_json::json!({ "ok": false, "error": error.to_string(), "error_code": code })
+}
+
+// Fail closed on missing PowerShell, CIM failure, malformed output or unknown adapters.
+// Match the GUI's AMD vendor + RDNA4 PCI range/model criteria, without a capability override.
+fn host_fsr4_capable() -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let Some(system_root) = std::env::var_os("SystemRoot") else {
+            return false;
+        };
+        let output = std::process::Command::new(
+            PathBuf::from(system_root).join("System32/WindowsPowerShell/v1.0/powershell.exe"),
+        )
+        .args([
+            "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+            "$ErrorActionPreference='Stop'; @(Get-CimInstance Win32_VideoController | Select-Object Name,PNPDeviceID) | ConvertTo-Json -Compress",
+        ])
+        .creation_flags(0x08000000)
+        .output();
+        output.is_ok_and(|output| output.status.success() && fsr4_from_adapter_json(&output.stdout))
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+#[cfg(any(windows, test))]
+fn fsr4_from_adapter_json(bytes: &[u8]) -> bool {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+        return false;
+    };
+    let adapters = match &value {
+        serde_json::Value::Array(adapters) => adapters.as_slice(),
+        serde_json::Value::Object(_) => std::slice::from_ref(&value),
+        _ => return false,
+    };
+    adapters.iter().any(|adapter| {
+        let Some(pnp) = adapter.get("PNPDeviceID").and_then(|value| value.as_str()) else {
+            return false;
+        };
+        let pnp = pnp.to_ascii_uppercase();
+        let parts: Vec<_> = pnp.split(['\\', '&']).collect();
+        if !parts.contains(&"VEN_1002") {
+            return false;
+        }
+        let device = parts.iter().find_map(|part| {
+            part.strip_prefix("DEV_")
+                .and_then(|value| u16::from_str_radix(value, 16).ok())
+        });
+        device.is_some_and(|device| matches!(device, 0x7550..=0x75ff))
+            || adapter
+                .get("Name")
+                .and_then(|value| value.as_str())
+                .is_some_and(|name| name.to_ascii_lowercase().contains("radeon rx 9"))
+    })
+}
+
 async fn run(cli: &Cli) -> Result<serde_json::Value, CliError> {
     let paths = runtime_paths()?;
     ensure_paths(&paths)?;
+    let recovery_store = BackupStore::open(paths.backups_db.clone(), paths.backups.clone())?;
+    let recovered = dlssync_application::transaction::recover_store(&recovery_store)?;
+    for record in recovered {
+        eprintln!(
+            "recovery {}: {:?} {}",
+            record.id,
+            record.stage,
+            record.error.as_deref().unwrap_or_default()
+        );
+    }
     match &cli.command {
         Command::Status => status(&paths),
         Command::Scan(args) => {
@@ -252,9 +333,12 @@ async fn catalog_refresh(paths: &RuntimePaths) -> Result<serde_json::Value, CliE
 
 fn create_plan(paths: &RuntimePaths, args: &PlanArgs) -> Result<serde_json::Value, CliError> {
     let catalog = load_catalog(paths)?;
-    let games = scan_installed_games()?;
+    let games = match &args.path {
+        Some(path) => vec![scan_path(path)?],
+        None => scan_installed_games()?,
+    };
     let items = plan_items(&catalog, &games, &paths.backups, args.game.as_deref());
-    let plan = build_update_plan_at(&catalog.generated_at.to_rfc3339(), items, &paths.backups);
+    let plan = build_verified_update_plan(&catalog, &games, items, &paths.backups)?;
     write_json_atomic(&plan_path(paths, &plan.id), &plan)?;
     append_record(
         paths,
@@ -276,7 +360,11 @@ async fn apply_plan(paths: &RuntimePaths, args: &ApplyArgs) -> Result<serde_json
     let catalog = load_catalog(paths)?;
     let backups = BackupStore::open(paths.backups_db.clone(), paths.backups.clone())?;
     let started = Instant::now();
-    let result = apply_update_plan(&catalog, &plan, &http_client()?, &backups).await?;
+    let policy = dlssync_application::policy::ApplyPolicy {
+        fsr4_capable: host_fsr4_capable(),
+        allow_streamline: args.allow_streamline,
+    };
+    let result = apply_update_plan(&catalog, &plan, &http_client()?, &backups, &policy).await?;
     let record = append_record(
         paths,
         OperationKind::DllApply,
@@ -311,7 +399,25 @@ fn rollback_plan(paths: &RuntimePaths, args: &RollbackArgs) -> Result<serde_json
         .get("plan_id")
         .ok_or_else(|| CliError::Message("operation has no linked plan".into()))?;
     let plan = read_plan(paths, plan_id)?;
-    let result = rollback_update_plan(&plan)?;
+    let backups = BackupStore::open(paths.backups_db.clone(), paths.backups.clone())?;
+    let all = backups.list()?;
+    let entries = plan
+        .items
+        .iter()
+        .filter(|item| item.selected)
+        .map(|item| {
+            all.iter()
+                .find(|entry| entry.backup_path == Path::new(&item.backup_path))
+                .cloned()
+                .ok_or_else(|| CliError::Message(format!("backup entry missing for {}", item.id)))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let restored =
+        dlssync_application::transaction::restore_entries(&backups, &entries, OperationActor::Cli)?;
+    let result = dlssync_contracts::RollbackPlanResult {
+        plan_id: plan.id.clone(),
+        restored: restored as u32,
+    };
     append_record(
         paths,
         OperationKind::Rollback,
@@ -456,5 +562,66 @@ fn print_value(json: bool, value: &serde_json::Value) {
             "{}",
             serde_json::to_string_pretty(value).expect("JSON value")
         );
+    }
+}
+
+#[cfg(test)]
+mod cli_parity_tests {
+    use super::*;
+
+    #[test]
+    fn cli_parity_unknown_hardware_is_not_capable() {
+        for input in [
+            b"garbage".as_slice(),
+            b"null",
+            b"[]",
+            b"{}",
+            br#"[{"Name":"AMD Radeon RX 9070"}]"#,
+            br#"[{"Name":"AMD Radeon RX 9070","PNPDeviceID":"PCI\\\\VEN_10DE&DEV_7550"}]"#,
+            br#"[{"Name":"AMD Radeon RX 7900","PNPDeviceID":"PCI\\\\VEN_1002&DEV_744C"}]"#,
+        ] {
+            assert!(!fsr4_from_adapter_json(input));
+        }
+        assert!(fsr4_from_adapter_json(
+            br#"[{"Name":"AMD Radeon","PNPDeviceID":"PCI\\\\VEN_1002&DEV_7550"}]"#
+        ));
+        assert!(fsr4_from_adapter_json(
+            br#"{"Name":"AMD Radeon RX 9070","PNPDeviceID":"PCI\\\\VEN_1002&DEV_0000"}"#
+        ));
+    }
+
+    #[test]
+    fn cli_parity_streamline_requires_explicit_opt_in() -> Result<(), clap::Error> {
+        for (args, expected) in [
+            (vec!["dlssync", "apply", "--plan", "id", "--yes"], false),
+            (
+                vec![
+                    "dlssync",
+                    "apply",
+                    "--plan",
+                    "id",
+                    "--yes",
+                    "--allow-streamline",
+                ],
+                true,
+            ),
+        ] {
+            let cli = Cli::try_parse_from(args)?;
+            assert!(
+                matches!(cli.command, Command::Apply(args) if args.allow_streamline == expected)
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn cli_parity_policy_rejection_has_machine_readable_code() {
+        let error = CliError::Execution(dlssync_application::ExecutionError::UnsafeTarget(
+            "FSR 4 requires RDNA4".into(),
+        ));
+        let value = error_json(&error);
+        assert_eq!(value["ok"], false);
+        assert_eq!(value["error_code"], "unsafe_target");
+        assert_eq!(value["error"], error.to_string());
     }
 }

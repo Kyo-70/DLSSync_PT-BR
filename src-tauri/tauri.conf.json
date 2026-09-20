@@ -27,7 +27,11 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' data: https://cdn.cloudflare.steamstatic.com https://cdn.akamai.steamstatic.com https://shared.cloudflare.steamstatic.com https://s3.amazonaws.com https://cdn2.steamgriddb.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https://cdn.jsdelivr.net https://api.github.com https://api.steampowered.com"
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data: https://cdn.cloudflare.steamstatic.com https://cdn.akamai.steamstatic.com https://shared.cloudflare.steamstatic.com https://s3.amazonaws.com https://cdn2.steamgriddb.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https://cdn.jsdelivr.net https://api.github.com https://api.steampowered.com",
+      "assetProtocol": {
+        "enable": true,
+        "scope": []
+      }
     }
   },
   "bundle": {
@@ -37,7 +41,7 @@
       "msi"
     ],
     "publisher": "xt0n1",
-    "homepage": "https://xt0n1.com",
+    "homepage": "https://github.com/xt0n1-t3ch/DLSSync",
     "copyright": "Copyright 2026 xt0n1. Licensed under Apache-2.0.",
     "licenseFile": "../LICENSE",
     "icon": [

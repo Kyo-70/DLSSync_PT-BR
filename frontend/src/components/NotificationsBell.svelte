@@ -1,4 +1,13 @@
 <script lang="ts">
+  import Check from "@lucide/svelte/icons/check";
+  import X from "@lucide/svelte/icons/x";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
+  import ArrowUp from "@lucide/svelte/icons/arrow-up";
+  import Download from "@lucide/svelte/icons/download";
+  import Bell from "@lucide/svelte/icons/bell";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import ExternalLink from "@lucide/svelte/icons/external-link";
   import { onMount } from "svelte";
   import {
     notifications,
@@ -126,20 +135,16 @@
     return translate(loc, "component.notif.relativeAgo", { dur: formatDurationSecs(secs) });
   }
 
-  function kindIcon(kind: NotificationKind): string {
+  function kindIcon(kind: NotificationKind) {
     switch (kind) {
-      case "apply_success": return "✓";
-      case "apply_failure": return "✕";
-      case "apply_cancelled": return "↺";
-      case "app_update_available": return "↑";
-      case "catalog_update_available": return "★";
-      case "dll_updates_available": return "⟳";
-      case "driver_update_available":
-      case "system_driver_update_available": return "⬇";
-      case "backup_restored": return "↺";
-      case "scan_failed":
-      case "catalog_refresh_failed": return "!";
-      default: return "•";
+      case "apply_success": return Check;
+      case "apply_failure": return X;
+      case "apply_cancelled": case "backup_restored": return RotateCcw;
+      case "app_update_available": return ArrowUp;
+      case "catalog_update_available": case "dll_updates_available": return RefreshCw;
+      case "driver_update_available": case "system_driver_update_available": return Download;
+      case "scan_failed": case "catalog_refresh_failed": return CircleAlert;
+      default: return Bell;
     }
   }
 
@@ -163,10 +168,13 @@
 </script>
 
 {#if open}
-  <div class="bell-panel glass-dialog" role="dialog" aria-modal="true" aria-label={$t("component.notif.title")} bind:this={panelEl} use:focusTrap>
+  <div class="bell-panel glass-dialog" role="dialog" aria-modal="true" aria-label={$t("component.notif.title")} bind:this={panelEl} use:focusTrap={{ initialFocusRing: false }}>
     <header class="bell-panel-header">
       <span class="bell-panel-title">{$t("component.notif.title")}</span>
-      <span class="bell-panel-count" aria-label={$t("component.notif.entriesCount", { count: entries.length })}>{entries.length}</span>
+      <div class="bell-header-actions">
+        <span class="bell-panel-count" aria-label={$t("component.notif.entriesCount", { count: entries.length })}>{entries.length}</span>
+        <button type="button" class="bell-panel-close" aria-label={$t("common.close")} title={$t("common.close")} onclick={onClose}><X size={16} strokeWidth={1.8} /></button>
+      </div>
     </header>
     <div class="bell-panel-list" role="list">
       {#if entries.length === 0}
@@ -174,6 +182,7 @@
       {:else}
         {#each entries as entry (entry.id)}
           {@const vendorKey = vendorKeyForNotification(entry)}
+          {@const KindIcon = kindIcon(entry.kind)}
           <div
             class="bell-item"
             class:bell-item-unread={entry.read_at == null}
@@ -195,7 +204,7 @@
                   </span>
                 {:else}
                   <span class="aura-badge bell-item-badge" data-tint={tintForKind(entry.kind)} aria-hidden="true">
-                    {kindIcon(entry.kind)}
+                    <KindIcon size={16} strokeWidth={1.8} />
                   </span>
                 {/if}
                 <span class="bell-item-text">
@@ -213,7 +222,7 @@
                 aria-label={$t("component.notif.dismissAria")}
                 onclick={(ev) => handleDismiss(entry, ev)}
               >
-                ×
+                <X size={14} strokeWidth={1.8} />
               </button>
             </div>
             {#if linkActions(entry).length > 0}
@@ -225,7 +234,7 @@
                     onclick={(ev) => openExternal(action.url, ev)}
                   >
                     {action.label}
-                    <span class="bell-item-link-icon" aria-hidden="true">↗</span>
+                    <ExternalLink size={12} aria-hidden="true" />
                   </button>
                 {/each}
               </div>
@@ -245,16 +254,27 @@
 {/if}
 
 <style>
+  .bell-header-actions { display: flex; align-items: center; gap: 12px; }
+  .bell-panel-close { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 7px; color: var(--text-secondary); }
+  .bell-panel-close:hover { background: var(--bg-elevated); color: var(--text-primary); }
+
+  .bell-panel.glass-dialog {
+    background: var(--bg-card);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    isolation: isolate;
+    overflow: hidden;
+  }
   .bell-panel {
     position: fixed;
     top: calc(var(--topbar-height) + 6px);
     right: 12px;
-    width: 380px;
+    width: 420px;
     max-width: calc(100vw - 24px);
-    max-height: min(480px, calc(100vh - var(--topbar-height) - 24px));
+    max-height: min(580px, calc(100vh - var(--topbar-height) - 24px));
     display: flex;
     flex-direction: column;
-    border-radius: var(--radius-2xl);
+    border-radius: 14px;
     box-shadow: var(--shadow-lg);
     z-index: 200;
   }
@@ -285,11 +305,15 @@
   }
   .bell-panel-list {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
-    padding: 6px;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    padding: 0 8px;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 0;
   }
   .bell-panel-empty {
     padding: 32px 14px;
@@ -301,23 +325,24 @@
     position: relative;
     display: flex;
     flex-direction: column;
-    border-radius: var(--radius-lg);
-    transition: background var(--dur-fast) var(--ease);
+    border-bottom: 1px solid var(--border);
+    padding: 4px 0;
   }
-  .bell-item:hover {
+  .bell-item-main:hover {
     background: var(--bg-card-hover);
   }
   .bell-item-row {
-    display: flex;
-    align-items: stretch;
-    gap: 2px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 32px;
+    align-items: start;
+    gap: 4px;
   }
   .bell-unread-stripe {
     position: absolute;
     left: 4px;
-    top: 12px;
-    bottom: 12px;
-    width: 3px;
+    top: 28px;
+    width: 4px;
+    height: 4px;
     border-radius: var(--radius-full);
     background: var(--accent);
     pointer-events: none;
@@ -327,7 +352,7 @@
     display: flex;
     align-items: flex-start;
     gap: 12px;
-    padding: 12px 8px 12px 14px;
+    padding: 16px 8px 16px 16px;
     text-align: left;
     color: var(--text-primary);
     min-width: 0;
@@ -338,13 +363,17 @@
     box-shadow: var(--shadow-ring);
   }
   .bell-item-badge {
-    width: 32px;
-    height: 32px;
-    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
     font-size: 14px;
     font-weight: 700;
     line-height: 1;
-    flex-shrink: 0;
+    flex: 0 0 28px;
+    box-shadow: none;
   }
   .bell-item-logo {
     display: inline-flex;
@@ -364,13 +393,15 @@
     font-size: var(--fs-sm);
     font-weight: 600;
     color: var(--text-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.45;
   }
   .bell-item-body {
     font-size: 12px;
     color: var(--text-secondary);
+    line-height: 1.5;
+    margin-top: 4px;
     overflow: hidden;
     text-overflow: ellipsis;
     display: -webkit-box;
@@ -382,10 +413,12 @@
     font-size: 11px;
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
-    margin-top: 2px;
+    margin-top: 7px;
   }
   .bell-item-dismiss {
-    width: 28px;
+    width: 32px;
+    height: 32px;
+    margin-top: 13px;
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -432,10 +465,7 @@
     outline: none;
     box-shadow: var(--shadow-ring);
   }
-  .bell-item-link-icon {
-    font-size: 10px;
-    opacity: 0.8;
-  }
+
   .bell-panel-footer {
     border-top: 1px solid var(--border);
     padding: 10px 14px;

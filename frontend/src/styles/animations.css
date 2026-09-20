@@ -14,7 +14,7 @@
 .pop-in { animation: pop-in var(--dur-normal) var(--ease-out); }
 
 .drawer-enter { animation: drawer-in var(--dur-normal) var(--ease-out); }
-.drawer-leave { animation: drawer-out var(--dur-normal) var(--ease-elastic); }
+.drawer-leave { animation: drawer-out var(--dur-normal) var(--ease-out); }
 
 .stagger > * { animation: stagger-rise var(--dur-normal) var(--ease-out) both; }
 .stagger > *:nth-child(1)  { animation-delay: calc(var(--dur-stagger) * 1); }

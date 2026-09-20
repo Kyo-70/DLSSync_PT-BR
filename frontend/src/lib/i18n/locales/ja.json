@@ -22,7 +22,9 @@
     "download": "ダウンロード",
     "install": "設置",
     "open": "開けて",
-    "undo": "元に戻す"
+    "undo": "元に戻す",
+    "technicalDetails": "技術情報",
+    "update": "更新する"
   },
   "status": {
     "outdated": "アップデートあり",
@@ -34,10 +36,10 @@
   },
   "view": {
     "journal": {
-      "title": "操作履歴",
-      "subtitle": "スキャン、カタログ更新、計画、適用、ロールバック、ドライバー操作を追跡する永続的な監査ログ。",
-      "export": "機密情報を除いたJSONをコピー",
-      "filters": "操作履歴のフィルター",
+      "title": "履歴",
+      "subtitle": "更新、バックアップ、ゲーム検索の履歴。",
+      "export": "履歴をコピー",
+      "filters": "履歴を絞り込む",
       "kind": "操作",
       "result": "結果",
       "all": "すべて",
@@ -50,16 +52,22 @@
       "kinds": {
         "scan": "スキャン",
         "catalog_refresh": "カタログ",
-        "plan": "計画",
-        "dll_apply": "適用",
-        "rollback": "ロールバック",
+        "plan": "更新の確認",
+        "dll_apply": "更新",
+        "rollback": "復元",
         "driver_install": "ドライバー"
       },
       "actors": {
         "gui": "アプリ",
         "cli": "CLI",
         "background": "バックグラウンド"
-      }
+      },
+      "recovery": {
+        "rolled_back": "ロールバック済み",
+        "rollback_failed": "ロールバック失敗",
+        "rolling_back": "ロールバック中"
+      },
+      "syncPending": "履歴を同期中…"
     },
     "library": {
       "title": "図書館",
@@ -81,13 +89,13 @@
         "segAria": "ベンダーごとの更新待ち",
         "kpiGames": "ゲーム",
         "kpiUpToDate": "最新",
-        "kpiProtected": "保護されている",
+        "kpiProtected": "バックアップあり",
         "kpiProtectedTitle": "バックアップに復元ポイントがあるゲーム",
-        "review": "レビュー",
+        "review": "更新を表示",
         "reviewTitle": "ライブラリは更新が待っているゲームだけに絞り込みます",
-        "applyAll": "すべて適用",
+        "applyAll": "すべて更新",
         "applyAllTitle": "ライブラリ全体で検出されたすべてのアップデートを適用してください",
-        "manifestStamp": "マニフェスト{stamp}",
+        "manifestStamp": "一覧の更新日時: {stamp}",
         "manifestTitle": "カタログマニフェスト更新時間"
       },
       "filter": {
@@ -140,7 +148,8 @@
       "section": {
         "needsUpdate": "更新が必要",
         "upToDate": "最新",
-        "viewAll": "すべての作品を見る→"
+        "viewAll": "すべての作品を見る→",
+        "otherGames": "その他のゲーム"
       },
       "noDllsZone": {
         "title": "サポート技術のないゲーム",
@@ -171,11 +180,17 @@
       },
       "applyAllCount_one": "アップデート{count}適用してください",
       "applyAllCount_other": "すべてのアップデートを適用({count})",
-      "applyAllTitle": "ライブラリ全体で検出されたすべてのアップデートを適用してください"
+      "applyAllTitle": "ライブラリ全体で検出されたすべてのアップデートを適用してください",
+      "shown": "{count} 件を表示",
+      "gameCount": "{count} 本のゲーム",
+      "summaryUpdates": "{games} 本のゲームに {count} 件の更新",
+      "updatesTab": "更新",
+      "filtersTitle": "フィルター"
     },
     "catalog": {
       "title": "カタログ",
-      "subtitle": "すべてのアップスケーリングやフレーム生成技術DLSSync軌道に乗っています。機能をクリックするとすべてのバージョンを確認でき、CDNのURLをコピーするか、直接ダウンロードにジャンプできます。",
+      "latest": "最新",
+      "subtitle": "コンポーネントのバージョンとダウンロードを確認します。",
       "refreshing": "さっぱりした",
       "refreshManifest": "リフレッシュマニフェスト",
       "stat": {
@@ -243,11 +258,14 @@
         "hours_other": "{count}h 前",
         "days_one": "{count}d前",
         "days_other": "{count}d前"
-      }
+      },
+      "browseSummary": "{families} 個のライブラリと {versions} 個のバージョンを表示。",
+      "allVendors": "すべて",
+      "noMatches": "この条件に一致するライブラリはありません。"
     },
     "drivers": {
       "title": "ドライバー",
-      "subtitle": "検出された各アダプターごとに最新のGPUドライバーをベンダーと照合し、プリセットやフレーム生成コントロールDLSS対応しています。",
+      "subtitle": "このPCのグラフィックスとWindowsのドライバーを確認します。",
       "health": {
         "aria": "ドライバーの健康概要",
         "gpuUpdates_one": "{count} GPUドライバーのアップデート",
@@ -285,11 +303,11 @@
       "rescan": "再スキャン",
       "systemSub": "PCの他の部分のドライバーアップデート:オーディオ、ネットワーク、Bluetooth、チップセット、入力、ストレージ。Windows UpdateやMicrosoft Update Catalogから提供され、ベンダー署名を保持し、既存のドライバーより古いものは決して提供しません。",
       "betaNote": "検出はハードウェアの誤読や見落としがあるので、更新を適用する前に必ず確認してください。もし問題が起きた場合、自動バックアップがそれをロールバックします。",
-      "systemSummary": "Windowsアップデートから直接、オーディオ、ネットワーク、チップセット、入力、ストレージドライバーなど、PCの他の部分も常に最新の状態に保てます。",
+      "systemSummary": "Windows UpdateがこのPCに提供するドライバーです。",
       "learnMore": "詳しくはこちら",
       "showLess": "表示を減らす",
       "scanningWindowsUpdate": "Windows Updateのコンポーネントドライバーをスキャン中...",
-      "allComponentsUpToDate": "すべてのコンポーネントは最新で、Windows Updateには新しいドライバーが搭載されていません。",
+      "allComponentsUpToDate": "Windows Updateで利用可能なドライバー更新は見つかりませんでした。",
       "latestFallback": "最新情報",
       "versionHistoryTitle": "このドライバーのインストール済みおよび以前にインストールされたバージョンを表示する",
       "versionHistoryAria": "バージョンの歴史",
@@ -298,6 +316,7 @@
       "driverInfoAria": "ドライバー情報",
       "update": "アップデート",
       "installStageFallback": "稼働",
+      "installFailedNote": "インストールに失敗しました",
       "readingDriverStore": "地元のドライバーショップを読んで...",
       "readVersionsError": "ドライバーのバージョンが読めませんでした。",
       "noCachedVersions": "このPCには以前のバージョンはキャッシュされていません。最新入手可能:{version}。",
@@ -308,11 +327,14 @@
       "dlssOverridesSub": "NVIDIAのドライバープロファイルを通じて、DLSSプリセット、フレーム生成モード、乗算器を全体的に強制できます。これはNVIDIAアプリが使うのと同じ仕組みです。ゲームごとのオーバーライドは各ゲームのディテールドロワーにリアルタイムで存在します。",
       "upscalingOn": "{vendors}でのアップスケール",
       "upscalingSub": "ドライバープロファイルプリセットのオーバーライドはNVIDIA専用(NVAPI)です。AMDやIntelでは、FSRとXeSSはゲームごとにDLLを交換することで操作できます。DLLはゲームのディテールドロワーやカタログから管理できます。このタブは、上記のAMDやIntelドライバー自体を最新の状態に保つためのものです。",
-      "openLinkFailed": "リンクが開かれませんでした:{error}"
+      "openLinkFailed": "リンクが開かれませんでした:{error}",
+      "graphics": "グラフィックス",
+      "devices": "デバイス",
+      "notChecked": "更新は未確認です"
     },
     "backups": {
       "title": "バックアップ",
-      "subtitle": "DLSSyncに置き換えられたすべてのDLLはまずスナップショットされます。いつでもワンクリックで復元できます。",
+      "subtitle": "以前の更新で保存したファイルです。",
       "activityTab": "アクティビティ",
       "expandAll": "すべて展開",
       "collapseAll": "全て崩壊",
@@ -329,7 +351,9 @@
         "newest": "最新",
         "oldest": "最年長",
         "missingHint": "ディスク上に存在しないスナップショットファイルは、DLSSync外に移動したり削除されたりしました。列を削除して整理しましょう。",
-        "missingCount": "{count}"
+        "missingCount": "{count}",
+        "unverified": "未検証",
+        "unverifiedHint": "アプリがディスク上でまだ確認していないバックアップです。"
       },
       "legend": {
         "label": "カウントの意味",
@@ -387,7 +411,8 @@
         "missing": "{count}",
         "missing_one": "{count}",
         "missing_other": "{count}",
-        "latest": "最新{date}"
+        "latest": "最新{date}",
+        "unverifiedWord": "未検証"
       },
       "entry": {
         "selectHint": "一括復元/削除を選択してください",
@@ -408,7 +433,9 @@
         "restoreHint": "元のDLLをゲームフォルダに戻してください",
         "restoreAgain": "再び修復してください",
         "restoreAgainHint": "このスナップショットを再度復元してください — 前回の復元後に新しいDLLを適用した場合に役立ちます",
-        "restoring": "修復"
+        "restoring": "修復",
+        "unverified": "未検証",
+        "unverifiedHint": "DLSSync はこのバックアップファイルをまだ確認していません。復元は成功するとは限りません。"
       },
       "cancel": "キャンセル",
       "delete": "削除",
@@ -477,7 +504,19 @@
         "rebootSuffix": "— リブートから完成まで",
         "notifTitle": "ドライバー {deviceClass}ロールバック",
         "toastRollbackFailed": "ロールバック失敗:{error}"
-      }
+      },
+      "eligibility": {
+        "snapshot_absent": "復元できません。バックアップファイルがディスクにありません。",
+        "snapshot_unavailable": "復元できません。バックアップファイルを利用できません。",
+        "already_restored": "すでに復元済みです。その後新しい DLL を適用した場合にのみ再度復元してください。",
+        "unverified": "未確認です。このバックアップを復元できるとは確認できません。",
+        "operation_in_flight": "このファイルで操作が実行中です。",
+        "unspecified": "復元がブロックされており、理由は報告されていません。"
+      },
+      "toastRestoreUnverified": "{file} の復元はまだ確定していません。結果はアクティビティで確認してください。",
+      "toastRestoreUnverifiedCount_one": "{count} 件の復元が未確定です",
+      "toastRestoreUnverifiedCount_other": "{count} 件の復元が未確定です",
+      "fileDetails": "ファイルの詳細"
     },
     "settings": {
       "title": "舞台設定",
@@ -550,6 +589,9 @@
           },
           "runAtStartup": {
             "label": "Windowsから始めましょう(トレイに最小化)",
+            "readFailed": "Windows のスタートアップ項目を読み取れませんでした: {error}",
+            "notVerified": "Windows のスタートアップ項目は未確認です",
+            "mismatch": "Windows は要求した値と異なる値を報告しています。表示しているのは Windows から読み戻した値です",
             "sub": "Windowsが起動したらトレイに隠されたDLSSync起動します。開くまでウィンドウは表示されません。"
           },
           "notifyToast": {
@@ -636,6 +678,15 @@
           "available": "v{version}が利用可能です — バナーをご覧ください。",
           "latest": "最新バージョン(v{version})を使っています。",
           "checkFailed": "アップデートチェック失敗:{error}"
+        },
+        "status": {
+          "unchecked": "このセッションでは未確認",
+          "checking": "確認中…",
+          "available": "アップデートあり: v{version}",
+          "upToDate": "最新です (v{version})",
+          "indeterminate": "確認で有効な応答が得られなかったため、更新の有無は判定されていません",
+          "error": "アップデートの確認に失敗しました: {error}",
+          "manualOnly": "{distribution} ビルド: アプリの更新は手動で、自動確認はありません"
         },
         "manualOnly": "{distribution}ビルド:手動アプリ更新のみ",
         "openReleases": "ページNexus Modsを開く"
@@ -762,16 +813,22 @@
           "sub": "プリセットやフレーム生成のオーバーライドDLSS、GPUドライバーの更新とともに{drivers}タブに移動しました。ゲームごとのオーバーライドは各ゲームのディテールドロワーに残ります。",
           "driversTabBold": "ドライバー",
           "openDrivers": "ドライバータブを開く"
-        }
-      }
+        },
+        "optionsTitle": "詳細オプション",
+        "optionsIntro": "診断とダウンロードの動作を設定します。",
+        "registryDetails": "レジストリの詳細"
+      },
+      "subtitle": "外観、更新設定、ゲーム検出を管理します。",
+      "filesAndLogs": "ファイルとログ"
     },
     "about": {
       "title": "概要",
-      "subtitle": "DLSSyncは、DLSS、FSR、XeSS技術をベンダーリリースと同期させており、ハッシュ検証済み、ベンダー署名済み、完全に可逆的です。",
+      "subtitle": "ゲームのコンポーネントを更新し、検証済みのバックアップ記録を保持します。",
       "action": {
         "sourceTitle": "GitHubでDLSSyncのソースコードを開く",
         "manifestTitle": "署名済み公開カタログのリポジトリを開く",
         "manifest": "マニフェスト",
+        "sponsor": "スポンサーになる",
         "sponsorTitle": "GitHub スポンサー — 定期または一度限りのサポート",
         "kofiTitle": "Ko-fi — 一度限りの簡単なヒント",
         "nexusTitle": "DLSSync Nexus Mods — 認知度を高めるために支持してください",
@@ -794,7 +851,8 @@
       "whatsNew": {
         "eyebrow": "新しいこと",
         "viewChangelog": "完全な変更履歴を見る→",
-        "openReleasesTitle": "オープンGitHubリリース"
+        "openReleasesTitle": "オープンGitHubリリース",
+        "unreleased": "未リリース"
       },
       "kpi": {
         "familiesTracked": "追跡された家族",
@@ -862,6 +920,9 @@
       },
       "update": {
         "checking": "リリースGitHub確認中...",
+        "status": {
+          "indeterminate": "確認で有効な応答が得られなかったため、更新の有無は判定されていません"
+        },
         "available": "更新可能:v{version}。リリースページにアクセスしてダウンロードしてください。",
         "latest": "最新バージョン(v{version})を使っています。",
         "failed": "アップデートチェック失敗:{error}。エンドポイントに到達不能だったり、まだリリースが公開されていない場合があります。"
@@ -1034,19 +1095,27 @@
     }
   },
   "applyStage": {
-    "download": "ダウンロード",
-    "verify_sha": "SHAの検証",
-    "verify_signature": "署名の確認",
-    "backup_current": "逆流",
-    "install_new": "新設",
-    "verify_installed": "インストール確認",
-    "done": "終わった"
+    "download": "ダウンロード中",
+    "verify_sha": "ファイルを確認中",
+    "verify_signature": "配布元を確認中",
+    "backup_current": "バックアップ中",
+    "install_new": "更新中",
+    "verify_installed": "最終確認中",
+    "done": "更新済み",
+    "backup": "バックアップ中",
+    "replace": "更新中",
+    "verify_post": "最終確認中",
+    "complete": "更新済み"
   },
   "installStage": {
     "downloading": "ダウンロード中",
     "installing": "設置",
     "completed": "終わった",
-    "failed": "失敗"
+    "failed": "失敗",
+    "launching": "起動中",
+    "cancelled": "キャンセルされました",
+    "queued": "待機中",
+    "verifying": "検証中"
   },
   "driverStatus": {
     "update_available": "アップデートあり",
@@ -1305,14 +1374,15 @@
   },
   "component": {
     "updatePlan": {
-      "eyebrow": "出所情報付きドライラン",
-      "title": "更新プランを確認",
-      "subtitle": "この署名済みプランを確認するまで、変更は行われません。",
-      "loading": "信頼性の証拠を読み込み中…",
+      "eyebrow": "更新の詳細",
+      "title": "更新の準備ができました",
+      "subtitle": "更新前にファイルをバックアップします。後から復元できます。",
+      "loading": "更新を確認しています…",
       "files": "ファイル",
       "signerPending": "発行元を確認中…",
-      "export": "プランのJSONをコピー",
-      "apply": "選択項目を適用"
+      "export": "詳細をコピー",
+      "apply": "更新する",
+      "dependencies": "追加で必要な項目"
     },
     "applyModal": {
       "eyebrow": {
@@ -1322,11 +1392,11 @@
       },
       "headline": {
         "someUpdated": "{done} {total}更新済み",
-        "allUpdated_one": "{count}機能更新",
-        "allUpdated_other": "{count}機能の更新",
+        "allUpdated_one": "更新が完了しました",
+        "allUpdated_other": "{count} 件の更新が完了しました",
         "updating": "{total}の{running}の更新",
-        "queued_one": "機能{count}待機中",
-        "queued_other": "待機した機能{count}"
+        "queued_one": "更新を準備しています",
+        "queued_other": "{count} 件の更新を準備しています"
       },
       "stat": {
         "done": "終わった",
@@ -1491,7 +1561,7 @@
       "topbar": {
         "searchPlaceholder": "検索ゲーム",
         "commandPaletteTitle": "コマンドパレット({mod}K)",
-        "commandPaletteAria": "オープンコマンドパレット",
+        "commandPaletteAria": "ゲームとコマンドを検索",
         "notifications": "通知",
         "unreadNotifications_one": "未読通知{count}",
         "unreadNotifications_other": "{count}未読通知",
@@ -1555,6 +1625,8 @@
       },
       "status": {
         "notInCatalog": "カタログにはない",
+        "externallyManaged": "DLSSync 外で管理",
+        "incompatible": "非対応として報告",
         "disabled": "障害者",
         "updatesReady": "アップデート準備完了",
         "updateReady": "アップデート完了",
@@ -1607,7 +1679,7 @@
         "pickDifferent": "別のバージョンを選んでください",
         "choose": "バージョンを選びましょう",
         "chooseVersion": "バージョンを選べ",
-        "catalogAside": "·カタログ v{version}",
+        "catalogAside": "パッケージ v{version}",
         "pinned": "ピン",
         "pinnedTitle": "君にピンで留められた"
       },
@@ -1770,6 +1842,26 @@
       "grdRequired": "4回のオーバーライドにはGame Ready Driver 572.16以降DLSSが必要です。",
       "superResolution": "スーパーレゾリューション",
       "frameGeneration": "フレーム生成",
+      "capabilityUnknown": "機能に関する応答が得られなかったため、書き込みは提供されません。",
+      "blocked": {
+        "host_not_windows": "このホストは Windows ではないため、ドライバープロファイル API は使用されませんでした。",
+        "nvapi_unavailable": "この環境では NVIDIA ドライバー API を読み込めませんでした。",
+        "nvapi_version_unknown": "NVIDIA ドライバー API は読み込まれましたが、検証済みのバージョンは報告されませんでした。",
+        "adapter_not_nvidia": "このアダプターは NVIDIA のアダプターではありません。",
+        "nvidia_driver_version_unknown": "インストール済みの NVIDIA ドライバーのバージョンは確認されませんでした。",
+        "adapter_class_unknown": "アダプターのクラスは確認されませんでした。",
+        "hardware_unrecognized": "このハードウェアは既知のアダプター記録と一致しませんでした。",
+        "provider_applicability_unknown": "このプロバイダーが該当するかどうかは確認されませんでした。",
+        "provider_incompatible": "プロバイダーはこの組み合わせを非対応と報告しました。",
+        "game_integration_unknown": "ゲーム側の統合状況は確認されませんでした。",
+        "game_integration_incompatible": "ゲーム側の統合は非対応として確認されました。",
+        "runtime_stack_unknown": "ランタイムスタックは確認されませんでした。",
+        "runtime_stack_incompatible": "ランタイムスタックは非対応として確認されました。",
+        "preset_runtime_mapping_unknown": "プリセットとランタイムの対応は確認されませんでした。",
+        "preset_runtime_mapping_incompatible": "プリセットとランタイムの対応は非対応として確認されました。"
+      },
+      "neuralRendering": "ニューラルレンダリング",
+      "writeUnavailable": "ドライバープロファイルの変更は利用できません。必要な機能の根拠が確認されませんでした。",
       "rayReconstruction": "レイ再構成",
       "forceLatestRrDll": "インストール済みの最新レイ再構成DLLを強制する",
       "forceLatestSrDll": "最新のインストールされたDLSS DLLを強制的にインストールしてください",
@@ -1791,7 +1883,7 @@
       "learnMore": "詳しく↗はこちら",
       "working": "仕事中...",
       "resetToDefault": "デフォルトにリセット",
-      "note": "NVIDIAのドライバーアプリケーションプロファイルを書き込みます。これはNVIDIAアプリが使う仕組みと同じです。リセットで完全に元に戻します。アンチチート機能付きのマルチプレイヤータイトルでは、強制プロフィールがマークされることがあります。まずはゲームのポリシーを確認してください。",
+      "note": "NVIDIAプロファイルを変更します。対応と効果はゲームとGPUに依存します。リセットするとローカル設定を削除します。",
       "rrNote": "レイ再構成はSuper Resolutionとは別のドライバー設定 (0x10E41DF7) を使います。RTX GPUと対応ゲームが必要です。",
       "toast": {
         "openLinkFailed": "リンクが開かれませんでした:{error}",
@@ -1800,11 +1892,14 @@
         "applyFailed": "応募失敗:{error}",
         "reset": "DLSSドライバーのデフォルトにリセットしてください。",
         "resetFailed": "リセット失敗:{error}"
-      }
+      },
+      "profileSaved": "NVIDIAプロファイルに保存し、再読み取りで確認しました。",
+      "profileUnverified": "ドライバーが値を確認できませんでした。再試行する前にプロファイルを更新してください。",
+      "profileAccess": "NVIDIAドライバー {version} はこれらの設定を提供します。保存してもゲームが使用するとは限りません。"
     },
     "palette": {
       "aria": "コマンドパレット",
-      "placeholder": "検索コマンドやビューへのジャンプ",
+      "placeholder": "ゲームとコマンドを検索",
       "tabToCycle": "タブからサイクルへ",
       "recent": "最近の動向",
       "empty": {
@@ -1827,6 +1922,177 @@
         "drawer": "ゲームドローワー",
         "modal": "モーダル",
         "palette": "コマンドパレット"
+      },
+      "games": "ゲーム"
+    },
+    "cover": {
+      "unavailable": "カバー画像なし"
+    },
+    "recipes": {
+      "heading": "Mod",
+      "sub": "ローカルのModファイルをインストールし、検証済みの復元記録を保持します。",
+      "empty": {
+        "catalog": "カタログに審査済みのModはありません。"
+      },
+      "installed": {
+        "heading": "インストール済みMod",
+        "empty": "このゲームにDLSSyncがインストールしたModはありません。"
+      },
+      "add": {
+        "heading": "ローカルModを追加",
+        "recipeFile": "Modファイルを選択",
+        "recipeFileLabel": "Modレシピ",
+        "sourceFolder": "ソースフォルダーを選択",
+        "sourceFolderLabel": "展開済みファイル",
+        "sourceFolderHint": "ダウンロード済みのファイルがあるフォルダーを選択してください。",
+        "nothingChosen": "未選択",
+        "clear": "クリア"
+      },
+      "intent": {
+        "label": "操作",
+        "apply": "ファイルをインストール",
+        "configure": "設定を変更"
+      },
+      "check": "ファイルを確認",
+      "checking": "ファイルを確認中…",
+      "apply": "Modをインストール",
+      "configure": "Mod設定を保存",
+      "working": "処理中…",
+      "remove": "Modを削除",
+      "removing": "削除中…",
+      "preview": {
+        "heading": "ファイルと設定",
+        "filesLabel": "ファイル",
+        "settingsLabel": "設定",
+        "recheck": "ゲームやソースファイルが変更された場合は再確認してください。",
+        "action": {
+          "create": "作成",
+          "replace": "置換",
+          "remove": "削除",
+          "configure": "設定"
+        }
+      },
+      "conflicts": {
+        "heading": "ファイルの競合",
+        "blocked": "続行する前に競合を解決してください。"
+      },
+      "issues": {
+        "heading": "詳細"
+      },
+      "error": {
+        "actionFailed": "Modの操作に失敗しました。",
+        "listFailed": "インストール済みModを読み取れませんでした。"
+      },
+      "import": {
+        "unverified": "ローカルのソースです。互換性は未検証です。"
+      },
+      "state": {
+        "note": "所有状態、検出ファイル、互換性は別の結果です。",
+        "ownership": {
+          "none": "未管理",
+          "installed_by_dlssync": "DLSSyncがインストール",
+          "owned_modified": "外部で変更済み",
+          "owned_missing": "ファイルが見つかりません",
+          "partially_removed": "一部削除済み",
+          "removed": "削除済み"
+        },
+        "observation": {
+          "not_observed": "未観測",
+          "files_detected": "ファイルを検出",
+          "runtime_detected": "実行を検出",
+          "unknown_or_inaccessible": "検査できませんでした"
+        },
+        "compatibility": {
+          "unknown": "互換性不明",
+          "documented_only": "文書のみ",
+          "tested_pass": "テスト合格",
+          "tested_fail": "テスト失敗",
+          "stale": "情報が古くなっています"
+        },
+        "support": {
+          "unknown": "サポート不明",
+          "experimental": "実験的",
+          "official": "公式",
+          "local_import": "ローカルインポート"
+        }
+      },
+      "result": {
+        "completed": "変更を検証済み",
+        "failed": "変更に失敗",
+        "changedLabel": "変更済み",
+        "retainedLabel": "保持済み",
+        "retainedHint": "保持されたファイルは削除されていません。再試行前に詳細を確認してください。"
+      },
+      "blocked": {
+        "no_selection": "Modファイルを選択",
+        "not_checked": "先にファイルを確認してください",
+        "expired": "確認が期限切れです。再確認してください。",
+        "conflicts": "競合を解決してください",
+        "not_allowed": "この操作は利用できません",
+        "busy": "現在の操作の完了を待ってください"
+      },
+      "role": {
+        "proxy": "プロキシ",
+        "addon": "アドオン",
+        "shader": "シェーダー",
+        "data": "データ",
+        "notice": "通知"
+      }
+    },
+    "hardware": {
+      "otherTechnologies": "その他の技術",
+      "otherHelp": "これらのライブラリも検出されています。ここで確認できますが、ハードウェア向けの初期選択には含まれません。",
+      "supportLibraries": "補助ライブラリ",
+      "otherUpdates": "その他の更新",
+      "forThisPc": "この PC 向け",
+      "selectRecommended": "推奨項目を選択（{count}）",
+      "supportHelp": "主要技術のプラグインと共有ファイルです。各ファイルには個別のバージョンがあります。",
+      "catalogOtherHelp": "他のベンダーを表示します。ハードウェアとの互換性を示すものではありません。",
+      "unknown": "ハードウェア情報を取得できません。更新を選ぶ前に検出されたライブラリを確認してください。",
+      "noRecommended": "推奨される更新はありません。その他の技術はゲームの詳細で確認できます。",
+      "reviewUpdates": "更新を確認"
+    },
+    "detail": {
+      "updates": "更新",
+      "advanced": "詳細設定",
+      "installLocation": "インストール先",
+      "localPackages": "ローカルパッケージ",
+      "localPackagesHelp": "自分で用意したファイルを管理します。カタログの更新とは別の機能です。",
+      "installedIn": "インストール先: {games}",
+      "catalogMatchHelp": "インストール済み表示には、最後のスキャンでのファイルの完全一致が必要です。",
+      "installedFile": "インストール済みファイル",
+      "catalogVersion": "カタログのバージョン",
+      "noExactMatch": "カタログとの完全一致なし",
+      "availableVersions": "利用可能なバージョン"
+    },
+    "devices": {
+      "heading": "インストール済みデバイス",
+      "localHelp": "Windowsのローカル情報です。カテゴリを開くとバージョンと詳細を表示します。",
+      "search": "デバイスを検索",
+      "attention": "要確認",
+      "noMatches": "一致するデバイスがありません。",
+      "details": "詳細",
+      "identity": "デバイスID",
+      "date": "ドライバーの日付",
+      "problem": "Windowsがデバイスエラー {code} を報告しています。",
+      "classes": {
+        "audio": "オーディオ",
+        "display": "グラフィックス",
+        "monitor": "モニター",
+        "network": "ネットワーク",
+        "bluetooth": "Bluetooth",
+        "input": "キーボードとマウス",
+        "storage": "ストレージ",
+        "printer": "プリンター",
+        "camera": "カメラ",
+        "sensor": "センサー",
+        "battery": "バッテリーと電源",
+        "smart_card": "カードリーダー",
+        "firmware": "ファームウェア",
+        "chipset": "チップセット",
+        "system": "システム",
+        "usb": "USBコントローラー",
+        "other": "その他のデバイス"
       }
     }
   },
@@ -1847,8 +2113,8 @@
     "settingsSaveFailed": "設定を保存できませんでした:{msg}",
     "saveFailed": "セーブできませんでした:{msg}",
     "nothingSelected": "何も選ばれていません",
-    "updatePlanStale": "このプランを開いている間にカタログが変更されました。適用前に新しいプランを確認してください。",
-    "applyInProgress": "すでに申請が進行中なので、先に申請が完了するまで待ちましょう",
+    "updatePlanStale": "ゲームファイルまたは更新情報が変更されました。もう一度更新を確認してください。",
+    "applyInProgress": "更新はすでに実行中です。",
     "cancelFailed": "キャンセル失敗:{msg}",
     "queuedAcross": "{updates}を横断して並んだ{games}",
     "queuedUpdates_one": "{count}アップデート",

@@ -14,11 +14,13 @@ import {
   inflightCount,
   pendingDllUpdateDigest,
   outdatedDllItems,
+  hardwarePreference,
   emitDllUpdatesDigest,
   backgroundConfig,
   triggerApplyAllOutdated,
   applyModalOpen,
   showToast,
+  formatError,
   type OutdatedDllItem,
 } from "./stores";
 import {
@@ -28,6 +30,7 @@ import {
   type ApplyTarget,
 } from "./applyController";
 import { hasAntiCheat } from "./anticheat";
+import { defaultUpdateFamily } from "./hardwarePreference";
 import { translate, locale } from "./i18n/index";
 
 /** Injection seam so the tick/apply-all handlers can be unit-tested without the
@@ -106,22 +109,25 @@ function liveDeps(): BackgroundDeps {
 
 /** Auto-apply every outdated DLL EXCEPT those in anti-cheat-flagged games. The
  *  per-game anti-cheat probe reuses the exact API the game drawer uses; a probe
- *  failure is treated as "not flagged" (the backend apply guards remain the hard
- *  safety net). Backups/pins/Enabler/Streamline coherence are enforced by the
+ *  failure prevents automatic changes until detection succeeds. Backups/pins/Enabler/Streamline coherence are enforced by the
  *  apply path. */
 export async function autoApplyExcludingAntiCheat(items: OutdatedDllItem[]): Promise<void> {
+  items = items.filter(item => defaultUpdateFamily(item.record.family, get(hardwarePreference)));
   if (items.length === 0) return;
   const byGame = new Map<string, DetectedGame>();
   for (const it of items) byGame.set(it.game.id, it.game);
   const blockedGameIds = new Set<string>();
+  const failedProbeGameIds = new Set<string>();
   for (const game of byGame.values()) {
     try {
       const report = await detectAnticheat(game.install_dir, game.app_id, game.name);
       if (hasAntiCheat(report)) blockedGameIds.add(game.id);
-    } catch {
+    } catch (error) {
+      failedProbeGameIds.add(game.id);
+      showToast("warning", formatError(error));
     }
   }
-  const allowed = items.filter((it) => !blockedGameIds.has(it.game.id));
+  const allowed = items.filter((it) => !blockedGameIds.has(it.game.id) && !failedProbeGameIds.has(it.game.id));
   if (allowed.length === 0) {
     if (blockedGameIds.size > 0) {
       showToast("info", translate(get(locale), "view.library.toast.autoApplyAllSkipped"));
@@ -136,10 +142,14 @@ export async function autoApplyExcludingAntiCheat(items: OutdatedDllItem[]): Pro
       }),
     );
   }
-  const targets: ApplyTarget[] = allowed.map((it) =>
-    buildTargetFromRecord(it.game, it.record, it.target),
-  );
-  await dispatchApply(targets, { showModal: () => applyModalOpen.set(true) });
+  const targets: ApplyTarget[] = allowed.map((it) => ({
+    ...buildTargetFromRecord(it.game, it.record, it.target),
+    catalog_family: it.catalogFamily,
+  }));
+  await dispatchApply(targets, {
+    actor: "background",
+    showModal: () => applyModalOpen.set(true),
+  });
 }
 
 /** Handle one background scan tick. Skips entirely when a scan is already running
