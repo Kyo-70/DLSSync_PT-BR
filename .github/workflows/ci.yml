@@ -164,7 +164,7 @@ jobs:
         shell: pwsh
         run: |
           $compiler = (rustc --version).Trim().Replace(' ', '-')
-          "key=e2e-app-v1-${{ runner.os }}-${{ runner.arch }}-$compiler-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'product.toml', 'package.json', 'pnpm-lock.yaml', '.cargo/**', 'src-tauri/**', 'crates/**', 'frontend/package.json', 'frontend/vite.config.*', 'frontend/src/**', 'tests/e2e/config.ts', 'tests/e2e/global-setup.ts') }}" >> $env:GITHUB_OUTPUT
+          "key=e2e-app-v1-${{ runner.os }}-${{ runner.arch }}-$compiler-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'product.toml', 'package.json', 'pnpm-lock.yaml', '.cargo/**', 'src-tauri/**', 'crates/**', 'frontend/package.json', 'frontend/vite.config.*', 'frontend/src/**', 'tests/e2e/config.ts', 'tests/e2e/global-setup.ts', 'tests/e2e/tauri.conf.json') }}" >> $env:GITHUB_OUTPUT
 
       - name: Restore an application built from identical sources
         id: e2e-binary
@@ -180,7 +180,7 @@ jobs:
         if: steps.e2e-binary.outputs.cache-hit != 'true'
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/target/e2e
-        run: node node_modules/@tauri-apps/cli/tauri.js build --debug --no-bundle
+        run: node node_modules/@tauri-apps/cli/tauri.js build --debug --no-bundle --config tests/e2e/tauri.conf.json
         timeout-minutes: 25
 
       - name: Preserve the successful build before running UI tests

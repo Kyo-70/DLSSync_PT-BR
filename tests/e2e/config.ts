@@ -5,7 +5,7 @@ const here = __dirname;
 export const repoRoot = path.resolve(here, "..", "..");
 
 export const cdpHost = "127.0.0.1";
-export const cdpPort = Number(process.env.DLSSYNC_E2E_CDP_PORT ?? 9334);
+export const cdpPort = 9334;
 export const cdpBaseUrl = `http://${cdpHost}:${cdpPort}`;
 export const cdpVersionEndpoint = `${cdpBaseUrl}/json/version`;
 
@@ -13,7 +13,14 @@ export const buildTargetDir = path.join(repoRoot, "target", "e2e");
 export const appBinaryPath = path.join(buildTargetDir, "debug", "dlssync.exe");
 
 export const buildCommand = process.execPath;
-export const buildArgs = [path.join(repoRoot, "node_modules", "@tauri-apps", "cli", "tauri.js"), "build", "--debug", "--no-bundle"];
+export const buildArgs = [
+  path.join(repoRoot, "node_modules", "@tauri-apps", "cli", "tauri.js"),
+  "build",
+  "--debug",
+  "--no-bundle",
+  "--config",
+  path.join(repoRoot, "tests", "e2e", "tauri.conf.json"),
+];
 export const buildTimeoutMs = 1_500_000;
 
 export const appReadyTimeoutMs = 30_000;
