@@ -21,7 +21,7 @@ test.describe("marketing screenshots", () => {
     await expect(page.locator(".game-card")).toHaveCount(4, { timeout: 30_000 });
     await page.screenshot({ path: join(gallery, "01-library.png"), animations: "disabled" });
 
-    await protectedCard.locator(".body").click();
+    await protectedCard.getByRole("heading").getByRole("button").click();
     await expect(page.locator(".detail-view")).toBeVisible();
     await expect(page.locator(".detail-view .feature-row")).toHaveCount(2, { timeout: 30_000 });
     await page.screenshot({ path: join(gallery, "02-game-detail.png"), animations: "disabled" });

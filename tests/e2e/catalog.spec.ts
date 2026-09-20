@@ -36,7 +36,7 @@ test.describe("catalog", () => {
     await page.locator(".runtime-search input").fill("DirectStorage");
     const microsoftCard = page.getByRole("region", { name: "Microsoft", exact: true });
     await expect(microsoftCard).toBeVisible();
-    const directStorage = microsoftCard.getByRole("button", { name: /^View versions of DirectStorage/ }).first();
+    const directStorage = microsoftCard.getByRole("button", { name: /^View .*DirectStorage.* versions$/ }).first();
     await expect(directStorage).toBeVisible();
     await directStorage.click();
     await expect(page.getByRole("button", { name: /Download/i }).first()).toBeVisible();

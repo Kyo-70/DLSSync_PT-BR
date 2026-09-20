@@ -62,6 +62,11 @@ jobs:
           components: rustfmt, clippy
           targets: x86_64-pc-windows-msvc
 
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        env:
+          CACHE_ON_FAILURE: 'true'
+
       - name: Stub frontend dist for tauri::generate_context!
         shell: pwsh
         run: |
@@ -147,12 +152,52 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # global-setup builds the debug binary (pnpm tauri build --debug --no-bundle),
-      # seeds hermetic app data, and launches WebView2 with the CDP port.
-      # Playwright drives every app tab over CDP with zero expected skips.
+      - name: Cache E2E Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          workspaces: '. -> target/e2e'
+        env:
+          CACHE_ON_FAILURE: 'true'
+
+      - name: Identify the exact application sources and compiler
+        id: e2e-key
+        shell: pwsh
+        run: |
+          $compiler = (rustc --version).Trim().Replace(' ', '-')
+          "key=e2e-app-v1-${{ runner.os }}-${{ runner.arch }}-$compiler-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'product.toml', 'package.json', 'pnpm-lock.yaml', '.cargo/**', 'src-tauri/**', 'crates/**', 'frontend/package.json', 'frontend/vite.config.*', 'frontend/src/**', 'tests/e2e/config.ts', 'tests/e2e/global-setup.ts') }}" >> $env:GITHUB_OUTPUT
+
+      - name: Restore an application built from identical sources
+        id: e2e-binary
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        continue-on-error: true
+        with:
+          key: ${{ steps.e2e-key.outputs.key }}
+          path: |
+            target/e2e/debug/dlssync.exe
+            target/e2e/debug/*.dll
+
+      - name: Build the E2E application when its sources changed
+        if: steps.e2e-binary.outputs.cache-hit != 'true'
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target/e2e
+        run: node node_modules/@tauri-apps/cli/tauri.js build --debug --no-bundle
+        timeout-minutes: 25
+
+      - name: Preserve the successful build before running UI tests
+        if: steps.e2e-binary.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        continue-on-error: true
+        with:
+          key: ${{ steps.e2e-key.outputs.key }}
+          path: |
+            target/e2e/debug/dlssync.exe
+            target/e2e/debug/*.dll
+
       - name: E2E (Playwright)
+        env:
+          DLSS_E2E_SKIP_BUILD: '1'
         run: pnpm test:e2e
-        timeout-minutes: 45
+        timeout-minutes: 20
 
       - name: Upload Playwright report
         if: failure()

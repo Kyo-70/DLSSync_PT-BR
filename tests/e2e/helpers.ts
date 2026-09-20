@@ -26,6 +26,6 @@ export async function gotoView(page: Page, view: ViewName): Promise<void> {
 export async function openGameCard(page: Page, index: number): Promise<void> {
   const card = page.locator(".game-card").nth(index);
   await expect(card).toBeVisible();
-  await card.locator(".body").click();
+  await card.getByRole("heading").getByRole("button").click();
   await expect(page.locator(".detail-view")).toBeVisible();
 }

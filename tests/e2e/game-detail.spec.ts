@@ -46,7 +46,7 @@ test.describe("game detail", () => {
     await expect(protectedCard).toBeVisible();
     await expect(protectedCard).toContainText("DLSS", { timeout: 30_000 });
     const detail = page.locator(".detail-view");
-    await protectedCard.locator(".body").click();
+    await protectedCard.getByRole("heading").getByRole("button").click();
     await expect(detail).toBeVisible();
     await expect(page.locator(".drawer-body .warning-banner, .detail-view .warning-banner").first()).toBeVisible();
     // The apply-risk note rides on the apply selection (`acActive && selectedCount > 0`), and the
@@ -73,7 +73,7 @@ test.describe("game detail", () => {
 
     const protectedCard = page.locator(".game-card", { hasText: E2E_PROTECTED_GAME_NAME }).first();
     await expect(protectedCard).toContainText("DLSS", { timeout: 30_000 });
-    await protectedCard.locator(".body").click();
+    await protectedCard.getByRole("heading").getByRole("button").click();
     await expect(page.locator(".detail-view")).toBeVisible();
 
     // The only files in reach belong to the seeded fixture game inside the hermetic data root.
