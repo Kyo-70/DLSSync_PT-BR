@@ -330,8 +330,7 @@
       "openLinkFailed": "Error al abrir el enlace: {error}",
       "graphics": "Gráficos",
       "devices": "Dispositivos",
-      "notChecked": "Sin comprobar actualizaciones",
-      "windowsOnly": "La instalación de drivers, los dispositivos de Windows y los perfiles de NVIDIA requieren Windows. Biblioteca, Catálogo y Copias de seguridad siguen disponibles."
+      "notChecked": "Sin comprobar actualizaciones"
     },
     "backups": {
       "title": "Copias de seguridad",

@@ -2,9 +2,7 @@ use crate::art::{best_local_asset, LocalVariant};
 use crate::{DetectedGame, GameArt, GameArtSource, LauncherKind, LauncherScanner, ScanError};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-#[cfg(windows)]
 use winreg::enums::HKEY_LOCAL_MACHINE;
-#[cfg(windows)]
 use winreg::RegKey;
 
 pub struct SteamScanner;
@@ -39,7 +37,6 @@ impl LauncherScanner for SteamScanner {
     }
 }
 
-#[cfg(windows)]
 fn find_steam_install() -> Result<PathBuf, ScanError> {
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     for subkey in [
@@ -56,24 +53,6 @@ fn find_steam_install() -> Result<PathBuf, ScanError> {
         }
     }
     Err(ScanError::Registry("Steam install path not found".into()))
-}
-
-#[cfg(not(windows))]
-fn find_steam_install() -> Result<PathBuf, ScanError> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or_else(|| ScanError::Parse("Home directory unavailable".into()))?;
-    let candidates = [
-        home.join("Library/Application Support/Steam"),
-        home.join(".local/share/Steam"),
-        home.join(".steam/steam"),
-        home.join(".steam/root"),
-        home.join(".var/app/com.valvesoftware.Steam/.local/share/Steam"),
-    ];
-    candidates
-        .into_iter()
-        .find(|path| path.join("steamapps").is_dir())
-        .ok_or_else(|| ScanError::Parse("Steam install path not found".into()))
 }
 
 fn parse_library_folders(steam_path: &Path) -> Result<Vec<PathBuf>, ScanError> {

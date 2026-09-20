@@ -330,8 +330,7 @@
       "openLinkFailed": "リンクが開かれませんでした:{error}",
       "graphics": "グラフィックス",
       "devices": "デバイス",
-      "notChecked": "更新は未確認です",
-      "windowsOnly": "ドライバーのインストール、Windows デバイス、NVIDIA プロファイルには Windows が必要です。ライブラリ、カタログ、バックアップは引き続き利用できます。"
+      "notChecked": "更新は未確認です"
     },
     "backups": {
       "title": "バックアップ",

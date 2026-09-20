@@ -29,13 +29,9 @@ pub fn read_authenticode(path: &Path) -> Option<AuthenticodeInfo> {
 }
 
 #[cfg(not(windows))]
-pub fn read_authenticode(path: &Path) -> Option<AuthenticodeInfo> {
-    Some(unix::read(path))
+pub fn read_authenticode(_path: &Path) -> Option<AuthenticodeInfo> {
+    None
 }
-
-#[cfg(any(not(windows), test))]
-#[path = "authenticode_unix.rs"]
-mod unix;
 
 #[cfg(windows)]
 mod win {

@@ -330,8 +330,7 @@
       "openLinkFailed": "Lien ouvert échoué : {error}",
       "graphics": "Graphiques",
       "devices": "Périphériques",
-      "notChecked": "Mises à jour non vérifiées",
-      "windowsOnly": "L’installation des pilotes, les périphériques Windows et les profils NVIDIA nécessitent Windows. Bibliothèque, Catalogue et Sauvegardes restent disponibles."
+      "notChecked": "Mises à jour non vérifiées"
     },
     "backups": {
       "title": "Remplaçants",

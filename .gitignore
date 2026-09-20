@@ -67,6 +67,3 @@ SPEC.md
 
 # Manifest signing private key — NEVER commit
 secrets/
-
-# Native verifier binaries are built from pinned source on release runners.
-/src-tauri/binaries/

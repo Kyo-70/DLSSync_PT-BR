@@ -330,8 +330,7 @@
       "openLinkFailed": "打开链接失败：{error}",
       "graphics": "显卡",
       "devices": "设备",
-      "notChecked": "尚未检查更新",
-      "windowsOnly": "驱动安装、Windows 设备和 NVIDIA 配置文件需要 Windows。游戏库、目录和备份仍然可用。"
+      "notChecked": "尚未检查更新"
     },
     "backups": {
       "title": "备份",

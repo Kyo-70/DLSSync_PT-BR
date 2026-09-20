@@ -330,8 +330,7 @@
       "openLinkFailed": "Link aberto falhou: {error}",
       "graphics": "Gráficos",
       "devices": "Dispositivos",
-      "notChecked": "Atualizações não verificadas",
-      "windowsOnly": "A instalação de drivers, os dispositivos Windows e os perfis NVIDIA exigem Windows. Biblioteca, Catálogo e Backups continuam disponíveis."
+      "notChecked": "Atualizações não verificadas"
     },
     "backups": {
       "title": "Reservas",

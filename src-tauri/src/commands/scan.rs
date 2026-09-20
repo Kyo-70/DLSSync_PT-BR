@@ -208,14 +208,10 @@ fn scan_launcher(kind: LauncherKind) -> Result<Vec<DetectedGame>, launcher_scan:
 }
 
 #[cfg(not(windows))]
-fn scan_launcher(kind: LauncherKind) -> Result<Vec<DetectedGame>, launcher_scan::ScanError> {
-    match kind {
-        LauncherKind::Steam => launcher_scan::SteamScanner.scan(),
-        LauncherKind::Manual => Ok(Vec::new()),
-        _ => Err(launcher_scan::ScanError::Parse(
-            "This launcher requires Windows. Add its game folder directly instead.".into(),
-        )),
-    }
+fn scan_launcher(_kind: LauncherKind) -> Result<Vec<DetectedGame>, launcher_scan::ScanError> {
+    Err(launcher_scan::ScanError::Parse(
+        "launcher discovery is available only on Windows".into(),
+    ))
 }
 
 fn removed_games_for_successful_scopes(

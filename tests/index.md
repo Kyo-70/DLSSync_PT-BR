@@ -400,5 +400,3 @@ Live driver installation, reboot and rollback remain separate acceptance actions
 `node --test scripts/build-nexus.test.mjs` checks shell-free command launch and isolated Nexus configuration. Nexus Cargo arguments follow the Tauri separator, and its build-time ACL input omits only the updater permission. A successful strip check does not prove packaged network silence.
 
 Release artifact gate: `cargo xtask verify-updater-signature --installer <exact-standard-installer>` verifies the adjacent Tauri signature against the public key in `src-tauri/tauri.conf.json`. Run it after final signing and before publication.
-
-Native platform gates run `.github/workflows/native.yml` on Linux x64 and macOS Intel/Apple Silicon. They exercise Steam discovery and PE/backup libraries, build the pinned verifier, and package the application. `pe-version` tests reject failed verification and ambiguous publisher identities. A compiled package is not proof of game compatibility.

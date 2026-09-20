@@ -4,7 +4,6 @@
   import { get } from "svelte/store";
   import { openUrl, systemDriverVersions, type DriverStatusReport, type GpuVendor } from "../lib/api";
   import { isNexusBuild } from "../lib/distribution";
-  import { supportsWindowsDrivers } from "../lib/platform";
   import { t, locale, translate } from "../lib/i18n/index";
   import {
     driverStatusTone,
@@ -179,7 +178,6 @@
   }
 
   onMount(() => {
-    if (!supportsWindowsDrivers) return;
     void ensureSystemInfo().catch(() => undefined);
     if (!isNexusBuild) {
       void loadDriverUpdates();
@@ -193,17 +191,16 @@
     <div>
       <h1 class="view-title">{$t("view.drivers.title")}</h1>
       <p class="view-subtitle">
-        {$t(supportsWindowsDrivers ? "view.drivers.subtitle" : "view.drivers.windowsOnly")}
+        {$t("view.drivers.subtitle")}
       </p>
     </div>
-    {#if supportsWindowsDrivers}<div class="header-actions">
+    <div class="header-actions">
       <button class="check-btn" onclick={() => loadDriverUpdates()} disabled={$driverCheckInProgress}>
         {$driverCheckInProgress ? $t("view.drivers.checking") : $t("view.drivers.checkForUpdates")}
       </button>
-    </div>{/if}
+    </div>
   </header>
 
-  {#if supportsWindowsDrivers}
   <nav class="drivers-tabs" aria-label={$t("view.drivers.title")}>
     <button data-testid="drivers-tab-graphics" class:active={activeSection === "graphics"} aria-pressed={activeSection === "graphics"} onclick={() => goToSection("graphics")}>{$t("view.drivers.graphics")}<span>{reports.length}</span></button>
     <button data-testid="drivers-tab-system" class:active={activeSection === "system"} aria-pressed={activeSection === "system"} onclick={() => goToSection("system")}>{$t("view.drivers.devices")}<span>{systemUpdateCount}</span></button>
@@ -597,7 +594,6 @@
         {$t("view.drivers.upscalingSub")}
       </p>
     </section>
-  {/if}
   {/if}
 </section>
 

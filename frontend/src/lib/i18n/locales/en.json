@@ -330,8 +330,7 @@
       "openLinkFailed": "Open link failed: {error}",
       "graphics": "Graphics",
       "devices": "Devices",
-      "notChecked": "Update check not run",
-      "windowsOnly": "Driver installation, Windows devices and NVIDIA profiles require Windows. Library, Catalog and Backups remain available."
+      "notChecked": "Update check not run"
     },
     "backups": {
       "title": "Backups",
