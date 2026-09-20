@@ -26,13 +26,10 @@ test.describe("marketing screenshots", () => {
     await expect(page.locator(".detail-view .feature-row")).toHaveCount(2, { timeout: 30_000 });
     await page.screenshot({ path: join(gallery, "02-game-detail.png"), animations: "disabled" });
 
-    const apply = page.locator(".foot-apply");
-    await apply.click();
-    await page.locator(".ac-confirm-proceed").click();
-    await expect(page.getByRole("heading", { name: "Review update plan", exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Apply selected", exact: true })).toBeEnabled();
-    await page.screenshot({ path: join(gallery, "03-update-plan.png"), animations: "disabled" });
-    await page.locator(".plan-modal .close").click();
+    await page.locator(".detail-back").click();
+    await gotoView(page, "backups");
+    await expect(page.locator(".backup-hero")).toHaveCount(0);
+    await page.screenshot({ path: join(gallery, "03-backups.png"), animations: "disabled" });
 
     await gotoView(page, "catalog");
     await expect(page.getByRole("heading", { name: "Trust Center", exact: true })).toHaveCount(0);

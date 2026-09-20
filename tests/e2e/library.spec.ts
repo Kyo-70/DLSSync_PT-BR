@@ -17,7 +17,7 @@ test.describe("library", () => {
       return;
     }
     await expect(page.locator(".game-card").first()).toBeVisible();
-    const segButtons = page.locator(".seg-btn");
+    const segButtons = page.locator(".presentation-picker button");
     expect(await segButtons.count()).toBeGreaterThanOrEqual(2);
 
     const listToggle = page.getByRole("button", { name: /^list$/i }).first();
@@ -32,34 +32,23 @@ test.describe("library", () => {
   test("search input and filter controls are present", async ({ app }) => {
     const { page } = app;
     await gotoView(page, "library");
-    await expect(page.locator("header input[type=search]")).toBeVisible();
-    await expect(page.locator(".filter-toolbar")).toBeVisible();
+    await expect(page.locator(".palette-btn")).toBeVisible();
+    await expect(page.locator("header input[type=search]")).toHaveCount(0);
+    await page.locator(".library-filter-toggle").click();
+    await expect(page.locator(".library-filter-options")).toBeVisible();
+    await page.locator(".library-filter-toggle").click();
   });
 
-  test("apply-all affordance appears only when pending updates exist", async ({ app }, testInfo) => {
+  test("apply-all affordance matches the displayed pending update count", async ({ app }) => {
     const { page } = app;
     await gotoView(page, "library");
-    const heroCount = await page.locator(".updates-hero").count();
-    if (heroCount === 0) {
-      testInfo.annotations.push({
-        type: "gated",
-        description: "no games in library at test time; status hero absent",
-      });
-      test.skip(true, "no games at test time");
-      return;
+    const summary = page.locator(".library-summary");
+    await expect(summary).toHaveAttribute("data-update-count", /^\d+$/);
+    const count = Number(await summary.getAttribute("data-update-count"));
+    if (count > 0) {
+      await expect(page.getByTestId("library-update-all")).toBeVisible();
+    } else {
+      await expect(page.getByTestId("library-update-all")).toHaveCount(0);
     }
-    await expect(page.locator(".updates-hero .display-num")).toBeVisible();
-    const pendingTone = await page
-      .locator('.updates-hero .display-num[data-tone="warning"]')
-      .count();
-    if (pendingTone === 0) {
-      await expect(page.locator(".updates-hero-apply")).toHaveCount(0);
-      testInfo.annotations.push({
-        type: "gated",
-        description: "no outdated DLLs at test time; hero renders all-clear without apply CTA",
-      });
-      return;
-    }
-    await expect(page.locator(".updates-hero-apply, .btn-apply-all").first()).toBeVisible();
   });
 });

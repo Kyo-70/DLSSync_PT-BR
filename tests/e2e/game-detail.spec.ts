@@ -25,7 +25,7 @@ test.describe("game detail", () => {
     const featureRows = await page.locator(".feature-row").count();
     if (featureRows > 0) {
       await expect(page.locator(".feature-row").first()).toBeVisible();
-      await expect(page.locator(".summary-row")).toHaveCount(1);
+      await expect(page.locator(".drawer-selection-summary")).toHaveCount(1);
     } else {
       testInfo.annotations.push({
         type: "gated",
@@ -77,7 +77,10 @@ test.describe("game detail", () => {
     await expect(page.locator(".detail-view")).toBeVisible();
 
     // The only files in reach belong to the seeded fixture game inside the hermetic data root.
-    await expect(page.locator(".drawer-path")).toContainText(FIXTURE_GAMES_DIR);
+    const detailTabs = page.locator(".detail-view .detail-tabs");
+    await detailTabs.getByRole("button", { name: "Advanced", exact: true }).click();
+    await expect(page.locator(".detail-location")).toContainText(FIXTURE_GAMES_DIR);
+    await detailTabs.getByRole("button", { name: "Updates", exact: true }).click();
 
     // The mandatory plan-review modal was removed: updating is one click. Nothing in this flow may
     // render it, in any wording.

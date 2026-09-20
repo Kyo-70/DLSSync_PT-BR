@@ -12,24 +12,8 @@ export const cdpVersionEndpoint = `${cdpBaseUrl}/json/version`;
 export const buildTargetDir = path.join(repoRoot, "target", "e2e");
 export const appBinaryPath = path.join(buildTargetDir, "debug", "dlssync.exe");
 
-function resolvePnpmCliPath(): string {
-  const npmExecPath = process.env.npm_execpath;
-  if (npmExecPath && fs.existsSync(npmExecPath)) return npmExecPath;
-
-  const bundledPnpm = path.join(
-    path.dirname(process.execPath),
-    "node_modules",
-    "pnpm",
-    "bin",
-    "pnpm.cjs",
-  );
-  if (fs.existsSync(bundledPnpm)) return bundledPnpm;
-
-  throw new Error("pnpm CLI entrypoint not found; run e2e through pnpm");
-}
-
 export const buildCommand = process.execPath;
-export const buildArgs = [resolvePnpmCliPath(), "tauri", "build", "--debug", "--no-bundle"];
+export const buildArgs = [path.join(repoRoot, "node_modules", "@tauri-apps", "cli", "tauri.js"), "build", "--debug", "--no-bundle"];
 export const buildTimeoutMs = 1_500_000;
 
 export const appReadyTimeoutMs = 30_000;

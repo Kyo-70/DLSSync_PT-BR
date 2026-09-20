@@ -1,6 +1,6 @@
 import { test as base, chromium, expect } from "@playwright/test";
 import type { Browser, BrowserContext, ConsoleMessage, Page } from "@playwright/test";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -199,13 +199,24 @@ export const test = base.extend<{ consoleGuard: void }, { app: AppHarness }>({
         const noise = attachNoiseCollector(page);
         await use({ page, noise });
       } finally {
-        if (browser) await browser.close().catch(() => undefined);
         if (child.exitCode === null) {
           const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-          child.kill();
+          if (process.platform === "win32" && child.pid) {
+            // WebView2 children can keep the isolated profile locked after only
+            // the parent is terminated. Target only this spawned process tree.
+            const stopped = spawnSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
+              windowsHide: true,
+              timeout: 10_000,
+              stdio: "ignore",
+            });
+            if (stopped.status !== 0) child.kill();
+          } else {
+            child.kill();
+          }
           await exited;
         }
-        rmSync(dataDir, { recursive: true, force: true });
+        if (browser) await browser.close().catch(() => undefined);
+        rmSync(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
       }
     },
     { scope: "worker", timeout: appReadyTimeoutMs + 10_000 },
