@@ -57,6 +57,12 @@ DLSSync 1.7.0 is a Windows 10/11 x64 release. Standard and NexusBuild packages a
 
 ### Fixed
 
+- Steam scans retain previously observed games when one configured library root is temporarily unavailable.
+- Download clients honor the saved connection timeout after startup and settings changes.
+- Post-update observation preserves launcher identity, failed driver installs keep their retry candidate, and local package ownership comparisons follow Windows path casing rules.
+- Local package targets can create missing nested parent directories, while backup restores reject normalized paths outside the configured backup root.
+- The WebView2 E2E harness reports early app exits, waits for real scan completion, closes owned flyouts, and uses unambiguous driver-list assertions.
+- Vitest and its V8 coverage provider are aligned at 4.1.11. The resolved frontend and Rust dependency updates include `nanoid` 3.3.19, `brace-expansion` 5.0.12, `devalue` 5.9.4, `quinn-proto` 0.11.16 and `serde_with` 3.21.0.
 - Vendor marks and explicit backup-row columns are restored, backup entry grid placement and responsive text width are corrected, and the game-detail grid is correct after the decorative feature icons were removed.
 - Nexus-only Cargo flags reach Cargo, and the build-time capability is derived without the Standard updater permission.
 - Windows driver updates match exact PnP hardware IDs, installation targets are revalidated, per-package Windows Update Agent outcomes are checked, and active-version verification is reported separately.

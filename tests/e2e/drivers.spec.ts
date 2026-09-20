@@ -9,7 +9,7 @@ test.describe("drivers", () => {
     const { page } = app;
     await gotoView(page, "drivers");
 
-    const list = page.locator(".driver-list");
+    const list = page.locator(".driver-list").filter({ has: page.locator(".driver-card") }).first();
     await expect(list).toBeVisible();
     await expect(page.locator(".driver-card").first()).toBeVisible();
 

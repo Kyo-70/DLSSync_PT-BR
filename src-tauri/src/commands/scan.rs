@@ -54,6 +54,10 @@ pub async fn scan_libraries(
                     successful_launchers.insert(launcher);
                     all.extend(games);
                 }
+                Err(launcher_scan::ScanError::Partial { games, detail }) => {
+                    all.extend(games);
+                    tracing::warn!(launcher = ?launcher, %detail, "launcher scan partial; prior games retained");
+                }
                 Err(error) => {
                     tracing::warn!(launcher = ?launcher, %error, "launcher scan failed");
                 }

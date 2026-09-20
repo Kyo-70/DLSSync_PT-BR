@@ -119,7 +119,7 @@ pub struct AppState {
     /// fast path and stays in `parking_lot::RwLock` for non-async reads.
     pub collect_system_info_lock: Arc<tokio::sync::Mutex<()>>,
     pub http_catalog: reqwest::Client,
-    pub http_downloads: reqwest::Client,
+    pub http_downloads: Arc<RwLock<reqwest::Client>>,
     pub http_art: reqwest::Client,
     pub download_cache: Arc<DownloadCache>,
     pub apply_registry: Arc<ApplyRegistry>,
@@ -160,14 +160,10 @@ impl AppState {
             .redirect(reqwest::redirect::Policy::limited(HTTP_CATALOG_REDIRECTS))
             .build()
             .expect("reqwest catalog client");
-        let http_downloads = reqwest::Client::builder()
-            .user_agent(UA)
-            .connect_timeout(Duration::from_secs(HTTP_DOWNLOAD_CONNECT_TIMEOUT_SECS))
-            .redirect(reqwest::redirect::Policy::limited(HTTP_DOWNLOAD_REDIRECTS))
-            .pool_max_idle_per_host(HTTP_DOWNLOAD_POOL_IDLE_PER_HOST)
-            .tcp_keepalive(Some(Duration::from_secs(30)))
-            .build()
-            .expect("reqwest downloads client");
+        let http_downloads = Arc::new(RwLock::new(
+            Self::build_download_client(HTTP_DOWNLOAD_CONNECT_TIMEOUT_SECS)
+                .expect("reqwest downloads client"),
+        ));
         let http_art = reqwest::Client::builder()
             .user_agent(UA)
             .timeout(Duration::from_secs(HTTP_ART_TIMEOUT_SECS))
@@ -208,6 +204,23 @@ impl AppState {
 
     pub fn install_event_handle(&self, handle: tauri::AppHandle) {
         *self.event_handle.write() = Some(handle);
+    }
+
+    pub fn rebuild_download_client(&self, connect_timeout_secs: u64) -> Result<(), String> {
+        let client = Self::build_download_client(connect_timeout_secs)?;
+        *self.http_downloads.write() = client;
+        Ok(())
+    }
+
+    fn build_download_client(connect_timeout_secs: u64) -> Result<reqwest::Client, String> {
+        reqwest::Client::builder()
+            .user_agent(UA)
+            .connect_timeout(Duration::from_secs(connect_timeout_secs.clamp(3, 60)))
+            .redirect(reqwest::redirect::Policy::limited(HTTP_DOWNLOAD_REDIRECTS))
+            .pool_max_idle_per_host(HTTP_DOWNLOAD_POOL_IDLE_PER_HOST)
+            .tcp_keepalive(Some(Duration::from_secs(30)))
+            .build()
+            .map_err(|error| error.to_string())
     }
 }
 

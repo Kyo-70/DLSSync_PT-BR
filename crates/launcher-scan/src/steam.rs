@@ -14,26 +14,48 @@ impl LauncherScanner for SteamScanner {
 
     fn scan(&self) -> Result<Vec<DetectedGame>, ScanError> {
         let steam_path = find_steam_install()?;
-        let libraries = parse_library_folders(&steam_path)?;
-        let mut games = Vec::new();
-        for lib in libraries {
-            let apps_dir = lib.join("steamapps");
-            let read_dir = match std::fs::read_dir(&apps_dir) {
-                Ok(r) => r,
-                Err(_) => continue,
-            };
-            for entry in read_dir.flatten() {
-                let name = entry.file_name();
-                let s = name.to_string_lossy();
-                if !s.starts_with("appmanifest_") || !s.ends_with(".acf") {
+        scan_install(&steam_path)
+    }
+}
+
+fn scan_install(steam_path: &Path) -> Result<Vec<DetectedGame>, ScanError> {
+    let libraries = parse_library_folders(steam_path)?;
+    let mut games = Vec::new();
+    let mut failures = Vec::new();
+    for lib in libraries {
+        let apps_dir = lib.join("steamapps");
+        let read_dir = match std::fs::read_dir(&apps_dir) {
+            Ok(r) => r,
+            Err(error) => {
+                failures.push(format!("{}: {error}", apps_dir.display()));
+                continue;
+            }
+        };
+        for entry in read_dir {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    failures.push(error.to_string());
                     continue;
                 }
-                if let Some(game) = parse_appmanifest(&entry.path(), &apps_dir, &steam_path) {
-                    games.push(game);
-                }
+            };
+            let name = entry.file_name();
+            let s = name.to_string_lossy();
+            if !s.starts_with("appmanifest_") || !s.ends_with(".acf") {
+                continue;
+            }
+            if let Some(game) = parse_appmanifest(&entry.path(), &apps_dir, steam_path) {
+                games.push(game);
             }
         }
+    }
+    if failures.is_empty() {
         Ok(games)
+    } else {
+        Err(ScanError::Partial {
+            games,
+            detail: failures.join("; "),
+        })
     }
 }
 
@@ -69,9 +91,7 @@ fn parse_library_folders(steam_path: &Path) -> Result<Vec<PathBuf>, ScanError> {
                     let raw = &after[..end];
                     let normalized = raw.replace("\\\\", "\\");
                     let p = PathBuf::from(normalized);
-                    if p.exists() {
-                        libs.push(p);
-                    }
+                    libs.push(p);
                 }
             }
         }

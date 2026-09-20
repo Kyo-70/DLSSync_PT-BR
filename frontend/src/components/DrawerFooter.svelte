@@ -137,7 +137,7 @@
     class="btn btn-primary foot-apply"
     class:is-active={selectedCount > 0}
     class:is-ac-danger={acActive && acSeverity === "danger"}
-    disabled={selectedCount === 0}
+    disabled={busy || selectedCount === 0}
     aria-describedby={acActive && selectedCount > 0 ? "ac-apply-risk-note" : undefined}
     onclick={onRequestApply}
   >

@@ -461,8 +461,9 @@ pub async fn install_driver(
     load_reboot_state(state.inner())?;
     let candidate = state
         .driver_install_candidates
-        .write()
-        .remove(&download_url)
+        .read()
+        .get(&download_url)
+        .cloned()
         .ok_or_else(|| {
             AppError::Validation(
                 "This driver package was not returned by the latest update check. Check again before installing."
@@ -495,7 +496,7 @@ pub async fn install_driver(
             .map_err(|e| AppError::Other(format!("create install staging dir: {e}")))?
     };
     let dest = staging.path().join(installer_filename(&download_url));
-    let client = state.http_downloads.clone();
+    let client = state.http_downloads.read().clone();
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<DownloadProgress>();
     let app_pump = app.clone();
@@ -640,6 +641,10 @@ pub async fn install_driver(
                 tracing::warn!(%error, "driver reboot evidence could not be persisted");
             }
         }
+        state
+            .driver_install_candidates
+            .write()
+            .remove(&download_url);
     }
     Ok(InstallOutcome {
         stage,
