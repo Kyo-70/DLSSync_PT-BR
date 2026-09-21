@@ -4,7 +4,6 @@ use crate::signatures::{
     PACKED_ENTROPY_THRESHOLD, PROTECTOR_SECTIONS, PROTECTOR_SECTION_COUNT_HINT, STRING_MARKERS,
 };
 use crate::ProtectionHit;
-use pelite::Wrap;
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -22,20 +21,57 @@ pub fn inspect_pe(path: &Path) -> Vec<ProtectionHit> {
     }
 }
 
-/// Section (name, sampled entropy) pairs gathered from either PE bitness.
-macro_rules! gather_sections {
-    ($file:expr) => {{
-        let mut out: Vec<(String, f64)> = Vec::new();
-        for sh in $file.section_headers() {
-            let name = sh.name().map(|s| s.to_string()).unwrap_or_default();
-            let entropy = match $file.get_section_bytes(sh) {
-                Ok(b) => shannon(&b[..b.len().min(ENTROPY_SAMPLE_BYTES)]),
-                Err(_) => 0.0,
-            };
-            out.push((name, entropy));
-        }
-        out
-    }};
+/// Parse section fields through bounded byte slices. PE optional-header lengths
+/// are untrusted; they must never become aligned Rust references.
+fn section_samples(bytes: &[u8]) -> Option<Vec<(String, f64)>> {
+    let word = |offset: usize| -> Option<u16> {
+        Some(u16::from_le_bytes(
+            bytes.get(offset..offset.checked_add(2)?)?.try_into().ok()?,
+        ))
+    };
+    let dword = |offset: usize| -> Option<u32> {
+        Some(u32::from_le_bytes(
+            bytes.get(offset..offset.checked_add(4)?)?.try_into().ok()?,
+        ))
+    };
+    if bytes.get(..2)? != b"MZ" {
+        return None;
+    }
+    let pe = dword(60)? as usize;
+    if !(64..=16 * 1024 * 1024).contains(&pe) || bytes.get(pe..pe.checked_add(4)?)? != b"PE\0\0" {
+        return None;
+    }
+    let count = word(pe + 6)? as usize;
+    let optional_size = word(pe + 20)? as usize;
+    let minimum = match word(pe + 24)? {
+        0x10b => 96,
+        0x20b => 112,
+        _ => return None,
+    };
+    if count > 96 || optional_size < minimum || !optional_size.is_multiple_of(4) {
+        return None;
+    }
+    let sections = pe.checked_add(24)?.checked_add(optional_size)?;
+    let table = bytes.get(sections..sections.checked_add(count.checked_mul(40)?)?)?;
+    let mut result = Vec::with_capacity(count);
+    // `as_chunks` keeps the exact-size iteration and drops the same trailing remainder that
+    // `chunks_exact` dropped. The slice above is already a whole number of 40-byte headers.
+    for section in table.as_chunks::<40>().0 {
+        let name_end = section[..8].iter().position(|byte| *byte == 0).unwrap_or(8);
+        let name = std::str::from_utf8(&section[..name_end])
+            .unwrap_or_default()
+            .to_string();
+        let size = u32::from_le_bytes(section[16..20].try_into().ok()?) as usize;
+        let start = u32::from_le_bytes(section[20..24].try_into().ok()?) as usize;
+        let sample = start
+            .checked_add(size)
+            .and_then(|end| bytes.get(start..end));
+        let entropy = sample
+            .map(|data| shannon(&data[..data.len().min(ENTROPY_SAMPLE_BYTES)]))
+            .unwrap_or(0.0);
+        result.push((name, entropy));
+    }
+    Some(result)
 }
 
 pub fn inspect_bytes(bytes: &[u8]) -> Vec<ProtectionHit> {
@@ -48,16 +84,8 @@ pub fn inspect_bytes(bytes: &[u8]) -> Vec<ProtectionHit> {
         }
     }
 
-    let sections: Vec<(String, f64)> = match pelite::PeFile::from_bytes(bytes) {
-        Ok(Wrap::T32(file)) => {
-            use pelite::pe32::Pe;
-            gather_sections!(file)
-        }
-        Ok(Wrap::T64(file)) => {
-            use pelite::pe64::Pe;
-            gather_sections!(file)
-        }
-        Err(_) => return hits,
+    let Some(sections) = section_samples(bytes) else {
+        return hits;
     };
 
     let mut max_entropy = 0.0f64;
@@ -125,6 +153,13 @@ fn push(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn malformed_optional_header_does_not_abort_section_scan() {
+        let mut bytes = build_pe64(&[]);
+        bytes[84..86].copy_from_slice(&2u16.to_le_bytes());
+        assert!(inspect_bytes(&bytes).is_empty());
+    }
 
     fn build_pe64(sections: &[(&str, Vec<u8>)]) -> Vec<u8> {
         let num = sections.len() as u16;

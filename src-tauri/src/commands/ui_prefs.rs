@@ -2,11 +2,13 @@ use crate::efficiency;
 use tauri::{AppHandle, Manager};
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub fn set_efficiency_mode(enable: bool) -> Result<(), String> {
     efficiency::apply(enable)
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub fn hide_main_window(app: AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("main") {
         w.hide().map_err(|e| e.to_string())?;
@@ -15,6 +17,7 @@ pub fn hide_main_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub fn show_main_window(app: AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("main") {
         w.show().map_err(|e| e.to_string())?;

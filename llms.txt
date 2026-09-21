@@ -1,94 +1,39 @@
 # DLSSync
 
-> Open-source Windows app that updates everything making PC games run and look better, from one place. It keeps NVIDIA DLSS, AMD FSR, Intel XeSS, Frame Generation, Reflex, Streamline, Ray Reconstruction and Microsoft DirectStorage DLLs in sync with each vendor's latest release, and it also updates NVIDIA, AMD and Intel GPU drivers plus other Windows device drivers. Hash-verified, vendor-signed, every change reversible. Lightweight (Rust + Tauri 2 + Svelte 5), zero telemetry, Apache-2.0.
+> Open-source Windows 10/11 x64 desktop app built with Tauri v2, Svelte and Rust. Updates supported DLSS, FSR, XeSS, Streamline and DirectStorage DLLs already present in game folders; also offers GPU and Windows device-driver update workflows. Apache-2.0.
 
-DLSSync is the modern open-source successor to DLSS Updater / DLSS Swapper for Windows gamers, but broader: it is not only an upscaler-DLL swapper. It also updates GPU and system drivers, gates every file behind a SHA-256 + Authenticode check, and ships as one lightweight signed binary with no Python or .NET runtime.
+The repository version is 1.7.0, released for Windows 10/11 x64 and dated in CHANGELOG.md. Published availability and the signature state of a specific file must be checked on the download pages.
 
-## What
+Integrity layers are distinct: Ed25519-signed catalog metadata, per-entry artifact hashes (SHA-256 or historical MD5), Authenticode publisher verification, and SHA-256-verified local backup snapshots. Catalog sources include first-party releases and labeled DLSS Swapper community-archive history. A correct hash does not prove game or hardware compatibility. Restore can fail if snapshots are missing, invalid or inaccessible.
 
-DLSSync detects games installed via Steam, Epic Games, GOG Galaxy, Ubisoft Connect, EA Desktop, Xbox / Microsoft Store and Battle.net, then keeps their DLSS, FSR, XeSS, NVIDIA Reflex, NVIDIA Streamline and Microsoft DirectStorage DLLs synchronized with each vendor's latest publisher release.
+Standard includes the app self-updater and allows automatic catalog refresh. NexusBuild- must have no self-updater, no automatic app-update or catalog calls, and only explicit manual network actions. Both v1.7.0 channels must use the same tag and source commit. The channel guide records current implementation and release-verification gaps; this index does not certify Nexus network silence. Portable mode stores state beside the executable and disables app self-update.
 
-Every replacement is gated by two independent checks: a SHA-256 hash match against a public CDN-hosted catalog manifest, and an Authenticode publisher signature gate that refuses any DLL not signed by NVIDIA, AMD, Intel or Microsoft. Every replaced DLL is auto-snapshotted into a local SQLite backup store so a one-click revert is always available.
+Nexus preparation writes derived configuration under `target/channels/nexus/config` without overwriting tracked configuration. Release publication refuses to delete an existing release. Standard `latest.json` must name only the exact Standard installer and include a nonempty matching signature. The AMD driver source opens an observed official AMD page instead of synthesizing an installer URL.
 
-Beyond DLLs, the Drivers tab updates NVIDIA, AMD and Intel GPU drivers (per-card version history, signature-verified installs) and other Windows device drivers (audio, network, Bluetooth, chipset, storage) through the Windows Update Agent, with an anti-downgrade guard and a System Restore checkpoint. It can also apply reversible NVIDIA DLSS preset and frame-generation overrides through the driver profile (NVAPI), the same mechanism the NVIDIA App uses, never injection.
+## User documentation
 
-## How DLSSync compares
+- [Install, one-click game updates, privacy and data paths](README.md)
+- [All documentation](docs/index.md)
+- [DLSS, FSR and XeSS family map](docs/dll-families.md)
+- [Streamline sets](docs/streamline.md)
+- [Versions and compatibility](docs/versions-and-compatibility.md)
+- [GPU and Windows drivers](docs/drivers.md)
+- [Restore a backup](docs/restoring-backups.md)
+- [DLSS presets](docs/dlss-overrides.md)
+- [Optional mods](docs/optional-mods.md)
+- [Error messages](docs/error-messages.md)
+- [Diagnostics and reporting](docs/troubleshooting.md)
+- [Nexus channel rules and verification gaps](docs/nexus-build.md)
+- [Dated comparison matrix](docs/competitive-comparison.md)
 
-- vs DLSS Swapper and DLSS Updater: DLSSync covers the same upscaler, frame-generation and ray-reconstruction DLLs, and adds the NVIDIA Streamline set (`sl.*`) as one atomic version-locked update, GPU and system driver updates, and a mandatory SHA-256 + Authenticode publisher gate. It ships as a single signed Rust binary with no Python or .NET runtime, installs per-user with no admin, and sends zero telemetry.
-- vs OptiScaler / DLSS Enabler: those inject and translate upscalers across GPUs (a different job). DLSSync updates the real vendor DLLs in place and pairs well alongside them.
-- License: Apache-2.0, every line auditable in the public repository.
+## Project references
 
-## Upstream sources
-
-DLSSync reads versions, hashes and signatures only from each vendor's official releases:
-
-- NVIDIA DLSS SDK: https://github.com/NVIDIA/DLSS
-- NVIDIA Streamline SDK: https://github.com/NVIDIA-RTX/Streamline
-- NVIDIA Reflex SDK: https://github.com/NVIDIA-RTX/REFLEX
-- Intel XeSS SDK: https://github.com/intel/xess
-- AMD FidelityFX SDK: https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK
-- Microsoft DirectStorage: https://github.com/microsoft/DirectStorage
-
-## Stack
-
-- Shell: Tauri 2 with native Windows WebView2 (no bundled Chromium)
-- Frontend: Svelte 5 + Vite 6 + TypeScript 5
-- Backend: Rust workspace (7 crates) — `pelite` for PE inspection, `jwalk` for parallel directory walking, `winreg` for launcher discovery, `rusqlite` (bundled) for the backup store, `reqwest` (rustls + brotli) for CDN fetch
-- Bundle: NSIS portable installer, `installMode: currentUser`, per-user install at `%LOCALAPPDATA%\DLSSync\`, no admin required
-- Auto-update: Ed25519-signed payload via `tauri-plugin-updater`, in-place hot-swap
-- Tray + Efficiency Mode: `tauri-plugin-autostart` + `win32-ecoqos` for EcoQoS green-leaf badge
-- License: Apache-2.0 — see LICENSE and NOTICE files
-
-## Footprint
-
-- Installer: under 5 MB
-- Binary: about 12 MB
-- Cold start: under 500 ms
-- Idle RAM: under 100 MB
-- Idle CPU: near 0 % when minimized (Windows EcoQoS Efficiency Mode)
-- Telemetry: zero. No analytics, no usage counters, no error reporting
-
-## Network surface
-
-DLSSync only makes outbound requests to:
-
-- `api.github.com` — release update check, at most once per 6 h
-- `cdn.jsdelivr.net` — DLL catalog manifest
-- `cdn.cloudflare.steamstatic.com` and `cdn2.steamgriddb.com` — game cover art (only if not already cached)
-- GPU driver updater (only when the Drivers tab is open or a driver install runs): `gfwsl.geforce.com` + `raw.githubusercontent.com/ZenitH-AT/nvidia-data` (NVIDIA), `dsadata.intel.com` (Intel), `raw.githubusercontent.com/GPUOpen-Drivers` version table + the AMD driver host (AMD)
-
-All requests are unauthenticated. No hardware ID, install list or any identifying information is sent.
-
-## Security model
-
-- Update payloads are Ed25519-signed; the app refuses unsigned or invalid signatures
-- Every DLL retains its original vendor Authenticode signature; DLSSync never re-signs or repackages
-- A SHA-256 + publisher subject gate runs before any DLL is written
-- Every replaced DLL is backed up locally before replacement
-- No driver, no kernel hook, no in-process injection, no memory writes
-
-## Anti-cheat compatibility
-
-DLSSync only writes files into the game's own install directory — equivalent to a manual file swap. Anti-cheats that detect modified game files (Easy Anti-Cheat, BattlEye, Riot Vanguard, Denuvo Anti-Tamper) will still flag a swapped DLL, and online titles can also flag a forced DLSS driver-profile override. DLSSync detects anti-cheat per game (a local scan for known anti-cheat binaries plus a community dataset bundled into the manifest) and shows a ban-risk warning before any DLL swap or DLSS override. It warns, it does not block — verify your specific title's policy before applying.
-
-## Sponsor
-
-DLSSync is built and maintained by one person on free time, with zero telemetry and no paid tier. If the app saves you time or you want to keep it healthy, sponsoring helps cover the manifest CI, the auto-update signing, and the hours that keep the catalog fresh.
-
-- Ko-fi: https://ko-fi.com/xt0n1
-- GitHub Sponsors: https://github.com/sponsors/xt0n1-t3ch
-- PayPal: https://www.paypal.me/xt0n1
-
-## Links
-
-- Repo: https://github.com/xt0n1-t3ch/DLSSync
-- Latest release: https://github.com/xt0n1-t3ch/DLSSync/releases/latest
-- Author: https://github.com/xt0n1-t3ch
-- Web: https://xt0n1.com
-- Issues: https://github.com/xt0n1-t3ch/DLSSync/issues
-- Sponsor: https://github.com/sponsors/xt0n1-t3ch
-- License: https://github.com/xt0n1-t3ch/DLSSync/blob/main/LICENSE
-
-## Keywords
-
-DLSS updater, DLSS swapper, DLSS Frame Generation, DLSS Ray Reconstruction, FSR 3, FSR Frame Generation, Intel XeSS, XeSS Frame Generation, XeLL, NVIDIA Reflex, NVIDIA Streamline, Microsoft DirectStorage, upscaling, frame generation, ray reconstruction, RTX, GeForce, Radeon, Intel Arc, GPU driver updater, NVIDIA driver update, Intel driver update, AMD Adrenalin update, NVAPI DRS, DLSS preset override, DLSS Multi Frame Generation, fixed and dynamic frame generation, anti-cheat detection, anti-tamper detection, Denuvo detection, Easy Anti-Cheat, BattlEye, Riot Vanguard, ban risk warning, Steam, Epic Games, GOG Galaxy, Ubisoft Connect, EA Desktop, Xbox, Battle.net, Tauri 2, Svelte 5, Rust, Windows portable, no admin, zero telemetry, hash-verified, vendor-signed Authenticode, Apache-2.0, open source, donate, sponsor
+- [Release notes](CHANGELOG.md)
+- [Architecture](docs/architecture-1.7.md)
+- [Catalog format and sources](docs/catalog-format.md)
+- [Runtime contracts](docs/runtime-contracts.md)
+- [Repository](https://github.com/xt0n1-t3ch/DLSSync)
+- [Available Standard releases](https://github.com/xt0n1-t3ch/DLSSync/releases/latest)
+- [Nexus Mods, mod 1922](https://www.nexusmods.com/site/mods/1922)
+- [Catalog repository](https://github.com/xt0n1-t3ch/DLSSync-Manifest)
+- [Issues](https://github.com/xt0n1-t3ch/DLSSync/issues)

@@ -49,6 +49,8 @@ function report(vendor: GpuVendor, downloadUrl: string | null): DriverStatusRepo
             changelog: null,
           },
     status: "update_available",
+    health: "outdated",
+    action: downloadUrl ? { kind: "install", download_url: downloadUrl, size_bytes: 100 } : { kind: "none", help_url: null },
   };
 }
 

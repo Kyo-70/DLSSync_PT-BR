@@ -9,9 +9,9 @@ import {
   appReadyPollIntervalMs,
   appReadyTimeoutMs,
   cdpBaseUrl,
+  cdpPort,
   cdpVersionEndpoint,
   isBenignConsoleNoise,
-  killScriptPath,
   repoRoot,
 } from "./config";
 
@@ -28,10 +28,6 @@ interface AppHarness {
 }
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
-function killStaleInstances(): void {
-  spawnSync(process.execPath, [killScriptPath], { stdio: "ignore" });
-}
 
 const FIXTURE_EXE_BYTES = 5 * 1024 * 1024 + 1024;
 export const E2E_PROTECTED_GAME_NAME = "Aurora Protocol";
@@ -80,9 +76,7 @@ function seedHermeticDataDir(): string {
   // public gallery. Regular E2E runs stay fully hermetic under the OS temp dir.
   let dataDir: string;
   if (process.env.DLSSYNC_CAPTURE_MARKETING === "1") {
-    dataDir = join(process.env.PUBLIC ?? "C:\\Users\\Public", "DLSSync");
-    rmSync(dataDir, { recursive: true, force: true });
-    mkdirSync(dataDir, { recursive: true });
+    dataDir = mkdtempSync(join(process.env.PUBLIC ?? "C:\\Users\\Public", "DLSSync-"));
   } else {
     dataDir = mkdtempSync(join(tmpdir(), "dlssync-e2e-"));
   }
@@ -100,22 +94,27 @@ function seedHermeticDataDir(): string {
 function spawnApp(dataDir: string): ChildProcess {
   return spawn(appBinaryPath, [], {
     cwd: repoRoot,
-    stdio: "ignore",
-    windowsHide: false,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
     env: {
       ...process.env,
       DLSSYNC_DATA_DIR: dataDir,
       DLSSYNC_E2E: "1",
+      DLSSYNC_CDP_PORT: String(cdpPort),
       DLSSYNC_E2E_GPU_FIXTURE: "1",
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${cdpPort} --remote-debugging-address=127.0.0.1`,
       WEBVIEW2_USER_DATA_FOLDER: join(dataDir, "WebView2"),
     },
   });
 }
 
-async function waitForCdp(): Promise<void> {
+async function waitForCdp(child: ChildProcess, diagnostics: () => string): Promise<void> {
   const deadline = Date.now() + appReadyTimeoutMs;
   let lastError: unknown;
   while (Date.now() < deadline) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(`app exited before CDP: code=${child.exitCode} signal=${child.signalCode}; ${diagnostics()}`);
+    }
     try {
       const res = await fetch(cdpVersionEndpoint);
       if (res.ok) return;
@@ -125,7 +124,7 @@ async function waitForCdp(): Promise<void> {
     await delay(appReadyPollIntervalMs);
   }
   throw new Error(
-    `app CDP endpoint ${cdpVersionEndpoint} never became ready within ${appReadyTimeoutMs}ms (binary: ${appBinaryPath}; last error: ${String(lastError)})`,
+    `app CDP endpoint ${cdpVersionEndpoint} never became ready within ${appReadyTimeoutMs}ms (binary: ${appBinaryPath}; last error: ${String(lastError)}; ${diagnostics()})`,
   );
 }
 
@@ -189,12 +188,19 @@ export const test = base.extend<{ consoleGuard: void }, { app: AppHarness }>({
   ],
   app: [
     async ({}, use) => {
-      killStaleInstances();
+      // Never attach to or terminate another development/test instance.
+      const occupied = await fetch(cdpVersionEndpoint).then(() => true).catch(() => false);
+      if (occupied) throw new Error(`CDP port ${cdpPort} is occupied; set DLSSYNC_E2E_CDP_PORT`);
       const dataDir = seedHermeticDataDir();
       const child = spawnApp(dataDir);
+      let output = "";
+      const capture = (chunk: Buffer): void => { output = (output + chunk.toString()).slice(-16000); };
+      child.stdout?.on("data", capture);
+      child.stderr?.on("data", capture);
+      child.on("error", (error) => { output += String(error); });
       let browser: Browser | undefined;
       try {
-        await waitForCdp();
+        await waitForCdp(child, () => output);
         browser = await chromium.connectOverCDP(cdpBaseUrl);
         const context = browser.contexts()[0] ?? (await browser.newContext());
         const page = await findAppPage(context);
@@ -202,10 +208,24 @@ export const test = base.extend<{ consoleGuard: void }, { app: AppHarness }>({
         const noise = attachNoiseCollector(page);
         await use({ page, noise });
       } finally {
+        if (child.exitCode === null) {
+          const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+          if (process.platform === "win32" && child.pid) {
+            // WebView2 children can keep the isolated profile locked after only
+            // the parent is terminated. Target only this spawned process tree.
+            const stopped = spawnSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
+              windowsHide: true,
+              timeout: 10_000,
+              stdio: "ignore",
+            });
+            if (stopped.status !== 0) child.kill();
+          } else {
+            child.kill();
+          }
+          await exited;
+        }
         if (browser) await browser.close().catch(() => undefined);
-        child.kill();
-        killStaleInstances();
-        rmSync(dataDir, { recursive: true, force: true });
+        rmSync(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
       }
     },
     { scope: "worker", timeout: appReadyTimeoutMs + 10_000 },

@@ -12,6 +12,7 @@
 
 <script lang="ts">
   import { t } from "../lib/i18n/index";
+  import { focusTrap } from "../actions/focusTrap";
   import { STREAMLINE_OVERRIDE_NOTE } from "../lib/ux";
 
   let {
@@ -116,7 +117,7 @@
     </span>
   {/if}
   {#if acConfirming}
-    <div class="ac-apply-confirm" role="alertdialog" aria-label={$t("component.gameDrawer.anticheat.apply.confirmAria")}>
+    <div class="ac-apply-confirm" role="alertdialog" aria-modal="true" aria-label={$t("component.gameDrawer.anticheat.apply.confirmAria")} use:focusTrap>
       <p class="ac-confirm-text">
         {acNames
           ? $t("component.gameDrawer.anticheat.apply.confirmBody", { names: acNames })
@@ -133,10 +134,10 @@
     </div>
   {/if}
   <button
-    class="btn btn-primary halo is-update foot-apply"
+    class="btn btn-primary foot-apply"
     class:is-active={selectedCount > 0}
     class:is-ac-danger={acActive && acSeverity === "danger"}
-    disabled={selectedCount === 0}
+    disabled={busy || selectedCount === 0}
     aria-describedby={acActive && selectedCount > 0 ? "ac-apply-risk-note" : undefined}
     onclick={onRequestApply}
   >
@@ -153,30 +154,20 @@
     flex-shrink: 0;
     margin: 0;
     padding: var(--space-3) var(--space-4);
-    background: var(--glass-2);
-    backdrop-filter: var(--glass-blur-bar);
-    -webkit-backdrop-filter: var(--glass-blur-bar);
+    background: var(--bg-card);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
     border-top: 1px solid var(--border);
-    box-shadow: var(--glass-edge);
+    box-shadow: none;
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-2);
     align-items: center;
     z-index: 4;
   }
-  .drawer-foot::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: calc(-1 * var(--space-4));
-    height: var(--space-4);
-    background: linear-gradient(to top, var(--bg-card), transparent);
-    pointer-events: none;
-  }
   .foot-util {
     flex: 0 0 auto;
-    height: 40px;
+    min-height: 44px;
     padding: 0 var(--space-3);
     gap: var(--space-2);
     justify-content: center;
@@ -187,9 +178,16 @@
     white-space: nowrap;
   }
   .foot-apply {
-    flex: 1 1 auto;
-    min-width: 150px;
-    height: 40px;
+    flex: 0 1 auto;
+    margin-left: auto;
+    min-width: 190px;
+    appearance: none;
+    border: 0;
+    border-radius: 10px;
+    background: var(--accent);
+    color: var(--accent-fg);
+    box-shadow: none;
+    min-height: 44px;
     order: 9;
     justify-content: center;
   }
@@ -198,7 +196,7 @@
   }
   .foot-streamline {
     flex: 1 1 100%;
-    height: 40px;
+    min-height: 44px;
     order: 8;
     justify-content: center;
   }

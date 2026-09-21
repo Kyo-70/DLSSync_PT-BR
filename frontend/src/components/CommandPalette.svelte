@@ -5,7 +5,9 @@
     shortcutOverlayOpen,
     currentView,
     settings,
-    persistSettings,
+    persistUiPreferences,
+    games,
+    drawerGameId,
     scanGames,
     loadCatalog,
     triggerThemeToggle,
@@ -27,6 +29,8 @@
   } from "../lib/ux";
   import { getAppPaths, revealPath } from "../lib/api";
   import { focusTrap } from "../actions/focusTrap";
+  import { bestArtSrc } from "../lib/gameArt";
+  import { launcherLabel } from "../lib/labels";
   import { t } from "../lib/i18n/index";
   import Search from "@lucide/svelte/icons/search";
   import Command from "@lucide/svelte/icons/command";
@@ -74,23 +78,32 @@
     wrench: Wrench,
   };
 
+  let panelLeft = $state(12);
+  let panelTop = $state(60);
+  let panelWidth = $state(480);
+  let panelHeight = $state(580);
+  function positionPanel(): void {
+    const anchor = document.querySelector("[data-command-palette-toggle]")?.getBoundingClientRect();
+    panelWidth = Math.min(480, window.innerWidth - 24);
+    panelLeft = Math.max(12, Math.min(window.innerWidth - panelWidth - 12, (anchor?.right ?? window.innerWidth - 12) - panelWidth));
+    panelTop = (anchor?.bottom ?? 48) + 14;
+    panelHeight = Math.max(160, Math.min(580, window.innerHeight - panelTop - 12));
+  }
   let query = $state("");
   let selectedIndex = $state(0);
-  let category = $state<"all" | CommandCategory>("all");
   let inputEl: HTMLInputElement | undefined = $state();
   let resultsEl: HTMLDivElement | undefined = $state();
 
-  const categories: readonly ("all" | CommandCategory)[] = ["all", "navigate", "action", "settings"];
   const RESULT_CATEGORIES: readonly CommandCategory[] = ["navigate", "action", "settings"];
 
   let recentIds = $derived($settings?.ui_prefs.command_palette_recent ?? []);
 
   function cmdTitle(cmd: PaletteCommand): string {
-    return $t("command." + cmd.id + ".title");
+    return cmd.id.startsWith("game:") ? cmd.title : $t("command." + cmd.id + ".title");
   }
   function cmdHint(cmd: PaletteCommand): string | undefined {
     if (cmd.hint === undefined) return undefined;
-    return $t("command." + cmd.id + ".hint");
+    return cmd.id.startsWith("game:") ? cmd.hint : $t("command." + cmd.id + ".hint");
   }
   function categoryLabel(cat: "all" | CommandCategory): string {
     return $t("commandCategory." + cat);
@@ -111,8 +124,12 @@
     const q = query.trim();
     const raw: { key: string; label: string; cmds: { cmd: PaletteCommand; ranges: number[] }[] }[] = [];
 
+    if (q) {
+      const matchingGames = $games.filter(game => game.name.toLocaleLowerCase().includes(q.toLocaleLowerCase())).slice(0, 8);
+      if (matchingGames.length) raw.push({ key: "games", label: $t("component.palette.games"), cmds: matchingGames.map(game => ({ cmd: { id: `game:${game.id}`, title: game.name, aliases: [], category: "navigate", icon: "layout-grid", hint: launcherLabel(game.launcher) }, ranges: matchedIndices(q, game.name) })) });
+    }
     if (!q) {
-      if (category === "all" && recentIds.length > 0) {
+      if (recentIds.length > 0) {
         const recents = recentIds
           .map((id) => COMMANDS.find((c) => c.id === id))
           .filter((c): c is PaletteCommand => c !== undefined);
@@ -120,17 +137,15 @@
           raw.push({ key: "recent", label: $t("component.palette.recent"), cmds: recents.map((cmd) => ({ cmd, ranges: [] })) });
         }
       }
-      const exclude = new Set(category === "all" ? recentIds : []);
+      const exclude = new Set(recentIds);
       for (const cat of RESULT_CATEGORIES) {
-        if (category !== "all" && category !== cat) continue;
         const cmds = COMMANDS.filter((c) => c.category === cat && !exclude.has(c.id)).map((cmd) => ({ cmd, ranges: [] as number[] }));
         if (cmds.length > 0) raw.push({ key: cat, label: categoryLabel(cat), cmds });
       }
     } else {
-      const pool = category === "all" ? COMMANDS : COMMANDS.filter((c) => c.category === category);
-      const matches = matchCommands(q, pool);
+      const pool = COMMANDS;
+      const matches = matchCommands(q, pool.map(cmd => ({ ...cmd, title: cmdTitle(cmd) })));
       for (const cat of RESULT_CATEGORIES) {
-        if (category !== "all" && category !== cat) continue;
         const cmds = matches
           .filter((m) => m.command.category === cat)
           .map((m) => ({ cmd: m.command, ranges: matchedIndices(q, cmdTitle(m.command)) }));
@@ -156,6 +171,7 @@
 
   $effect(() => {
     if ($commandPaletteOpen) {
+      positionPanel();
       query = "";
       selectedIndex = 0;
       void tick().then(() => inputEl?.focus());
@@ -190,26 +206,18 @@
       }
     };
     window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    window.addEventListener("resize", positionPanel);
+    return () => { window.removeEventListener("keydown", handler); window.removeEventListener("resize", positionPanel); };
   });
 
   function close(): void {
     commandPaletteOpen.set(false);
   }
 
-  function nextCategory(): void {
-    const idx = categories.indexOf(category);
-    category = categories[(idx + 1) % categories.length];
-    selectedIndex = 0;
-  }
-
   async function persistRecent(id: string): Promise<void> {
     if (!$settings) return;
     const next = pushRecentCommand($settings.ui_prefs.command_palette_recent ?? [], id);
-    await persistSettings({
-      ...$settings,
-      ui_prefs: { ...$settings.ui_prefs, command_palette_recent: next },
-    });
+    await persistUiPreferences({ command_palette_recent: next });
   }
 
   async function openFolder(kind: "root" | "backups_dir" | "logs_dir"): Promise<void> {
@@ -227,10 +235,7 @@
     const next = current === "grid" ? "list" : "grid";
     if (!LIBRARY_VIEW_MODES.includes(next)) return;
     currentView.set("library");
-    await persistSettings({
-      ...$settings,
-      ui_prefs: { ...$settings.ui_prefs, library_view_mode: next },
-    });
+    await persistUiPreferences({ library_view_mode: next });
   }
 
   async function toggleDensity(): Promise<void> {
@@ -239,24 +244,23 @@
     const next = current === "compact" ? "comfy" : "compact";
     if (!LIBRARY_DENSITIES.includes(next)) return;
     currentView.set("library");
-    await persistSettings({
-      ...$settings,
-      ui_prefs: { ...$settings.ui_prefs, library_density: next },
-    });
+    await persistUiPreferences({ library_density: next });
   }
 
   async function setSettingsTab(tab: string): Promise<void> {
     if (!$settings) return;
     currentView.set("settings");
-    await persistSettings({
-      ...$settings,
-      ui_prefs: { ...$settings.ui_prefs, settings_active_tab: tab as never },
-    });
+    await persistUiPreferences({ settings_active_tab: tab as never });
   }
 
   async function runCommand(cmd: PaletteCommand): Promise<void> {
     close();
-    await persistRecent(cmd.id);
+    if (cmd.id.startsWith("game:")) {
+      currentView.set("library");
+      drawerGameId.set(cmd.id.slice(5));
+      return;
+    }
+    void persistRecent(cmd.id);
     switch (cmd.id) {
       case "nav.library": currentView.set("library"); break;
       case "nav.catalog": currentView.set("catalog"); break;
@@ -267,7 +271,7 @@
         currentView.set("library");
         triggerApplyAllOutdated();
         break;
-      case "action.rescan": void scanGames(); break;
+      case "action.rescan": void scanGames({ trigger: "user_scan" }); break;
       case "action.refresh_manifest": void loadCatalog({ trigger: "manual_user" }); break;
       case "action.check_updates": triggerUpdateCheck(); break;
       case "action.restore_recent":
@@ -292,12 +296,6 @@
     if (e.key === "Escape") {
       e.preventDefault();
       close();
-      return;
-    }
-    if (e.key === "Tab") {
-      e.preventDefault();
-      e.stopPropagation();
-      nextCategory();
       return;
     }
     if (e.key === "ArrowDown") {
@@ -333,9 +331,9 @@
     onclick={onBackdropClick}
     onkeydown={(e) => { if (e.key === "Escape") close(); }}
     tabindex="-1"
-    use:focusTrap
+    use:focusTrap={{ initialFocusRing: false }}
   >
-    <div class="palette">
+    <div class="palette" style:left={`${panelLeft}px`} style:top={`${panelTop}px`} style:width={`${panelWidth}px`} style:max-height={`${panelHeight}px`}>
       <div class="palette-search">
         <Search class="palette-search-icon" size={18} strokeWidth={2.2} />
         <input
@@ -344,21 +342,11 @@
           onkeydown={onKeydown}
           type="text"
           placeholder={$t("component.palette.placeholder")}
+          aria-label={$t("component.palette.placeholder")}
           spellcheck="false"
           autocomplete="off"
         />
-        <kbd class="palette-search-kbd">Esc</kbd>
-      </div>
-
-      <div class="palette-categories">
-        {#each categories as cat}
-          <button
-            class="category"
-            class:active={category === cat}
-            onclick={() => { category = cat; selectedIndex = 0; inputEl?.focus(); }}
-          >{categoryLabel(cat)}</button>
-        {/each}
-        <span class="tab-hint">{$t("component.palette.tabToCycle")}</span>
+        <button class="palette-close" onclick={close} aria-label={$t("common.close")}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button>
       </div>
 
       <div class="palette-results" bind:this={resultsEl}>
@@ -374,6 +362,7 @@
               <div class="result-group-head">{group.label}</div>
               {#each group.items as item (item.cmd.id)}
                 {@const Icon = ICONS[item.cmd.icon] ?? Command}
+                {@const resultGame = item.cmd.id.startsWith("game:") ? $games.find(game => game.id === item.cmd.id.slice(5)) : undefined}
                 <button
                   class="result"
                   class:active={item.index === selectedIndex}
@@ -381,7 +370,7 @@
                   onclick={() => void runCommand(item.cmd)}
                   onmouseenter={() => { selectedIndex = item.index; }}
                 >
-                  <span class="result-icon" data-cat={item.cmd.category} aria-hidden="true"><Icon size={16} strokeWidth={2} /></span>
+                  {#if resultGame && bestArtSrc(resultGame)}<img class="result-game-art" src={bestArtSrc(resultGame)!} alt="" width="48" height="36" />{:else}<span class="result-icon" data-cat={item.cmd.category} aria-hidden="true"><Icon size={16} strokeWidth={2} /></span>{/if}
                   <span class="result-text">
                     <span class="result-title">
                       {#each highlightSegments(cmdTitle(item.cmd), item.ranges) as seg}
@@ -412,7 +401,6 @@
       <div class="palette-footer">
         <span class="footer-hint"><span class="kbd">↑</span><span class="kbd">↓</span> {$t("component.palette.footer.navigate")}</span>
         <span class="footer-hint"><span class="kbd">↵</span> {$t("component.palette.footer.run")}</span>
-        <span class="footer-hint"><span class="kbd">Tab</span> {$t("component.palette.footer.category")}</span>
         <span class="footer-hint"><span class="kbd">Esc</span> {$t("component.palette.footer.close")}</span>
       </div>
     </div>
@@ -469,34 +457,12 @@
   .palette-search input:focus { outline: none; border: none; box-shadow: none; }
   .palette-search input::placeholder { color: var(--text-placeholder); font-weight: 400; }
   .palette-search input::selection { background: var(--accent-soft); color: var(--text-primary); }
-  .palette-search-kbd {
-    flex-shrink: 0;
-    font-size: var(--fs-2xs);
-    font-weight: 600;
-    color: var(--text-muted);
-    padding: 2px 6px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-    background: var(--bg-card);
-  }
-  .palette-categories {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 0 16px 12px;
-  }
-  .category {
-    font-size: var(--fs-xs);
-    font-weight: 600;
-    padding: 5px 12px;
-    border-radius: var(--radius-full);
-    color: var(--text-muted);
-    background: transparent;
-    transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
-  }
-  .category:hover { color: var(--text-primary); background: var(--bg-elevated); }
-  .category.active { color: var(--accent-fg); background: var(--accent); }
-  .tab-hint { margin-left: auto; font-size: var(--fs-2xs); opacity: 0.7; }
+
+
+
+
+
+
   .palette-results {
     flex: 1;
     overflow-y: auto;
@@ -612,4 +578,14 @@
     color: var(--text-muted);
   }
   .footer-hint { display: inline-flex; align-items: center; gap: 4px; }
+
+  .palette-backdrop { display: block; padding: 0; background: transparent; }
+  .palette { position: fixed; background: var(--bg-card); backdrop-filter: none; -webkit-backdrop-filter: none; border-radius: 12px; animation: none; }
+  .palette-results { min-height: 0; overscroll-behavior: contain; }
+  .palette-search input { font-size: 14px; }
+  .result-game-art { width: 48px; height: 36px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
+  .result { padding: 12px; }
+  .result.active { background: var(--bg-elevated); }
+  .palette-close { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 7px; color: var(--text-secondary); flex-shrink: 0; }
+  .palette-close:hover { background: var(--bg-elevated); color: var(--text-primary); }
 </style>

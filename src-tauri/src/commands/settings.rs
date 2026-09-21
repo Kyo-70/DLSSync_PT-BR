@@ -1,11 +1,12 @@
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::paths::AppPaths;
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use tauri::State;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, specta::Type)]
 pub struct LauncherOverrides {
     #[serde(default)]
     pub steam: Vec<String>,
@@ -25,7 +26,7 @@ pub struct LauncherOverrides {
     pub custom: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct UpdatePreferences {
     pub update_dlss: bool,
     pub update_dlss_fg: bool,
@@ -56,7 +57,7 @@ impl Default for UpdatePreferences {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct UiPreferences {
     pub theme: String,
     pub sidebar_collapsed: bool,
@@ -128,7 +129,7 @@ impl Default for UiPreferences {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, specta::Type)]
 pub struct SteamApiConfig {
     #[serde(default)]
     pub api_key: String,
@@ -136,13 +137,13 @@ pub struct SteamApiConfig {
     pub steam_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, specta::Type)]
 pub struct SgdbConfig {
     #[serde(default)]
     pub api_key: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, specta::Type)]
 pub struct WindowState {
     pub width: Option<f64>,
     pub height: Option<f64>,
@@ -151,7 +152,7 @@ pub struct WindowState {
     pub maximized: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, specta::Type)]
 pub struct GamePreference {
     #[serde(default)]
     pub disabled_families: Vec<String>,
@@ -159,7 +160,7 @@ pub struct GamePreference {
     pub pinned_versions: std::collections::HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct AdvancedConfig {
     #[serde(default)]
     pub dlss_debug_overlay: bool,
@@ -197,7 +198,7 @@ impl Default for AdvancedConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct NetworkConfig {
     #[serde(default = "default_retry_attempts")]
     pub retry_attempts: u32,
@@ -238,7 +239,7 @@ impl Default for NetworkConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct BackgroundConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -286,7 +287,7 @@ impl BackgroundConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, specta::Type)]
 pub struct AppSettings {
     #[serde(default)]
     pub launcher_overrides: LauncherOverrides,
@@ -319,6 +320,72 @@ impl AppSettings {
         self.advanced
             .apply_concurrency
             .clamp(MIN_APPLY_CONCURRENCY, MAX_APPLY_CONCURRENCY)
+    }
+}
+
+pub(crate) fn projection_settings(
+    settings: &AppSettings,
+    game_id: &str,
+) -> dlssync_application::scan::ProjectionSettings {
+    let prefs = &settings.update_prefs;
+    let mut disabled_families = BTreeSet::new();
+    let mut disable = |enabled: bool, families: &[&str]| {
+        if !enabled {
+            disabled_families.extend(families.iter().map(|family| (*family).to_string()));
+        }
+    };
+    disable(prefs.update_dlss, &["dlss_sr"]);
+    disable(prefs.update_dlss_fg, &["dlss_fg"]);
+    disable(prefs.update_dlss_rr, &["dlss_rr"]);
+    disable(
+        prefs.update_streamline,
+        &[
+            "sl_dlss_sr",
+            "sl_dlss_fg",
+            "sl_dlss_rr",
+            "streamline",
+            "streamline_common",
+            "streamline_pcl",
+            "streamline_nis",
+            "streamline_direct_sr",
+            "reflex",
+        ],
+    );
+    disable(prefs.update_reflex, &["reflex"]);
+    disable(
+        prefs.update_xess,
+        &["xess_sr", "xess_sr_dx11", "xess_fg", "xell"],
+    );
+    disable(
+        prefs.update_fsr,
+        &[
+            "fsr_upscaler",
+            "fsr_upscaler_vk",
+            "fsr_fg",
+            "fsr_loader",
+            "fsr_denoiser",
+        ],
+    );
+    disable(
+        prefs.update_direct_storage,
+        &["direct_storage", "direct_storage_core"],
+    );
+
+    let pinned_versions = settings
+        .game_preferences
+        .get(game_id)
+        .map(|game| {
+            disabled_families.extend(game.disabled_families.iter().cloned());
+            game.pinned_versions
+                .iter()
+                .map(|(key, version)| (key.clone(), version.clone()))
+                .collect::<BTreeMap<_, _>>()
+        })
+        .unwrap_or_default();
+
+    dlssync_application::scan::ProjectionSettings {
+        disabled_families,
+        pinned_versions,
     }
 }
 
@@ -360,7 +427,7 @@ fn persist(state: &AppState, settings: &AppSettings) -> AppResult<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct AppPathsDto {
     pub install_mode: dlssync_contracts::InstallMode,
     pub root: String,
@@ -394,6 +461,7 @@ impl From<&AppPaths> for AppPathsDto {
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn get_app_paths(state: State<'_, AppState>) -> AppResult<AppPathsDto> {
     let guard = state.paths.read();
     let paths = guard
@@ -403,18 +471,61 @@ pub async fn get_app_paths(state: State<'_, AppState>) -> AppResult<AppPathsDto>
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn get_settings(state: State<'_, AppState>) -> AppResult<AppSettings> {
     Ok(state.settings.read().clone())
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn save_settings(state: State<'_, AppState>, settings: AppSettings) -> AppResult<()> {
+    let _projection_guard = dlssync_application::scan::projection_guard();
+    let download_client = AppState::download_client(settings.network.connect_timeout_secs)
+        .map_err(AppError::Other)?;
     persist(&state, &settings)?;
-    *state.settings.write() = settings;
+    *state.http_downloads.write() = download_client;
+    let ticket = state
+        .authoritative_state
+        .begin_observation(dlssync_application::scan::GAME_PROJECTION_SCOPE);
+    *state.settings.write() = settings.clone();
+    let catalog = state.catalog.read().clone();
+    let snapshot = state.authoritative_state.snapshot();
+    let games = snapshot
+        .games
+        .iter()
+        .map(|game| {
+            dlssync_application::scan::reproject_game_snapshot(
+                game,
+                catalog.as_ref(),
+                &projection_settings(&settings, &game.id),
+            )
+        })
+        .collect::<Vec<_>>();
+    let affected_game_ids = games.iter().map(|game| game.id.clone()).collect();
+    if !games.is_empty() {
+        let receipt = state
+            .authoritative_state
+            .commit_observation(
+                ticket,
+                dlssync_application::state::StateCommit {
+                    delta: dlssync_contracts::StateDelta {
+                        affected_game_ids,
+                        games,
+                        ..dlssync_contracts::StateDelta::default()
+                    },
+                    ..dlssync_application::state::StateCommit::default()
+                },
+            )
+            .map_err(|error| crate::error::AppError::Other(error.to_string()))?;
+        if let Some(error) = receipt.delivery_error {
+            tracing::warn!(%error, "settings game reprojection event delivery failed");
+        }
+    }
     Ok(())
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn add_blacklist_entry(
     state: State<'_, AppState>,
     game_id: String,
@@ -428,6 +539,7 @@ pub async fn add_blacklist_entry(
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn remove_blacklist_entry(
     state: State<'_, AppState>,
     game_id: String,
@@ -439,6 +551,7 @@ pub async fn remove_blacklist_entry(
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn add_favorite_game(
     state: State<'_, AppState>,
     game_id: String,
@@ -457,6 +570,7 @@ pub async fn add_favorite_game(
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn remove_favorite_game(
     state: State<'_, AppState>,
     game_id: String,
@@ -468,6 +582,7 @@ pub async fn remove_favorite_game(
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn save_window_state(
     state: State<'_, AppState>,
     window_state: WindowState,
@@ -536,6 +651,34 @@ mod ui_prefs_tests {
         assert_eq!(
             back.command_palette_recent,
             vec!["action.apply_all_outdated"]
+        );
+    }
+
+    #[test]
+    fn scan_projection_includes_global_switches_and_per_game_policy() {
+        let mut settings = AppSettings::default();
+        settings.game_preferences.insert(
+            "game-a".into(),
+            GamePreference {
+                disabled_families: vec!["xess_sr".into()],
+                pinned_versions: std::collections::HashMap::from([(
+                    "dlss_sr|C:\\Games\\A\\nvngx_dlss.dll".into(),
+                    "310.4.0".into(),
+                )]),
+            },
+        );
+
+        let projection = projection_settings(&settings, "game-a");
+
+        assert!(projection.disabled_families.contains("sl_dlss_fg"));
+        assert!(projection.disabled_families.contains("reflex"));
+        assert!(projection.disabled_families.contains("xess_sr"));
+        assert_eq!(
+            projection
+                .pinned_versions
+                .get("dlss_sr|C:\\Games\\A\\nvngx_dlss.dll")
+                .map(String::as_str),
+            Some("310.4.0")
         );
     }
 }

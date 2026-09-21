@@ -13,6 +13,25 @@ use async_trait::async_trait;
 /// `curl <GPU_DATA_URL> > crates/driver-catalog/data/gpu-data.json`).
 const EMBEDDED_GPU_DATA: &str = include_str!("../../data/gpu-data.json");
 
+#[derive(Debug, serde::Deserialize, specta::Type)]
+struct PciPfidEntry {
+    device_id: u16,
+    pfid: String,
+}
+
+const PCI_PFID_DATA: &str = include_str!("../../data/nvidia-pci-pfid.json");
+
+fn pfid_from_pci(device_id: u16) -> Option<String> {
+    if device_id == 0 {
+        return None;
+    }
+    serde_json::from_str::<Vec<PciPfidEntry>>(PCI_PFID_DATA)
+        .ok()?
+        .into_iter()
+        .find(|entry| entry.device_id == device_id)
+        .map(|entry| entry.pfid)
+}
+
 pub struct NvidiaGpuSource;
 
 pub fn os_id(os: &OsTarget) -> u32 {
@@ -135,7 +154,11 @@ fn parse_download_info(info: &serde_json::Value) -> Option<DriverRelease> {
         },
         display_version,
         is_beta,
-        download_url: info["DownloadURL"].as_str().unwrap_or_default().to_string(),
+        download_url: info["DownloadURL"]
+            .as_str()
+            .map(str::trim)
+            .filter(|url| !url.is_empty())
+            .map(str::to_string),
         size_bytes: parse_size(info["DownloadURLFileSize"].as_str().unwrap_or_default()),
         signature_subject: c::PUBLISHER_SUBJECT.to_string(),
         released_at: parse_release_date(info["ReleaseDateTime"].as_str().unwrap_or_default()),
@@ -329,6 +352,9 @@ async fn resolve_pfid(
     client: &reqwest::Client,
     device: &DeviceId,
 ) -> Result<Option<String>, DriverError> {
+    if let Some(pfid) = pfid_from_pci(device.pci_device_id) {
+        return Ok(Some(pfid));
+    }
     let gpu_data = fetch_gpu_data(client).await;
     Ok(match_pfid(&gpu_data, &device.model))
 }
@@ -418,6 +444,13 @@ mod tests {
     }
 
     #[test]
+    fn pci_lookup_precedes_name_fallback_for_known_devices() {
+        assert_eq!(pfid_from_pci(0x2705).as_deref(), Some("1040"));
+        assert_eq!(pfid_from_pci(0), None);
+        assert_eq!(pfid_from_pci(0xFFFF), None);
+    }
+
+    #[test]
     fn match_pfid_finds_flat_and_nested_entries() {
         let flat = serde_json::json!({ "GeForce RTX 3070": "933" });
         assert_eq!(
@@ -481,7 +514,10 @@ mod tests {
         let release = parse_lookup_response(body).unwrap().expect("release");
         assert_eq!(release.version.display, "572.16");
         assert_eq!(release.version.packed, 57216);
-        assert!(release.download_url.ends_with("dch-whql.exe"));
+        assert!(release
+            .download_url
+            .as_deref()
+            .is_some_and(|url| url.ends_with("dch-whql.exe")));
         assert!(release.size_bytes > 800 * 1024 * 1024);
         assert_eq!(release.signature_subject, "NVIDIA Corporation");
         assert!(release.released_at.is_some());

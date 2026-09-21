@@ -31,9 +31,10 @@
 
 <script lang="ts">
   import { t } from "../lib/i18n/index";
+  import BrandMark from "./BrandMark.svelte";
+  import { familyVendor } from "../lib/labels";
   import { familyShort, GROUP_ACCENT, filenameFromPath } from "../lib/labels";
   import VersionPickerPopover from "./VersionPickerPopover.svelte";
-  import FeatureIcon from "./FeatureIcon.svelte";
   import DlssOverridePanel from "./DlssOverridePanel.svelte";
 
   let {
@@ -42,6 +43,9 @@
     outdatedCount,
     selectedCount,
     featureBuckets,
+    otherFeatureBuckets = [],
+    recommendedCount = undefined,
+    hardwareKnown = false,
     advancedRows,
     selected,
     disabledFamilies,
@@ -76,6 +80,9 @@
     outdatedCount: number;
     selectedCount: number;
     featureBuckets: DrawerFeatureBucket[];
+    otherFeatureBuckets?: DrawerFeatureBucket[];
+    recommendedCount?: number;
+    hardwareKnown?: boolean;
     advancedRows: DrawerAdvancedRow[];
     selected: Record<string, boolean>;
     disabledFamilies: string[];
@@ -114,35 +121,21 @@
 </script>
 
 {#if hasRecords}
-<div class="summary-row">
-  <div class="summary-stat">
-    <span class="stat-num">{recordCount}</span>
-    <span class="stat-label">{$t("component.gameDrawer.stat.files")}</span>
-  </div>
-  <div class="summary-stat">
-    <span class="stat-num" class:is-update={outdatedCount > 0}>{outdatedCount}</span>
-    <span class="stat-label">{$t("component.gameDrawer.stat.updates")}</span>
-  </div>
-  <div class="summary-stat">
-    <span class="stat-num" class:is-accent={selectedCount > 0}>{selectedCount}</span>
-    <span class="stat-label">{$t("component.gameDrawer.stat.selected")}</span>
-  </div>
+<div class="drawer-selection-summary" data-total-files={recordCount} data-total-updates={outdatedCount}>
+  <span>{hardwareKnown ? $t("component.hardware.forThisPc") : $t("component.detail.updates")}</span>
+  <span>{selectedCount} {$t("component.gameDrawer.stat.selected")}</span>
 </div>
-
-{#if outdatedCount > 0}
+{#if (recommendedCount ?? outdatedCount) > 0}
   <div class="quick-actions">
-    <button class="btn btn-sm btn-accent" onclick={onSelectAllOutdated}>
-      {$t("component.gameDrawer.selectAllUpdates", { count: outdatedCount })}
-    </button>
-    <button class="btn btn-sm btn-ghost" onclick={onClearSelection} disabled={selectedCount === 0}>
-      {$t("component.gameDrawer.clearSelection")}
-    </button>
+    <button class="btn btn-sm btn-accent" onclick={onSelectAllOutdated}>{hardwareKnown ? $t("component.hardware.selectRecommended", { count: recommendedCount ?? outdatedCount }) : $t("component.gameDrawer.selectAllUpdates", { count: outdatedCount })}</button>
+    <button class="btn btn-sm btn-ghost" onclick={onClearSelection} disabled={selectedCount === 0}>{$t("component.gameDrawer.clearSelection")}</button>
   </div>
 {/if}
 
-{#if featureBuckets.length > 0}
+{#snippet featureRows(buckets: DrawerFeatureBucket[])}
+{#if buckets.length > 0}
   <ul class="feature-list stagger">
-    {#each featureBuckets as b (b.feature)}
+    {#each buckets as b (b.feature)}
       {@const selState = featureSelectionState(b)}
       {@const expanded = !!expandedFeatures[b.feature]}
       {@const primaryKey = rowKey(b.primary)}
@@ -164,10 +157,9 @@
           />
           <span class="check-box"></span>
         </label>
-        <div class="feature-glyph" style:--feature-accent={b.accent} aria-hidden="true">
-          <FeatureIcon id={b.iconId} size={20} />
-        </div>
         <div class="feature-body">
+          <span class="feature-vendor"><BrandMark key={familyVendor(b.primary.family)} fit="wordmark" size={16} showLabel={false} /></span>
+          <div class="feature-copy">
           <div class="feature-head">
             <span class="feature-title">{b.title}</span>
             {#if b.statusTone === "update"}
@@ -181,15 +173,19 @@
             {/if}
           </div>
           <p class="feature-blurb">{b.blurb}</p>
-          <div class="feature-versions">
+          <div class="feature-versions" title={filenameFromPath(b.primary.path)}>
             <span class="ver-pair">
+
+              <span class="version-label">{$t("component.flyout.installed")}</span>
               <span class="ver current" class:is-update={primaryRel === "outdated"}>v{b.primary.current_version ?? "?"}</span>
               {#if primaryAside}
                 <button class="ver catalog-aside" onclick={() => onSetPickerOpen(primaryKey)} title={$t("component.gameDrawer.version.pickDifferent")}>
                   <span class="muted">{$t("component.gameDrawer.version.catalogAside", { version: primaryTarget ?? "" })}</span>
                 </button>
               {:else}
+                {#if primaryTarget && primaryRel !== "same" && primaryTarget !== b.primary.current_version}
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="arrow"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                {/if}
                 <button class="ver target-btn" onclick={() => onSetPickerOpen(primaryKey)} title={$t("component.gameDrawer.version.choose")}>
                   {#if primaryTarget}
                     <span class="target">v{primaryTarget}</span>
@@ -215,6 +211,7 @@
               </button>
             {/if}
           </div>
+        </div>
         </div>
         <div class="feature-tools">
           <button class="feature-eye" onclick={() => onToggleFeatureDisabled(b.records)} title={b.allDisabled ? $t("component.gameDrawer.feature.reEnable") : $t("component.gameDrawer.feature.disable")} aria-label={b.allDisabled ? $t("component.gameDrawer.feature.reEnable") : $t("component.gameDrawer.feature.disable")}>
@@ -262,7 +259,9 @@
                         <span class="muted mono">{$t("component.gameDrawer.version.catalogAside", { version: tgt ?? "" })}</span>
                       </button>
                     {:else}
+                      {#if tgt && rel !== "same" && tgt !== r.current_version}
                       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="arrow"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                      {/if}
                       <button class="ver target-btn small" onclick={() => onSetPickerOpen(k)}>
                         {#if tgt}
                           <span class="target mono">v{tgt}</span>
@@ -292,6 +291,7 @@
                     family={r.family}
                     filename={filenameFromPath(r.path)}
                     currentVersion={r.current_version}
+                    currentSha256={r.sha256}
                     latestVersion={lat}
                     pickedVersion={pin ?? null}
                     onPick={(v) => onSetPin(k, v)}
@@ -307,6 +307,7 @@
             family={b.primary.family}
             filename={filenameFromPath(b.primary.path)}
             currentVersion={b.primary.current_version}
+            currentSha256={b.primary.sha256}
             latestVersion={primaryLatest}
             pickedVersion={primaryPinned ?? null}
             onPick={(v) => onSetPin(primaryKey, v)}
@@ -318,13 +319,23 @@
   </ul>
 {/if}
 
+{/snippet}
+{@render featureRows(featureBuckets)}
+{#if otherFeatureBuckets.length > 0}
+  <details class="other-feature-disclosure" open={otherFeatureBuckets.some(bucket => bucket.records.some(record => selected[rowKey(record)]))}>
+    <summary><span>{$t("component.hardware.otherTechnologies")}</span><span class="disclosure-count">{otherFeatureBuckets.length}</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 5 7 7-7 7"/></svg></summary>
+    <p>{$t("component.hardware.otherHelp")}</p>
+    {@render featureRows(otherFeatureBuckets)}
+  </details>
+{/if}
+
 {#if advancedRows.length > 0}
   <section class="advanced-block" class:open={advancedExpanded}>
     <button type="button" class="advanced-head" onclick={onToggleAdvanced} aria-expanded={advancedExpanded}>
       <span class="advanced-titles">
         <span class="advanced-name">
           <span class="advanced-dot" style:background={GROUP_ACCENT.advanced}></span>
-          {$t("feature.advanced.title")}
+          {$t("component.hardware.supportLibraries")}
           <span class="chip chip-neutral small-chip count">{advancedRows.length}</span>
         </span>
         <span class="advanced-sub">{$t("feature.advanced.blurb")}</span>
@@ -362,7 +373,9 @@
               </div>
               <div class="file-versions">
                 <span class="ver current mono" class:is-update={rel === "outdated"}>v{r.current_version ?? "?"}</span>
+                {#if tgt && rel !== "same" && tgt !== r.current_version}
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="arrow"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                {/if}
                 <button class="ver target-btn small" onclick={() => onSetPickerOpen(k)}>
                   {#if tgt}<span class="target mono">v{tgt}</span>{:else}<span class="muted">{$t("component.gameDrawer.version.chooseVersion")}</span>{/if}
                   <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" class="chev"><polyline points="6 9 12 15 18 9"/></svg>
@@ -385,6 +398,7 @@
                 family={r.family}
                 filename={filenameFromPath(r.path)}
                 currentVersion={r.current_version}
+                    currentSha256={r.sha256}
                 latestVersion={lat}
                 pickedVersion={pin ?? null}
                 onPick={(v) => onSetPin(k, v)}
@@ -428,37 +442,12 @@
 </section>
 
 <style>
-  .summary-row {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: var(--space-2);
-  }
-  .summary-stat {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-1);
-    padding: var(--space-3) var(--space-2);
-    background: var(--bg-cap);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-  }
-  .stat-num {
-    font-size: var(--fs-xl);
-    font-weight: 700;
-    color: var(--text-primary);
-    letter-spacing: var(--letter-tighter);
-    font-variant-numeric: tabular-nums;
-    line-height: var(--lh-tight);
-  }
-  .stat-num.is-update { color: var(--update); }
-  .stat-num.is-accent { color: var(--accent); }
-  .stat-label {
-    font-size: var(--fs-2xs);
-    text-transform: uppercase;
-    letter-spacing: var(--letter-wider);
-    color: var(--text-muted);
-  }
+
+
+
+
+
+
 
   .quick-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 
@@ -466,29 +455,14 @@
   .feature-row {
     position: relative;
     display: grid;
-    grid-template-columns: 22px 36px 1fr auto;
+    grid-template-columns: 24px minmax(0, 1fr) auto;
     gap: var(--space-3);
     align-items: flex-start;
-    padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
-  }
-  .feature-row:hover { background: var(--bg-card-hover); border-color: var(--border-hover); }
-  .feature-row.is-update {
-    border-color: color-mix(in srgb, var(--update) 40%, var(--border));
-    background: color-mix(in srgb, var(--update-dim) 50%, var(--bg-card));
-  }
-  .feature-row.is-update::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: var(--space-3);
-    bottom: var(--space-3);
-    width: 3px;
-    border-radius: 0 var(--radius-full) var(--radius-full) 0;
-    background: var(--update);
+    padding: 22px 0;
+    min-width: 0;
+    background: none;
+    border: 0;
+    border-bottom: 1px solid var(--border);
   }
   .feature-row.disabled { opacity: 0.55; }
 
@@ -542,23 +516,10 @@
   .feature-check input:disabled + .check-box,
   .file-check input:disabled + .check-box { opacity: 0.3; cursor: not-allowed; }
 
-  .feature-glyph {
-    width: 36px;
-    height: 36px;
-    border-radius: var(--radius-md);
-    background: color-mix(in srgb, var(--feature-accent) 16%, var(--bg-elevated));
-    border: 1px solid color-mix(in srgb, var(--feature-accent) 28%, transparent);
-    color: var(--feature-accent);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
-
-  .feature-body { min-width: 0; }
+  .feature-body { min-width: 0; grid-column: 2; }
   .feature-head { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
-  .feature-title { font-size: var(--fs-base); font-weight: 600; color: var(--text-primary); letter-spacing: var(--letter-tight); }
-  .feature-blurb { font-size: var(--fs-xs); color: var(--text-muted); margin-top: var(--space-1); line-height: var(--lh-snug); }
+  .feature-title { font-size: 16px; font-weight: 600; color: var(--text-primary); letter-spacing: var(--letter-tight); }
+  .feature-blurb { font-size: 13px; color: var(--text-secondary); margin-top: var(--space-1); line-height: var(--lh-snug); }
 
   .feature-versions {
     display: flex;
@@ -611,8 +572,8 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    font-size: var(--fs-2xs);
-    color: var(--text-muted);
+    font-size: 12px;
+    color: var(--text-secondary);
     background: transparent;
     border: none;
     cursor: pointer;
@@ -628,14 +589,15 @@
   .files-toggle.subtle:hover { color: var(--text-secondary); }
 
   .feature-tools {
+    grid-column: 3;
     display: inline-flex;
     align-items: center;
     gap: 2px;
     flex-shrink: 0;
   }
   .feature-eye {
-    width: 26px;
-    height: 26px;
+    width: 32px;
+    height: 32px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -669,7 +631,7 @@
   .file-row {
     position: relative;
     display: grid;
-    grid-template-columns: 22px 1fr auto;
+    grid-template-columns: 24px minmax(0, 1fr) auto;
     gap: var(--space-2);
     align-items: flex-start;
     padding: 9px 10px;
@@ -742,12 +704,37 @@
   .dlss-drawer-body { padding: 0 4px var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
 
   @container drawer (max-width: 420px) {
-    .summary-row { gap: var(--space-1); }
-    .summary-stat { padding: var(--space-2) var(--space-1); }
+
+
     .feature-row {
-      grid-template-columns: 22px 1fr auto;
+      grid-template-columns: 24px minmax(0, 1fr) auto;
       column-gap: var(--space-2);
     }
-    .feature-glyph { display: none; }
   }
+
+  .drawer-selection-summary { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--text-secondary); margin-bottom: 0; text-transform: none; }
+  .other-feature-disclosure { margin: 8px 0; border-bottom: 1px solid var(--border); }
+  .other-feature-disclosure > summary { display: flex; align-items: center; gap: 10px; padding: 20px 0; list-style: none; cursor: pointer; color: var(--text-primary); font-size: 14px; font-weight: 600; }
+  .other-feature-disclosure > summary::-webkit-details-marker { display: none; }
+  .other-feature-disclosure > summary svg { margin-left: auto; }
+  .other-feature-disclosure[open] > summary svg { transform: rotate(90deg); }
+  .disclosure-count { color: var(--text-secondary); font-weight: 400; }
+  .version-label { font: 12px var(--font-sans); color: var(--text-secondary); }
+  .ver-pair { flex-wrap: wrap; min-width: 0; }
+  @container drawer (max-width: 520px) {
+    .feature-row { grid-template-columns: 24px minmax(0, 1fr); }
+    .feature-tools { grid-column: 2; justify-self: end; margin-top: -8px; }
+    .file-row { grid-template-columns: 24px minmax(0, 1fr); }
+    .file-status { grid-column: 2; }
+  }
+  .other-feature-disclosure > p { font-size: 13px; line-height: 1.5; color: var(--text-muted); margin: 12px 0 18px; }
+  .feature-body { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 12px; }
+  .feature-copy { min-width: 0; }
+  .feature-vendor { align-self: start; width: 72px; min-height: 34px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .feature-head { gap: 10px; }
+  .feature-blurb { margin: 8px 0 0; line-height: 1.6; }
+  .feature-row { padding: 18px 0; }
+  .feature-versions { gap: 12px; }
+  .chip { text-transform: none; letter-spacing: normal; font-size: 11px; }
+  .catalog-aside .muted { font-style: normal; color: var(--text-secondary); }
 </style>

@@ -1,7 +1,157 @@
+<script lang="ts" module>
+  /** Authoritative component readers for the game detail surface.
+   *
+   *  Rust owns the observed version, the candidate, the update decision and the applicability of
+   *  every component. Nothing here compares versions, resolves a target version or decides
+   *  compatibility, trust or install success. A file with no published component reads as
+   *  `no-target`: unknown, never offered and never drawn as up to date. */
+  import type { ComponentState, GameSnapshot } from "../generated/bindings";
+  import type { DllRecord } from "../lib/api";
+  import { translate } from "../lib/i18n/index";
+
+  /** Presentation vocabulary shared with `DrawerFeatureList`. It is a projection of the published
+   *  `ComponentStatus`, not an independent classification. */
+  export type Relation = "outdated" | "same" | "ahead" | "no-target";
+
+  export type ComponentIndex = {
+    /** Component by absolute path, the join Rust's `install_dir` + `relative_path` produces. */
+    byPath: Map<string, ComponentState>;
+    /** Component by `family|filename`; `null` marks a key more than one component claims. */
+    byFile: Map<string, ComponentState | null>;
+  };
+
+  /** Comparable form of a Windows path. Rust publishes `relative_path` with `/` separators. */
+  export function pathKey(path: string): string {
+    return path.replace(/[\\/]+/g, "\\").replace(/\\+$/, "").toLowerCase();
+  }
+
+  /** Index of the components Rust published for one game, or `null` while it published none for
+   *  it. An empty component list is a published fact and returns an empty index. */
+  export function componentIndex(snapshots: GameSnapshot[], gameId: string): ComponentIndex | null {
+    const snapshot = snapshots.find((candidate) => candidate.id === gameId);
+    const components = snapshot?.components;
+    if (!snapshot || !components) return null;
+    const byPath = new Map<string, ComponentState>();
+    const byFile = new Map<string, ComponentState | null>();
+    for (const component of components) {
+      const relative = component.identity.relative_path.replace(/^[\\/]+/, "");
+      byPath.set(pathKey(`${snapshot.install_dir}\\${relative}`), component);
+      const fileKey = `${component.identity.family}|${component.identity.filename}`.toLowerCase();
+      byFile.set(fileKey, byFile.has(fileKey) ? null : component);
+    }
+    return { byPath, byFile };
+  }
+
+  /** The component Rust published for one scanned file, or `null`. The absolute path is the join;
+   *  the family/filename lookup only answers when exactly one component claims that pair, so a
+   *  different install root can never silently bind the wrong file. */
+  export function componentForRecord(
+    index: ComponentIndex | null,
+    record: DllRecord,
+  ): ComponentState | null {
+    if (!index) return null;
+    const direct = index.byPath.get(pathKey(record.path));
+    if (direct) return direct;
+    const filename = record.path.split(/[\\/]/).pop() ?? record.path;
+    return index.byFile.get(`${record.family}|${filename}`.toLowerCase()) ?? null;
+  }
+
+  /** Relation presented for one file, read from its published component. `no-target` covers every
+   *  state that must not be offered — unchecked, unknown, disabled, externally managed,
+   *  incompatible, not applicable, and an available update with no published candidate. */
+  export function relationOf(component: ComponentState | null): Relation {
+    if (!component) return "no-target";
+    switch (component.status) {
+      case "update_available":
+        return component.applicability !== "not_applicable" && component.candidate !== null
+          ? "outdated"
+          : "no-target";
+      case "newer":
+        return "ahead";
+      case "current":
+        return "same";
+      default:
+        return "no-target";
+    }
+  }
+
+  /** Version Rust would install for one component. The view never derives it. */
+  export function candidateVersion(component: ComponentState | null): string | null {
+    return component?.candidate?.package_version ?? null;
+  }
+
+
+  export type BucketStatus = {
+    key: string;
+    fallbackKey: string;
+    tone: "update" | "success" | "info" | "neutral";
+  };
+
+  /** Status of one feature bucket, from the components Rust published for its files. Partial and
+   *  unknown observations keep their own wording: they are never folded into "Up to date" and
+   *  never into "Update ready". */
+  export function bucketStatus(
+    components: (ComponentState | null)[],
+    multiple: boolean,
+  ): BucketStatus {
+    if (components.some((component) => relationOf(component) === "outdated")) {
+      return {
+        key: multiple
+          ? "component.gameDrawer.status.updatesReady"
+          : "component.gameDrawer.status.updateReady",
+        fallbackKey: "status.outdated",
+        tone: "update",
+      };
+    }
+    const statuses = components.map((component) => component?.status ?? null);
+    if (statuses.includes("newer")) {
+      return {
+        key: "component.gameDrawer.status.aheadOfCatalog",
+        fallbackKey: "status.unknown",
+        tone: "info",
+      };
+    }
+    if (statuses.includes("externally_managed")) {
+      return {
+        key: "component.gameDrawer.status.externallyManaged",
+        fallbackKey: "status.unknown",
+        tone: "neutral",
+      };
+    }
+    if (statuses.includes("incompatible")) {
+      return {
+        key: "component.gameDrawer.status.incompatible",
+        fallbackKey: "status.unknown",
+        tone: "neutral",
+      };
+    }
+    if (statuses.includes("disabled")) {
+      return {
+        key: "component.gameDrawer.status.disabled",
+        fallbackKey: "status.unknown",
+        tone: "neutral",
+      };
+    }
+    if (statuses.length > 0 && statuses.every((status) => status === "current")) {
+      return { key: "status.up_to_date", fallbackKey: "status.up_to_date", tone: "success" };
+    }
+    if (statuses.length > 0 && statuses.every((status) => status === "unchecked")) {
+      return {
+        key: "component.gameDrawer.status.notInCatalog",
+        fallbackKey: "component.gameDrawer.status.notInCatalog",
+        tone: "neutral",
+      };
+    }
+    return { key: "status.unknown", fallbackKey: "status.unknown", tone: "neutral" };
+  }
+</script>
+
 <script lang="ts">
+  import RecipePanel from "./RecipePanel.svelte";
+  import { recipeApi } from "../lib/api";
   import { onDestroy } from "svelte";
   import { get } from "svelte/store";
-  import { t, locale, translate } from "../lib/i18n/index";
+  import { t, locale } from "../lib/i18n/index";
   import { setActiveArt, clearActiveArt } from "../lib/artContext";
   import { coverAccent } from "../lib/coverAccent";
   import { EXTERNAL_URLS } from "../lib/ux";
@@ -11,26 +161,25 @@
     gameDlssEnabler,
     gameDllsLoading,
     gameDllErrors,
-    catalogLatestByKey,
-    relationContext,
     settings,
     persistSettings,
     showToast,
     optimisticToggle,
     rescanGame,
     driverReports,
+    hardwarePreference,
     ensureSystemInfo,
     fsr4Capable,
   } from "../lib/stores";
-  import { dllRelation, targetVersion, recordUpdatable, isStreamlinePlugin } from "../lib/relation";
-  import { addBlacklistEntry, removeBlacklistEntry, findGameExecutable, detectAnticheat, saveSettings, openPath, readDlssOverrideConfig, type AppSettings, type DllRecord, type AntiCheatReport } from "../lib/api";
+  import { preferredFamily, defaultUpdateFamily } from "../lib/hardwarePreference";
+  import { recordUpdatable, isStreamlinePlugin } from "../lib/relation";
+  import { authoritativeState } from "../lib/stateSync";
+  import { addBlacklistEntry, removeBlacklistEntry, findGameExecutable, detectAnticheat, saveSettings, openPath, readDlssOverrideConfig, type AppSettings, type AntiCheatReport } from "../lib/api";
   import { hasAntiCheat, statusNote, warningMessage, severity, detectedNames } from "../lib/anticheat";
   import { dispatchApply, dispatchStreamlineSet, dispatchDllSet, type ApplyTarget } from "../lib/applyController";
   import {
     familyLabel,
     familyShort,
-    familyCatalogKey,
-    launcherLabel,
     recordFeature,
     featureTitle,
     featureIconId,
@@ -41,10 +190,13 @@
     DLL_SET_LABELS,
     FSR4_GATED_FAMILIES,
     filenameFromPath,
+    gameOperationLabel,
     type FeatureSlot,
     type DllSetKey,
   } from "../lib/labels";
+  import { bestArtSrc } from "../lib/gameArt";
   import ContextMenu, { type ContextMenuAction } from "./ContextMenu.svelte";
+  import { focusTrap } from "../actions/focusTrap";
   import DrawerHero from "./DrawerHero.svelte";
   import DrawerFeatureList, { type DrawerFeatureBucket, type DrawerAdvancedRow } from "./DrawerFeatureList.svelte";
   import DrawerFooter, { type DrawerDllSet } from "./DrawerFooter.svelte";
@@ -58,10 +210,11 @@
   let game = $derived($games.find((g) => g.id === gameId));
   let coverAccentColor = $state<string | null>(null);
   $effect(() => {
-    if (game?.image_url) setActiveArt(game.image_url);
+    const cover = game ? bestArtSrc(game) : null;
+    if (cover) setActiveArt(cover);
   });
   $effect(() => {
-    const url = game?.image_url;
+    const url = game ? bestArtSrc(game) : null;
     coverAccentColor = null;
     if (!url) return;
     let active = true;
@@ -78,6 +231,9 @@
   });
 
   let records: DllRecord[] = $derived($gameDlls[gameId] ?? []);
+  // Components Rust published for this game, or `null` while it published none. Every update
+  // decision and every target version on this surface is read from here.
+  let components = $derived(componentIndex($authoritativeState.games, gameId));
   let dlssEnabler = $derived($gameDlssEnabler[gameId] ?? false);
   let loading = $derived($gameDllsLoading[gameId] ?? false);
   let scanError = $derived($gameDllErrors[gameId] ?? null);
@@ -100,6 +256,8 @@
   let pinnedVersions: Record<string, string> = $derived(pref?.pinned_versions ?? {});
 
   let selected = $state<Record<string, boolean>>({});
+  let selectionTouched = $state(false);
+  let selectionSignature = $state("");
   let activeGameId = $state<string | null>(null);
   let pickerOpenFor = $state<string | null>(null);
   let expandedFeatures = $state<Record<string, boolean>>({});
@@ -135,10 +293,12 @@
   $effect(() => {
     if (gameId !== activeGameId) {
       activeGameId = gameId;
+      selectionTouched = false;
+      selectionSignature = "";
       const next: Record<string, boolean> = {};
       for (const r of records) {
         const key = rowKey(r);
-        next[key] = isOutdated(r) && !disabledFamilies.includes(r.family);
+        next[key] = isOutdated(r) && !disabledFamilies.includes(r.family) && defaultUpdateFamily(r.family, $hardwarePreference);
       }
       selected = next;
       expandedFeatures = {};
@@ -148,7 +308,7 @@
       acReport = null;
       void loadAntiCheat();
       void detectManagedExternally();
-      void ensureSystemInfo();
+      void ensureSystemInfo().catch(() => undefined);
     }
   });
 
@@ -156,23 +316,29 @@
     return `${r.family}|${r.path}`;
   }
 
+  /** The component Rust published for one scanned file, or `null` when it published none. */
+  function componentFor(r: DllRecord): ComponentState | null {
+    return componentForRecord(components, r);
+  }
+
   function isOutdated(r: DllRecord): boolean {
     if (!recordUpdatable(r, $settings?.update_prefs ?? null)) return false;
     return relation(r) === "outdated";
   }
 
+  /** Rust resolves user pins and publishes the candidate after settings are committed. */
   function targetFor(r: DllRecord): string | null {
-    const pin = pinnedVersions[rowKey(r)] ?? null;
-    return targetVersion(r, $relationContext, pin);
+    return candidateVersion(componentFor(r));
   }
 
+  /** Candidate Rust published for this file, shown next to the observed version. */
   function latestFor(r: DllRecord): string | null {
-    return $catalogLatestByKey[familyCatalogKey(r.family)] ?? null;
+    return candidateVersion(componentFor(r));
   }
 
-  function relation(r: DllRecord): "outdated" | "same" | "ahead" | "no-target" {
-    const pin = pinnedVersions[rowKey(r)] ?? null;
-    return dllRelation(r, $relationContext, pin);
+  /** Presentation relation, projected from the published component status. */
+  function relation(r: DllRecord): Relation {
+    return relationOf(componentFor(r));
   }
 
   async function toggleFeatureDisabled(recs: DllRecord[]): Promise<void> {
@@ -253,18 +419,24 @@
       const recs = map.get(fid);
       if (!recs || recs.length === 0) continue;
       const primary = pickPrimary(fid, recs);
+      // Every flag below reads the components Rust published for these files.
+      const states = recs.map((r) => componentFor(r));
       const anyOutdated = recs.some((r) => relation(r) === "outdated");
       const anyAhead = recs.some((r) => relation(r) === "ahead");
       const inCatalog = recs.filter((r) => relation(r) !== "no-target");
       const allUpToDate = inCatalog.length > 0 && inCatalog.every((r) => relation(r) === "same");
       const allDisabled = recs.every((r) => disabledFamilies.includes(r.family));
-      const tr = $t;
-      let label = tr("component.gameDrawer.status.notInCatalog");
-      let tone: DrawerFeatureBucket["statusTone"] = "neutral";
-      if (allDisabled) { label = tr("component.gameDrawer.status.disabled"); tone = "neutral"; }
-      else if (anyOutdated) { label = recs.length > 1 ? tr("component.gameDrawer.status.updatesReady") : tr("component.gameDrawer.status.updateReady"); tone = "update"; }
-      else if (anyAhead) { label = tr("component.gameDrawer.status.aheadOfCatalog"); tone = "info"; }
-      else if (allUpToDate) { label = tr("status.up_to_date"); tone = "success"; }
+      let label: string;
+      let tone: DrawerFeatureBucket["statusTone"];
+      if (allDisabled) {
+        // A family the user switched off for this game. A local preference, not a published state.
+        label = $t("component.gameDrawer.status.disabled");
+        tone = "neutral";
+      } else {
+        const status = bucketStatus(states, recs.length > 1);
+        label = translate($locale, status.key);
+        tone = status.tone;
+      }
       out.push({
         feature: fid,
         records: recs,
@@ -304,10 +476,27 @@
     return out.sort((a, b) => a.label.localeCompare(b.label));
   });
 
+  let preferredFeatureBuckets = $derived(featureBuckets.filter(bucket => bucket.records.some(record => preferredFamily(record.family, $hardwarePreference))));
+  let otherFeatureBuckets = $derived(featureBuckets.filter(bucket => !bucket.records.some(record => preferredFamily(record.family, $hardwarePreference))));
+  let recommendedCount = $derived(records.filter(record => isOutdated(record) && !disabledFamilies.includes(record.family) && preferredFamily(record.family, $hardwarePreference)).length);
+
+  $effect(() => {
+    const preference = $hardwarePreference;
+    const signature = `${gameId}:${[...preference.vendors].sort().join(",")}:${records.map(record => `${rowKey(record)}:${isOutdated(record)}:${disabledFamilies.includes(record.family)}`).join("|")}`;
+    if (selectionTouched || signature === selectionSignature || activeGameId !== gameId) return;
+    selectionSignature = signature;
+    const next: Record<string, boolean> = {};
+    for (const record of records) next[rowKey(record)] = isOutdated(record) && !disabledFamilies.includes(record.family) && defaultUpdateFamily(record.family, preference);
+    selected = next;
+    // A supporting library selected by default must not be hidden from the user.
+    advancedExpanded = advancedRows.some(row => row.records.some(record => next[rowKey(record)]));
+  });
+
   function selectAllOutdated(): void {
+    selectionTouched = true;
     const next: Record<string, boolean> = { ...selected };
     for (const r of records) {
-      if (isOutdated(r) && !disabledFamilies.includes(r.family)) {
+      if (isOutdated(r) && !disabledFamilies.includes(r.family) && preferredFamily(r.family, $hardwarePreference)) {
         next[rowKey(r)] = true;
       }
     }
@@ -315,14 +504,17 @@
   }
 
   function clearSelection(): void {
+    selectionTouched = true;
     selected = {};
   }
 
   function setFileSelection(key: string, checked: boolean): void {
+    selectionTouched = true;
     selected = { ...selected, [key]: checked };
   }
 
   function toggleFeatureSelection(bucket: DrawerFeatureBucket, checked: boolean): void {
+    selectionTouched = true;
     const next = { ...selected };
     for (const r of bucket.records) {
       if (disabledFamilies.includes(r.family)) continue;
@@ -351,6 +543,8 @@
     for (const r of records) {
       if (!selected[rowKey(r)]) continue;
       if (disabledFamilies.includes(r.family)) continue;
+      const published = componentFor(r);
+      if (!published || published.applicability === "not_applicable" || ["disabled", "externally_managed", "incompatible", "unknown", "unchecked"].includes(published.status)) continue;
       const tgt = targetFor(r);
       if (!tgt) continue;
       out.push({ record: r, target: tgt });
@@ -365,7 +559,7 @@
   });
 
   function requestApply(): void {
-    if (selectedCount === 0) return;
+    if (busy || selectedCount === 0) return;
     if (acActive && acSeverity === "danger" && !acConfirming) {
       acConfirming = true;
       return;
@@ -385,12 +579,13 @@
       showToast("warning", translate(get(locale), "component.gameDrawer.toast.nothingSelected"));
       return;
     }
-    const game_label = `${launcherLabel(game.launcher)} - ${game.name}`;
+    const game_label = gameOperationLabel(game.launcher, game.name);
     const targets: ApplyTarget[] = items.map((it) => ({
       game_id: game!.id,
       game_label,
       record: it.record,
       target_version: it.target,
+      catalog_family: componentFor(it.record)?.candidate?.family,
     }));
     await dispatchApply(targets, { showModal: onApplyStart });
     try {
@@ -456,12 +651,12 @@
     if (!game) return;
     const members = dllSetMembers(key);
     if (members.length === 0) return;
-    const game_label = `${launcherLabel(game.launcher)} - ${game.name}`;
+    const game_label = gameOperationLabel(game.launcher, game.name);
     const targets: ApplyTarget[] = [];
     for (const r of members) {
       const tgt = targetFor(r);
       if (!tgt) continue;
-      targets.push({ game_id: game.id, game_label, record: r, target_version: tgt });
+      targets.push({ game_id: game.id, game_label, record: r, target_version: tgt, catalog_family: componentFor(r)?.candidate?.family });
     }
     await dispatchDllSet(targets, DLL_SET_LABELS[key], { showModal: onApplyStart });
     try {
@@ -495,12 +690,12 @@
 
   async function applyStreamlineSetAction(): Promise<void> {
     if (!game || streamlineSetMembers.length === 0) return;
-    const game_label = `${launcherLabel(game.launcher)} - ${game.name}`;
+    const game_label = gameOperationLabel(game.launcher, game.name);
     const targets: ApplyTarget[] = [];
     for (const r of streamlineSetMembers) {
       const tgt = targetFor(r);
       if (!tgt) continue;
-      targets.push({ game_id: game.id, game_label, record: r, target_version: tgt });
+      targets.push({ game_id: game.id, game_label, record: r, target_version: tgt, catalog_family: componentFor(r)?.candidate?.family });
     }
     await dispatchStreamlineSet(targets, { showModal: onApplyStart });
     try {
@@ -610,13 +805,14 @@
   let acLearnUrl = $derived(acReport?.source_url ?? EXTERNAL_URLS.anticheatFaq);
   let acWarningMessage = $derived(acReport ? warningMessage(acReport) : "");
 
+  let detailTab = $state<"updates" | "advanced">("updates");
   let busy = $derived(loading || rescanning);
 </script>
 
-<svelte:window onkeydown={(e) => { if (game && e.key === "Escape") onClose(); }} />
+<svelte:window onkeydown={(e) => { if (game && e.key === "Escape" && !e.defaultPrevented) onClose(); }} />
 
 {#if game}
-  <div class="detail-view" aria-label={game.name}>
+  <div class="detail-view" role="dialog" aria-modal="true" aria-label={game.name} tabindex="-1" use:focusTrap={{ initialFocusRing: false }}>
     <DrawerHero
       {game}
       {coverAccentColor}
@@ -624,7 +820,7 @@
       {rescanning}
       {scanError}
       recordCount={records.length}
-      {outdatedCount}
+      outdatedCount={$hardwarePreference.known ? recommendedCount : outdatedCount}
       {aheadCount}
       {acActive}
       {acSeverity}
@@ -636,7 +832,12 @@
       onLearnMore={() => void openAnticheatLink()}
     />
 
+    <nav class="detail-tabs" aria-label={game.name}>
+      <button class:active={detailTab === "updates"} aria-pressed={detailTab === "updates"} onclick={() => (detailTab = "updates")}>{$t("component.detail.updates")}</button>
+      <button class:active={detailTab === "advanced"} aria-pressed={detailTab === "advanced"} onclick={() => (detailTab = "advanced")}>{$t("component.detail.advanced")}</button>
+    </nav>
     <div class="drawer-body">
+      {#if detailTab === "updates"}
       {#if busy}
         <div class="loading-state scanning" role="status" aria-live="polite">
           <div class="scan-head">
@@ -687,7 +888,10 @@
           recordCount={records.length}
           {outdatedCount}
           {selectedCount}
-          {featureBuckets}
+          featureBuckets={preferredFeatureBuckets}
+          {otherFeatureBuckets}
+          {recommendedCount}
+          hardwareKnown={$hardwarePreference.known}
           {advancedRows}
           {selected}
           {disabledFamilies}
@@ -717,6 +921,17 @@
           onRowContextMenu={openRowMenu}
           onRowMenuAnchor={openRowMenuAt}
         />
+      {/if}
+      {:else}
+        <section class="detail-location">
+          <h3>{$t("component.detail.installLocation")}</h3>
+          <p class="mono">{game.install_dir}</p>
+        </section>
+        <section class="local-packages">
+          <h3>{$t("component.detail.localPackages")}</h3>
+          <p>{$t("component.detail.localPackagesHelp")}</p>
+          {#key game.id}<RecipePanel gameId={game.id} api={recipeApi} />{/key}
+        </section>
       {/if}
     </div>
 
@@ -753,6 +968,15 @@
 {/if}
 
 <style>
+  .detail-tabs { display: flex; gap: 24px; padding: 0 clamp(16px, 4cqi, 36px); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .detail-tabs button { padding: 14px 0; background: none; border: 0; border-bottom: 2px solid transparent; color: var(--text-secondary); cursor: pointer; font-weight: 600; }
+  .detail-tabs button.active { border-color: var(--text-primary); color: var(--text-primary); }
+  .detail-location h3, .local-packages h3 { font-size: 16px; margin-bottom: 8px; }
+  .detail-location p { overflow-wrap: anywhere; font-size: 12px; color: var(--text-secondary); }
+  .local-packages { padding-top: 20px; border-top: 1px solid var(--border); }
+  .local-packages > p { color: var(--text-secondary); font-size: 13px; margin-bottom: 20px; }
+
+
   .detail-view {
     --art-chrome-fg: #fff;
     --art-chrome-fg-dim: rgba(255, 255, 255, 0.88);
@@ -780,7 +1004,7 @@
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: var(--space-4) var(--space-4) var(--space-5);
+    padding: 20px clamp(16px, 4cqi, 36px) 28px;
     display: flex;
     flex-direction: column;
     gap: var(--space-4);

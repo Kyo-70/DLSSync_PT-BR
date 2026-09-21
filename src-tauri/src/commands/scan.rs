@@ -1,19 +1,33 @@
 use crate::constants::{
-    ART_HTTP_TIMEOUT_SECS, SGDB_API_BASE, SGDB_GRID_DIMS, SGDB_HERO_DIMS, STEAM_CAPSULE_PATH,
-    STEAM_CDN_BASE, STEAM_HEADER_PATH, STEAM_HERO_PATH, STEAM_STORESEARCH,
+    ART_PROTOCOL_MAX_ASSET_BYTES, ART_RESOLVED_CACHE_TTL_SECS, ART_UNAVAILABLE_CACHE_TTL_SECS,
+    SGDB_API_BASE, SGDB_GRID_DIMS, SGDB_HERO_DIMS, STEAM_CAPSULE_2X_PATH, STEAM_CAPSULE_PATH,
+    STEAM_CDN_BASE, STEAM_HEADER_PATH, STEAM_HERO_PATH,
 };
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
-use dlssync_contracts::{OperationActor, OperationKind, OperationRecord, OperationStatus};
-use launcher_scan::{DetectedGame, LauncherKind};
+use dlssync_contracts::{
+    DistributionChannel, OperationActor, OperationKind, OperationRecord, OperationStatus,
+};
+use launcher_scan::{
+    ArtCacheStatus, ArtLocatorKind, ArtResolveTrigger, DetectedGame, GameArt, GameArtAsset,
+    GameArtCandidate, GameArtSource, GameArtState, LauncherKind, LauncherScanner,
+};
 use once_cell::sync::Lazy;
 use operation_journal::{JournalError, JournalStore};
 use std::collections::{BTreeMap, HashSet};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tauri::State;
 
+struct ScanDiscovery {
+    games: Vec<DetectedGame>,
+    successful_launchers: HashSet<LauncherKind>,
+    successful_custom_roots: Vec<PathBuf>,
+}
+
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn scan_libraries(
     state: State<'_, AppState>,
     launchers: Vec<LauncherKind>,
@@ -29,12 +43,31 @@ pub async fn scan_libraries(
     };
 
     let started = Instant::now();
-    let result = tokio::task::spawn_blocking(move || {
-        let mut all = launcher_scan::scan_all(&launchers).unwrap_or_default();
+    let mut result = tokio::task::spawn_blocking(move || {
+        let mut all = Vec::new();
+        let mut successful_launchers = HashSet::new();
+        let mut successful_custom_roots = Vec::new();
+
+        for launcher in launchers {
+            match scan_launcher(launcher) {
+                Ok(games) => {
+                    successful_launchers.insert(launcher);
+                    all.extend(games);
+                }
+                Err(launcher_scan::ScanError::Partial { games, detail }) => {
+                    all.extend(games);
+                    tracing::warn!(launcher = ?launcher, %detail, "launcher scan partial; prior games retained");
+                }
+                Err(error) => {
+                    tracing::warn!(launcher = ?launcher, %error, "launcher scan failed");
+                }
+            }
+        }
 
         for folder in custom_folders {
             let path = PathBuf::from(&folder);
             if let Some(games) = scan_custom_folder(&path) {
+                successful_custom_roots.push(path);
                 all.extend(games);
             }
         }
@@ -43,19 +76,131 @@ pub async fn scan_libraries(
             for extra in &overrides.steam {
                 let p = PathBuf::from(extra);
                 if let Some(games) = scan_custom_folder(&p) {
+                    successful_custom_roots.push(p);
                     all.extend(games);
                 }
             }
         }
 
-        deduplicate(all)
+        ScanDiscovery {
+            games: deduplicate(all),
+            successful_launchers,
+            successful_custom_roots,
+        }
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()));
 
+    if let Ok(discovery) = result.as_mut() {
+        let games = &mut discovery.games;
+        let cache_dir = app_cache_dir(&state)?;
+        let mut transport = crate::art_transport::ArtTransportSession::new(&cache_dir)
+            .map_err(|error| AppError::Other(format!("initialize game art transport: {error}")))?;
+        for game in games.iter_mut() {
+            if let Err(error) = transport.prepare(&mut game.art) {
+                let source = game
+                    .art
+                    .preferred()
+                    .map(|asset| asset.source)
+                    .unwrap_or(GameArtSource::ManualFolder);
+                tracing::warn!(game_id = %game.id, %error, "game art transport preparation failed");
+                game.art = GameArt::source_failed(source, "asset_transport_failed");
+                game.art.cache_status = ArtCacheStatus::TransientFailure;
+            }
+        }
+        transport
+            .finish()
+            .map_err(|error| AppError::Other(format!("clean game art transport cache: {error}")))?;
+
+        let observed = games
+            .iter()
+            .map(|game| {
+                dlssync_application::scan::observe_game_snapshot(
+                    game,
+                    None,
+                    &dlssync_application::scan::ProjectionSettings::default(),
+                )
+            })
+            .collect::<Vec<_>>();
+        // A scan may overlap with the Library mount scan. Take the projection lock before
+        // capturing the previous snapshot and the observation ticket, so the commit cannot be
+        // invalidated by another scan that acquired a generation between discovery and publish.
+        let _projection_guard = dlssync_application::scan::projection_guard();
+        let ticket = state
+            .authoritative_state
+            .begin_observation(dlssync_application::scan::GAME_PROJECTION_SCOPE);
+        let catalog = state.catalog.read().clone();
+        let settings = state.settings.read().clone();
+        let snapshots = observed
+            .iter()
+            .map(|snapshot| {
+                dlssync_application::scan::reproject_game_snapshot(
+                    snapshot,
+                    catalog.as_ref(),
+                    &crate::commands::settings::projection_settings(&settings, &snapshot.id),
+                )
+            })
+            .collect::<Vec<_>>();
+        let previous = state.authoritative_state.snapshot();
+        let observed_ids = snapshots
+            .iter()
+            .map(|snapshot| snapshot.id.as_str())
+            .collect::<HashSet<_>>();
+        let removed_game_ids = removed_games_for_successful_scopes(
+            &previous.games,
+            &observed_ids,
+            &discovery.successful_launchers,
+            &discovery.successful_custom_roots,
+        );
+        let removed_ids = removed_game_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<HashSet<_>>();
+        games.extend(
+            previous
+                .games
+                .iter()
+                .filter(|snapshot| {
+                    !observed_ids.contains(snapshot.id.as_str())
+                        && !removed_ids.contains(snapshot.id.as_str())
+                })
+                .map(retained_detected_game),
+        );
+        *games = deduplicate(std::mem::take(games));
+        let mut affected_game_ids = snapshots
+            .iter()
+            .map(|snapshot| snapshot.id.clone())
+            .collect::<Vec<_>>();
+        affected_game_ids.extend(removed_game_ids.iter().cloned());
+        if !snapshots.is_empty() || !removed_game_ids.is_empty() {
+            match state.authoritative_state.commit_observation(
+                ticket,
+                dlssync_application::state::StateCommit {
+                    delta: dlssync_contracts::StateDelta {
+                        affected_game_ids,
+                        games: snapshots,
+                        removed_game_ids,
+                        ..dlssync_contracts::StateDelta::default()
+                    },
+                    ..dlssync_application::state::StateCommit::default()
+                },
+            ) {
+                Ok(receipt) => {
+                    if let Some(error) = receipt.delivery_error {
+                        tracing::warn!(%error, "game observation event delivery failed");
+                    }
+                }
+                Err(error) => tracing::warn!(%error, "library observation commit was stale"),
+            }
+        }
+        if let Err(error) = crate::commands::runtime::refresh_persisted_state(state.inner()) {
+            tracing::warn!(%error, "persisted-state refresh after scan failed");
+        }
+    }
+
     let duration_ms = started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
     let outcome = match &result {
-        Ok(games) => Ok(games.len()),
+        Ok(discovery) => Ok(discovery.games.len()),
         Err(err) => Err(err.to_string()),
     };
     if let Some(journal) = state.journal.read().as_ref() {
@@ -64,7 +209,80 @@ pub async fn scan_libraries(
         }
     }
 
-    result
+    result.map(|discovery| discovery.games)
+}
+
+fn retained_detected_game(snapshot: &dlssync_contracts::GameSnapshot) -> DetectedGame {
+    DetectedGame {
+        id: snapshot.id.clone(),
+        name: snapshot.name.clone(),
+        launcher: snapshot
+            .launcher
+            .as_deref()
+            .and_then(|launcher| {
+                serde_json::from_value(serde_json::Value::String(launcher.to_string())).ok()
+            })
+            .unwrap_or(LauncherKind::Manual),
+        install_dir: snapshot.install_dir.clone().into(),
+        app_id: None,
+        native_ids: BTreeMap::new(),
+        art: GameArt::default(),
+        image_url: snapshot.art_url.clone(),
+        size_bytes: None,
+    }
+}
+
+#[cfg(windows)]
+fn scan_launcher(kind: LauncherKind) -> Result<Vec<DetectedGame>, launcher_scan::ScanError> {
+    match kind {
+        LauncherKind::Steam => launcher_scan::SteamScanner.scan(),
+        LauncherKind::Epic => launcher_scan::EpicScanner.scan(),
+        LauncherKind::Gog => launcher_scan::GogScanner.scan(),
+        LauncherKind::Ubisoft => launcher_scan::UbisoftScanner.scan(),
+        LauncherKind::EaDesktop => launcher_scan::EaDesktopScanner.scan(),
+        LauncherKind::Xbox => launcher_scan::XboxScanner.scan(),
+        LauncherKind::Battlenet => launcher_scan::BattlenetScanner.scan(),
+        LauncherKind::Manual => Ok(Vec::new()),
+    }
+}
+
+#[cfg(not(windows))]
+fn scan_launcher(_kind: LauncherKind) -> Result<Vec<DetectedGame>, launcher_scan::ScanError> {
+    Err(launcher_scan::ScanError::Parse(
+        "launcher discovery is available only on Windows".into(),
+    ))
+}
+
+fn removed_games_for_successful_scopes(
+    existing: &[dlssync_contracts::GameSnapshot],
+    observed_ids: &HashSet<&str>,
+    successful_launchers: &HashSet<LauncherKind>,
+    successful_custom_roots: &[PathBuf],
+) -> Vec<String> {
+    existing
+        .iter()
+        .filter(|game| !observed_ids.contains(game.id.as_str()))
+        .filter(|game| {
+            let launcher_success = game
+                .launcher
+                .as_deref()
+                .and_then(|launcher| {
+                    serde_json::from_value::<LauncherKind>(serde_json::Value::String(
+                        launcher.to_string(),
+                    ))
+                    .ok()
+                })
+                .is_some_and(|launcher| successful_launchers.contains(&launcher));
+            let custom_scope_success = game.launcher.as_deref() == Some("manual")
+                && Path::new(&game.install_dir).parent().is_some_and(|parent| {
+                    successful_custom_roots.iter().any(|root| {
+                        normalize_path_identity(parent) == normalize_path_identity(root)
+                    })
+                });
+            launcher_success || custom_scope_success
+        })
+        .map(|game| game.id.clone())
+        .collect()
 }
 
 /// Write one `OperationKind::Scan` journal record for a library scan. Success
@@ -129,6 +347,7 @@ fn e2e_mode_enabled() -> bool {
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn detect_dlls(
     _state: State<'_, AppState>,
     install_dir: String,
@@ -143,6 +362,7 @@ pub async fn detect_dlls(
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn detect_dlss_enabler(
     _state: State<'_, AppState>,
     install_dir: String,
@@ -168,7 +388,17 @@ fn deduplicate(games: Vec<DetectedGame>) -> Vec<DetectedGame> {
 #[cfg(test)]
 mod e2e_isolation_tests {
     use super::*;
-    use dlssync_contracts::JournalFilter;
+    use dlssync_contracts::{GameSnapshot, JournalFilter};
+
+    fn snapshot(id: &str, launcher: &str, install_dir: &str) -> GameSnapshot {
+        GameSnapshot {
+            id: id.to_string(),
+            name: id.to_string(),
+            install_dir: install_dir.to_string(),
+            launcher: Some(launcher.to_string()),
+            ..GameSnapshot::default()
+        }
+    }
 
     #[test]
     fn e2e_mode_disables_host_launcher_discovery() {
@@ -275,6 +505,58 @@ mod e2e_isolation_tests {
             "redacted export must not leak windows paths"
         );
     }
+
+    #[test]
+    fn completed_launcher_scope_removes_only_missing_games_from_that_scope() {
+        let existing = vec![
+            snapshot("steam-old", "steam", r"C:\Steam\steam-old"),
+            snapshot("epic-old", "epic", r"C:\Epic\epic-old"),
+        ];
+        let observed = HashSet::new();
+        let successful = HashSet::from([LauncherKind::Steam]);
+
+        let removed = removed_games_for_successful_scopes(&existing, &observed, &successful, &[]);
+
+        assert_eq!(removed, vec!["steam-old"]);
+    }
+
+    #[test]
+    fn observed_game_is_never_removed_from_a_completed_scope() {
+        let existing = vec![snapshot("steam-present", "steam", r"C:\Steam\present")];
+        let observed = HashSet::from(["steam-present"]);
+        let successful = HashSet::from([LauncherKind::Steam]);
+
+        let removed = removed_games_for_successful_scopes(&existing, &observed, &successful, &[]);
+
+        assert!(removed.is_empty());
+    }
+
+    #[test]
+    fn failed_launcher_scope_preserves_previous_membership() {
+        let existing = vec![snapshot("steam-old", "steam", r"C:\Steam\steam-old")];
+
+        let removed =
+            removed_games_for_successful_scopes(&existing, &HashSet::new(), &HashSet::new(), &[]);
+
+        assert!(removed.is_empty());
+    }
+
+    #[test]
+    fn completed_custom_root_removes_only_its_missing_manual_children() {
+        let existing = vec![
+            snapshot("custom-a", "manual", r"C:\Games\Custom\Game A"),
+            snapshot("custom-b", "manual", r"D:\Other\Game B"),
+        ];
+
+        let removed = removed_games_for_successful_scopes(
+            &existing,
+            &HashSet::new(),
+            &HashSet::new(),
+            &[PathBuf::from(r"C:\Games\Custom")],
+        );
+
+        assert_eq!(removed, vec!["custom-a"]);
+    }
 }
 
 fn scan_custom_folder(root: &Path) -> Option<Vec<DetectedGame>> {
@@ -310,6 +592,8 @@ fn scan_custom_folder(root: &Path) -> Option<Vec<DetectedGame>> {
             launcher: LauncherKind::Manual,
             install_dir: path,
             app_id: None,
+            native_ids: BTreeMap::new(),
+            art: GameArt::unavailable(GameArtSource::ManualFolder, "no_launcher_cover_source"),
             image_url: None,
             size_bytes: None,
         });
@@ -619,138 +903,693 @@ fn scan_folder_markers(path: &Path, depth: u8) -> FolderMarkers {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct GameArt {
-    pub grid_url: Option<String>,
-    pub hero_url: Option<String>,
-    pub capsule_url: Option<String>,
+struct ArtCacheEntry {
+    expires_at: i64,
+    art: GameArt,
 }
 
-fn empty_art() -> GameArt {
-    GameArt {
-        grid_url: None,
-        hero_url: None,
-        capsule_url: None,
+#[derive(Debug)]
+enum RemoteProbe {
+    Found(Vec<u8>),
+    Missing,
+    Failed,
+}
+
+#[derive(Debug)]
+struct RemoteFound {
+    candidate: GameArtCandidate,
+    bytes: Vec<u8>,
+    width: u32,
+    height: u32,
+}
+
+fn remote_art_allowed(channel: DistributionChannel, trigger: ArtResolveTrigger) -> bool {
+    match (channel, trigger) {
+        (_, ArtResolveTrigger::Automatic) => false,
+        (DistributionChannel::Nexus, ArtResolveTrigger::UserScan)
+        | (DistributionChannel::Nexus, ArtResolveTrigger::ExplicitRetry)
+        | (DistributionChannel::Standard, ArtResolveTrigger::UserScan)
+        | (DistributionChannel::Standard, ArtResolveTrigger::ExplicitRetry) => true,
     }
 }
 
-#[tauri::command]
-pub async fn fetch_steam_art(state: State<'_, AppState>, name: String) -> AppResult<GameArt> {
-    let trimmed = name.trim();
-    if trimmed.is_empty() {
-        return Ok(empty_art());
-    }
-    let _ = ART_HTTP_TIMEOUT_SECS;
-    let client = state.http_art.clone();
+fn policy_pending() -> GameArt {
+    let mut art = GameArt::pending(Vec::new());
+    art.error_code = Some("remote_policy:explicit_action_required".to_string());
+    art
+}
 
-    let url = format!(
-        "{}?term={}&l=english&cc=us",
-        STEAM_STORESEARCH,
-        encode_path(trimmed)
-    );
-    let resp = match client.get(&url).send().await {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!(error = %e, name = %trimmed, "steam storesearch request failed");
-            return Ok(empty_art());
-        }
-    };
-    let body: serde_json::Value = match resp.json().await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(error = %e, name = %trimmed, "steam storesearch parse failed");
-            return Ok(empty_art());
-        }
-    };
-    let appid = body
-        .get("items")
-        .and_then(|v| v.as_array())
-        .and_then(|items| {
-            items
-                .iter()
-                .find(|it| it.get("type").and_then(|t| t.as_str()) == Some("app"))
-                .and_then(|it| it.get("id"))
-                .and_then(|i| i.as_i64())
-        });
-    let Some(id) = appid else {
-        return Ok(empty_art());
-    };
-    Ok(GameArt {
-        grid_url: Some(format!("{STEAM_CDN_BASE}/{id}/{STEAM_HEADER_PATH}")),
-        hero_url: Some(format!("{STEAM_CDN_BASE}/{id}/{STEAM_HERO_PATH}")),
-        capsule_url: Some(format!("{STEAM_CDN_BASE}/{id}/{STEAM_CAPSULE_PATH}")),
+fn steam_landscape_candidates(app_id: &str) -> Vec<GameArtCandidate> {
+    [
+        (STEAM_HERO_PATH, "library_hero", 3840, 1240),
+        (STEAM_HEADER_PATH, "header", 920, 430),
+    ]
+    .into_iter()
+    .filter_map(|(path, variant, width, height)| {
+        GameArtCandidate::https(
+            format!("{STEAM_CDN_BASE}/{app_id}/{path}"),
+            GameArtSource::SteamOfficialCdn,
+            variant,
+            width,
+            height,
+        )
     })
+    .collect()
+}
+
+fn steam_portrait_candidates(app_id: &str) -> Vec<GameArtCandidate> {
+    [
+        (STEAM_CAPSULE_2X_PATH, "library_600x900_2x", 1200, 1800),
+        (STEAM_CAPSULE_PATH, "library_600x900", 600, 900),
+    ]
+    .into_iter()
+    .filter_map(|(path, variant, width, height)| {
+        GameArtCandidate::https(
+            format!("{STEAM_CDN_BASE}/{app_id}/{path}"),
+            GameArtSource::SteamOfficialCdn,
+            variant,
+            width,
+            height,
+        )
+    })
+    .collect()
+}
+
+async fn first_available_with_probe<F, Fut>(
+    candidates: &[GameArtCandidate],
+    mut probe: F,
+) -> Result<Option<RemoteFound>, ()>
+where
+    F: FnMut(GameArtCandidate) -> Fut,
+    Fut: Future<Output = RemoteProbe>,
+{
+    for candidate in candidates {
+        match probe(candidate.clone()).await {
+            RemoteProbe::Found(bytes) => {
+                let Some((width, height)) = launcher_scan::art::verified_image_bytes(&bytes) else {
+                    return Err(());
+                };
+                return Ok(Some(RemoteFound {
+                    candidate: candidate.clone(),
+                    bytes,
+                    width,
+                    height,
+                }));
+            }
+            RemoteProbe::Missing => continue,
+            RemoteProbe::Failed => return Err(()),
+        }
+    }
+    Ok(None)
+}
+
+async fn http_probe(client: &reqwest::Client, candidate: GameArtCandidate) -> RemoteProbe {
+    if !candidate_host_allowed(&candidate) {
+        return RemoteProbe::Failed;
+    }
+    let response = match client.get(&candidate.locator).send().await {
+        Ok(response) => response,
+        Err(_) => return RemoteProbe::Failed,
+    };
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return RemoteProbe::Missing;
+    }
+    if !response.status().is_success() {
+        return RemoteProbe::Failed;
+    }
+    if response
+        .content_length()
+        .is_some_and(|length| length > ART_PROTOCOL_MAX_ASSET_BYTES)
+    {
+        return RemoteProbe::Failed;
+    }
+    match response.bytes().await {
+        Ok(bytes) if bytes.len() as u64 <= ART_PROTOCOL_MAX_ASSET_BYTES => {
+            RemoteProbe::Found(bytes.to_vec())
+        }
+        Ok(_) => RemoteProbe::Failed,
+        Err(_) => RemoteProbe::Failed,
+    }
+}
+
+fn candidate_host_allowed(candidate: &GameArtCandidate) -> bool {
+    let Ok(parsed) = url::Url::parse(&candidate.locator) else {
+        return false;
+    };
+    if parsed.scheme() != "https" {
+        return false;
+    }
+    let Some(host) = parsed.host_str().map(str::to_ascii_lowercase) else {
+        return false;
+    };
+    match candidate.source {
+        GameArtSource::SteamOfficialCdn => host.ends_with("steamstatic.com"),
+        GameArtSource::SteamGridDb => host.ends_with("steamgriddb.com"),
+        GameArtSource::EpicManifest | GameArtSource::EpicCatalog => {
+            (host == "epicgames.com" || host.ends_with(".epicgames.com"))
+                || host.ends_with(".epicgames.dev")
+                || host.ends_with(".unrealengine.com")
+                || host.ends_with("akamaized.net")
+                || host.ends_with("cloudfront.net")
+        }
+        _ => false,
+    }
+}
+
+fn art_cache_root(state: &AppState) -> AppResult<PathBuf> {
+    Ok(app_cache_dir(state)?.join("game-art"))
+}
+
+fn app_cache_dir(state: &AppState) -> AppResult<PathBuf> {
+    state
+        .paths
+        .read()
+        .as_ref()
+        .map(|paths| paths.cache_dir.clone())
+        .ok_or_else(|| AppError::Other("application paths are not initialized".to_string()))
+}
+
+fn cache_stem(key: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(key.as_bytes());
+    let mut output = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        use std::fmt::Write as _;
+        let _ = write!(output, "{byte:02x}");
+    }
+    output
+}
+
+fn cache_metadata_path(root: &Path, key: &str) -> PathBuf {
+    root.join(format!("{}.json", cache_stem(key)))
+}
+
+fn load_cached_art(root: &Path, key: &str, now: i64) -> Option<GameArt> {
+    let raw = std::fs::read(cache_metadata_path(root, key)).ok()?;
+    let mut entry: ArtCacheEntry = serde_json::from_slice(&raw).ok()?;
+    if entry.expires_at <= now {
+        return None;
+    }
+    if entry.art.state == GameArtState::Resolved {
+        for asset in [entry.art.landscape.as_ref(), entry.art.portrait.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            if asset.locator_kind != ArtLocatorKind::LocalFile
+                || launcher_scan::art::verified_dimensions(Path::new(&asset.locator)).is_none()
+            {
+                return None;
+            }
+        }
+    }
+    entry.art.cache_status = ArtCacheStatus::Hit;
+    Some(entry.art)
+}
+
+fn should_persist_art(art: &GameArt) -> bool {
+    matches!(
+        art.state,
+        GameArtState::Resolved | GameArtState::Unavailable
+    )
+}
+
+fn store_cached_art(root: &Path, key: &str, mut art: GameArt, now: i64) -> AppResult<GameArt> {
+    if !should_persist_art(&art) {
+        return Ok(art);
+    }
+    std::fs::create_dir_all(root)?;
+    art.cache_status = ArtCacheStatus::Stored;
+    let ttl = if art.state == GameArtState::Resolved {
+        ART_RESOLVED_CACHE_TTL_SECS
+    } else {
+        ART_UNAVAILABLE_CACHE_TTL_SECS
+    };
+    let entry = ArtCacheEntry {
+        expires_at: now.saturating_add(ttl),
+        art: art.clone(),
+    };
+    let destination = cache_metadata_path(root, key);
+    let temporary = destination.with_extension("json.tmp");
+    let encoded = serde_json::to_vec_pretty(&entry)
+        .map_err(|error| AppError::Other(format!("game art cache encode: {error}")))?;
+    std::fs::write(&temporary, encoded)?;
+    std::fs::rename(temporary, destination)?;
+    Ok(art)
+}
+
+fn persist_remote_asset(root: &Path, key: &str, found: RemoteFound) -> AppResult<GameArtAsset> {
+    let _ = key;
+    let cache_dir = root
+        .parent()
+        .ok_or_else(|| AppError::Other("game art cache root has no parent".to_string()))?;
+    let destination = crate::art_transport::persist_verified_bytes(cache_dir, &found.bytes)
+        .map_err(|error| AppError::Other(format!("persist game art asset: {error}")))?;
+    Ok(GameArtAsset::local(
+        &destination,
+        found.candidate.source,
+        found.candidate.variant,
+        found.width,
+        found.height,
+    ))
+}
+
+async fn resolve_steam_official(
+    client: &reqwest::Client,
+    cache_root: &Path,
+    cache_key: &str,
+    app_id: &str,
+) -> GameArt {
+    let landscape = first_available_with_probe(&steam_landscape_candidates(app_id), |candidate| {
+        http_probe(client, candidate)
+    })
+    .await;
+    let portrait = first_available_with_probe(&steam_portrait_candidates(app_id), |candidate| {
+        http_probe(client, candidate)
+    })
+    .await;
+
+    let source_failed = landscape.is_err() || portrait.is_err();
+    let landscape = match landscape {
+        Ok(Some(found)) => persist_remote_asset(cache_root, cache_key, found).ok(),
+        Ok(None) | Err(()) => None,
+    };
+    let portrait = match portrait {
+        Ok(Some(found)) => persist_remote_asset(cache_root, cache_key, found).ok(),
+        Ok(None) | Err(()) => None,
+    };
+    if landscape.is_some() || portrait.is_some() {
+        GameArt::resolved(landscape, portrait)
+    } else if source_failed {
+        GameArt::source_failed(GameArtSource::SteamOfficialCdn, "request_failed")
+    } else {
+        GameArt::unavailable(GameArtSource::SteamOfficialCdn, "all_variants_missing")
+    }
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
+pub async fn fetch_steam_art(
+    state: State<'_, AppState>,
+    app_id: String,
+    trigger: ArtResolveTrigger,
+) -> AppResult<GameArt> {
+    let app_id = app_id.trim();
+    if app_id.is_empty() || !app_id.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Ok(GameArt::unavailable(
+            GameArtSource::SteamOfficialCdn,
+            "invalid_app_id",
+        ));
+    }
+    let cache_root = art_cache_root(&state)?;
+    let cache_key = format!("steam:{app_id}");
+    let now = chrono::Utc::now().timestamp();
+    if let Some(art) = load_cached_art(&cache_root, &cache_key, now) {
+        let mut art = art;
+        crate::art_transport::prepare_art(&app_cache_dir(&state)?, &mut art)
+            .map_err(|error| AppError::Other(format!("prepare cached game art: {error}")))?;
+        return Ok(art);
+    }
+    // Reading a previously verified local asset does not require network consent.
+    let channel = state.distribution_policy.read().channel;
+    if !remote_art_allowed(channel, trigger) {
+        return Ok(policy_pending());
+    }
+
+    let mut art = resolve_steam_official(&state.http_art, &cache_root, &cache_key, app_id).await;
+    if art.state != GameArtState::SourceFailed {
+        art.cache_status = ArtCacheStatus::Miss;
+    }
+    store_cached_art(&cache_root, &cache_key, art, now)
+}
+
+#[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn enrich_game_art(
     state: State<'_, AppState>,
-    name: String,
+    game: DetectedGame,
     api_key: String,
+    trigger: ArtResolveTrigger,
 ) -> AppResult<GameArt> {
-    if api_key.trim().is_empty() || name.trim().is_empty() {
-        return Ok(empty_art());
+    if game.art.state == GameArtState::Resolved {
+        let mut art = game.art;
+        crate::art_transport::prepare_art(&app_cache_dir(&state)?, &mut art)
+            .map_err(|error| AppError::Other(format!("prepare resolved game art: {error}")))?;
+        return Ok(art);
     }
-    let trimmed = name.trim();
-    let client = state.http_art.clone();
+    let cache_root = art_cache_root(&state)?;
+    let cache_key = format!("game:{}", game.id);
+    let now = chrono::Utc::now().timestamp();
+    if let Some(art) = load_cached_art(&cache_root, &cache_key, now) {
+        let mut art = art;
+        crate::art_transport::prepare_art(&app_cache_dir(&state)?, &mut art)
+            .map_err(|error| AppError::Other(format!("prepare cached game art: {error}")))?;
+        return Ok(art);
+    }
+    // Reading a previously verified local asset does not require network consent.
+    let channel = state.distribution_policy.read().channel;
+    if !remote_art_allowed(channel, trigger) {
+        return Ok(policy_pending());
+    }
 
-    let search_url = format!(
-        "{SGDB_API_BASE}/search/autocomplete/{}",
-        encode_path(trimmed)
-    );
-    let search: serde_json::Value = match client.get(&search_url).bearer_auth(&api_key).send().await
-    {
-        Ok(r) => match r.json().await {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::warn!(error = %e, name = %trimmed, "sgdb search parse failed");
-                return Ok(empty_art());
+    if game.launcher == LauncherKind::Steam {
+        if let Some(app_id) = game.app_id.as_deref() {
+            let art =
+                resolve_steam_official(&state.http_art, &cache_root, &cache_key, app_id).await;
+            if art.state == GameArtState::Resolved || api_key.trim().is_empty() {
+                return store_cached_art(&cache_root, &cache_key, art, now);
             }
-        },
-        Err(e) => {
-            tracing::warn!(error = %e, name = %trimmed, "sgdb search request failed");
-            return Ok(empty_art());
         }
-    };
+    }
 
-    let game_id = search
-        .get("data")
-        .and_then(|d| d.as_array())
-        .and_then(|a| a.first())
-        .and_then(|g| g.get("id"))
-        .and_then(|i| i.as_i64());
-    let Some(gid) = game_id else {
-        return Ok(empty_art());
-    };
+    if game.launcher == LauncherKind::Epic {
+        let art = resolve_epic_official(&state.http_art, &cache_root, &cache_key, &game).await;
+        if art.state == GameArtState::Resolved || api_key.trim().is_empty() {
+            return store_cached_art(&cache_root, &cache_key, art, now);
+        }
+    }
 
-    let grid_url = fetch_first_asset_url(
-        &client,
-        &api_key,
-        &format!("{SGDB_API_BASE}/grids/game/{gid}?dimensions={SGDB_GRID_DIMS}&types=static"),
+    if !game.art.candidates.is_empty() {
+        match first_available_with_probe(&game.art.candidates, |candidate| {
+            http_probe(&state.http_art, candidate)
+        })
+        .await
+        {
+            Ok(Some(found)) => {
+                let asset = persist_remote_asset(&cache_root, &cache_key, found)?;
+                return store_cached_art(
+                    &cache_root,
+                    &cache_key,
+                    GameArt::resolved(Some(asset), None),
+                    now,
+                );
+            }
+            Ok(None) if api_key.trim().is_empty() => {
+                return store_cached_art(
+                    &cache_root,
+                    &cache_key,
+                    GameArt::unavailable(GameArtSource::EpicManifest, "observed_cover_missing"),
+                    now,
+                );
+            }
+            Err(()) => {
+                return Ok(GameArt::source_failed(
+                    game.art.candidates[0].source,
+                    "request_failed",
+                ));
+            }
+            Ok(None) => {}
+        }
+    }
+
+    if api_key.trim().is_empty() || game.name.trim().is_empty() {
+        return Ok(game.art);
+    }
+    resolve_steamgriddb(
+        &state.http_art,
+        &cache_root,
+        &cache_key,
+        &game.name,
+        api_key.trim(),
+        now,
     )
-    .await;
-    let hero_url = fetch_first_asset_url(
-        &client,
-        &api_key,
-        &format!("{SGDB_API_BASE}/heroes/game/{gid}?dimensions={SGDB_HERO_DIMS}&types=static"),
-    )
-    .await;
-
-    Ok(GameArt {
-        grid_url,
-        hero_url,
-        capsule_url: None,
-    })
+    .await
 }
 
-async fn fetch_first_asset_url(client: &reqwest::Client, key: &str, url: &str) -> Option<String> {
-    let resp = client.get(url).bearer_auth(key).send().await.ok()?;
-    let val: serde_json::Value = resp.json().await.ok()?;
-    val.get("data")
-        .and_then(|d| d.as_array())
-        .and_then(|a| a.first())
-        .and_then(|g| g.get("url"))
-        .and_then(|u| u.as_str())
-        .map(String::from)
+/// Read artwork only from an exact namespace and unambiguous product identity.
+fn epic_catalog_candidates(
+    value: &serde_json::Value,
+    game: &DetectedGame,
+) -> Result<Vec<GameArtCandidate>, &'static str> {
+    let namespace = game
+        .native_ids
+        .get("catalog_namespace")
+        .ok_or("missing_namespace")?;
+    let item_id = game.native_ids.get("catalog_item_id");
+    let elements = value
+        .pointer("/data/Catalog/searchStore/elements")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("invalid_catalog_response")?;
+    let scoped: Vec<_> = elements
+        .iter()
+        .filter(|offer| offer["namespace"].as_str() == Some(namespace.as_str()))
+        .collect();
+    let exact: Vec<_> = scoped
+        .iter()
+        .copied()
+        .filter(|offer| {
+            offer["items"].as_array().is_some_and(|items| {
+                items
+                    .iter()
+                    .any(|item| item_id.is_some_and(|id| item["id"].as_str() == Some(id.as_str())))
+            })
+        })
+        .collect();
+    // Store offers can replace their item ID between builds. Accept the published title only
+    // when exactly one offer in the same immutable namespace has that exact title.
+    let matching: Vec<_> = if exact.is_empty() {
+        scoped
+            .into_iter()
+            .filter(|offer| {
+                offer["title"]
+                    .as_str()
+                    .is_some_and(|title| title.eq_ignore_ascii_case(game.name.trim()))
+            })
+            .collect()
+    } else {
+        exact
+    };
+    if matching.len() != 1 {
+        return Err("ambiguous_or_missing_offer");
+    }
+    let images = matching[0]["keyImages"]
+        .as_array()
+        .ok_or("missing_images")?;
+    let mut candidates = Vec::new();
+    for kind in [
+        "OfferImageWide",
+        "DieselStoreFrontWide",
+        "OfferImageTall",
+        "DieselStoreFrontTall",
+        "Thumbnail",
+    ] {
+        for image in images
+            .iter()
+            .filter(|image| image["type"].as_str() == Some(kind))
+        {
+            if let Some(url) = image["url"].as_str() {
+                if let Some(candidate) = GameArtCandidate::https(
+                    url,
+                    GameArtSource::EpicCatalog,
+                    kind,
+                    image["width"].as_u64().unwrap_or(0).min(u32::MAX as u64) as u32,
+                    image["height"].as_u64().unwrap_or(0).min(u32::MAX as u64) as u32,
+                ) {
+                    if candidate_host_allowed(&candidate) {
+                        candidates.push(candidate);
+                    }
+                }
+            }
+        }
+    }
+    if candidates.is_empty() {
+        Err("missing_cover_variants")
+    } else {
+        Ok(candidates)
+    }
+}
+
+async fn resolve_epic_official(
+    client: &reqwest::Client,
+    cache_root: &Path,
+    cache_key: &str,
+    game: &DetectedGame,
+) -> GameArt {
+    let Some(namespace) = game.native_ids.get("catalog_namespace") else {
+        return GameArt::unavailable(GameArtSource::EpicCatalog, "missing_namespace");
+    };
+    let query = "query Cover($namespace: String!) { Catalog { searchStore(namespace: $namespace, count: 50, country: \"US\", locale: \"en-US\") { elements { id title namespace keyImages { type url width height } items { id namespace } } } } }";
+    let variables = serde_json::json!({"namespace": namespace}).to_string();
+    let response = match client
+        .get("https://store.epicgames.com/graphql")
+        .query(&[("query", query), ("variables", variables.as_str())])
+        .send()
+        .await
+    {
+        Ok(response) if response.status().is_success() => response,
+        _ => return GameArt::source_failed(GameArtSource::EpicCatalog, "catalog_request_failed"),
+    };
+    if response
+        .content_length()
+        .is_some_and(|size| size > 2 * 1024 * 1024)
+    {
+        return GameArt::source_failed(GameArtSource::EpicCatalog, "catalog_response_too_large");
+    }
+    let bytes = match response.bytes().await {
+        Ok(bytes) if bytes.len() <= 2 * 1024 * 1024 => bytes,
+        _ => return GameArt::source_failed(GameArtSource::EpicCatalog, "invalid_catalog_response"),
+    };
+    let value = match serde_json::from_slice(&bytes) {
+        Ok(value) => value,
+        Err(_) => {
+            return GameArt::source_failed(GameArtSource::EpicCatalog, "invalid_catalog_response")
+        }
+    };
+    let candidates = match epic_catalog_candidates(&value, game) {
+        Ok(candidates) => candidates,
+        Err(reason) => return GameArt::unavailable(GameArtSource::EpicCatalog, reason),
+    };
+    let landscape: Vec<_> = candidates
+        .iter()
+        .filter(|candidate| candidate.width > candidate.height)
+        .cloned()
+        .collect();
+    let portrait: Vec<_> = candidates
+        .iter()
+        .filter(|candidate| candidate.height >= candidate.width)
+        .cloned()
+        .collect();
+    let (landscape, portrait) = tokio::join!(
+        first_available_with_probe(&landscape, |candidate| http_probe(client, candidate)),
+        first_available_with_probe(&portrait, |candidate| http_probe(client, candidate))
+    );
+    let failed = landscape.is_err() || portrait.is_err();
+    let landscape = landscape
+        .ok()
+        .flatten()
+        .and_then(|found| persist_remote_asset(cache_root, cache_key, found).ok());
+    let portrait = portrait
+        .ok()
+        .flatten()
+        .and_then(|found| persist_remote_asset(cache_root, cache_key, found).ok());
+    if landscape.is_some() || portrait.is_some() {
+        GameArt::resolved(landscape, portrait)
+    } else if failed {
+        GameArt::source_failed(GameArtSource::EpicCatalog, "image_request_failed")
+    } else {
+        GameArt::unavailable(GameArtSource::EpicCatalog, "cover_variants_missing")
+    }
+}
+
+async fn resolve_steamgriddb(
+    client: &reqwest::Client,
+    cache_root: &Path,
+    cache_key: &str,
+    name: &str,
+    api_key: &str,
+    now: i64,
+) -> AppResult<GameArt> {
+    let search_url = format!(
+        "{SGDB_API_BASE}/search/autocomplete/{}",
+        encode_path(name.trim())
+    );
+    let response = match client.get(search_url).bearer_auth(api_key).send().await {
+        Ok(response) if response.status().is_success() => response,
+        Ok(_) | Err(_) => {
+            return Ok(GameArt::source_failed(
+                GameArtSource::SteamGridDb,
+                "search_failed",
+            ));
+        }
+    };
+    let search: serde_json::Value = match response.json().await {
+        Ok(value) => value,
+        Err(_) => {
+            return Ok(GameArt::source_failed(
+                GameArtSource::SteamGridDb,
+                "invalid_response",
+            ));
+        }
+    };
+    let Some(game_id) = search
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|items| items.first())
+        .and_then(|game| game.get("id"))
+        .and_then(serde_json::Value::as_i64)
+    else {
+        return store_cached_art(
+            cache_root,
+            cache_key,
+            GameArt::unavailable(GameArtSource::SteamGridDb, "no_match"),
+            now,
+        );
+    };
+
+    let urls = [
+        format!("{SGDB_API_BASE}/grids/game/{game_id}?dimensions={SGDB_GRID_DIMS}&types=static"),
+        format!("{SGDB_API_BASE}/heroes/game/{game_id}?dimensions={SGDB_HERO_DIMS}&types=static"),
+    ];
+    let mut candidates = Vec::new();
+    for (index, url) in urls.iter().enumerate() {
+        let Ok(response) = client.get(url).bearer_auth(api_key).send().await else {
+            return Ok(GameArt::source_failed(
+                GameArtSource::SteamGridDb,
+                "asset_list_failed",
+            ));
+        };
+        if !response.status().is_success() {
+            return Ok(GameArt::source_failed(
+                GameArtSource::SteamGridDb,
+                "asset_list_failed",
+            ));
+        }
+        let Ok(value) = response.json::<serde_json::Value>().await else {
+            return Ok(GameArt::source_failed(
+                GameArtSource::SteamGridDb,
+                "invalid_response",
+            ));
+        };
+        if let Some(items) = value.get("data").and_then(serde_json::Value::as_array) {
+            for item in items {
+                let Some(url) = item.get("url").and_then(serde_json::Value::as_str) else {
+                    continue;
+                };
+                let width = item
+                    .get("width")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0) as u32;
+                let height = item
+                    .get("height")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0) as u32;
+                if let Some(candidate) = GameArtCandidate::https(
+                    url,
+                    GameArtSource::SteamGridDb,
+                    if index == 0 { "grid" } else { "hero" },
+                    width,
+                    height,
+                ) {
+                    candidates.push(candidate);
+                }
+            }
+        }
+    }
+    candidates.sort_by(|left, right| {
+        u64::from(right.width)
+            .saturating_mul(u64::from(right.height))
+            .cmp(&u64::from(left.width).saturating_mul(u64::from(left.height)))
+    });
+    match first_available_with_probe(&candidates, |candidate| http_probe(client, candidate)).await {
+        Ok(Some(found)) => {
+            let asset = persist_remote_asset(cache_root, cache_key, found)?;
+            store_cached_art(
+                cache_root,
+                cache_key,
+                GameArt::resolved(Some(asset), None),
+                now,
+            )
+        }
+        Ok(None) => store_cached_art(
+            cache_root,
+            cache_key,
+            GameArt::unavailable(GameArtSource::SteamGridDb, "no_asset"),
+            now,
+        ),
+        Err(()) => Ok(GameArt::source_failed(
+            GameArtSource::SteamGridDb,
+            "asset_download_failed",
+        )),
+    }
 }
 
 fn encode_path(s: &str) -> String {
@@ -764,4 +1603,122 @@ fn encode_path(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod art_resolution_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    #[test]
+    fn epic_art_matches_namespace_and_unique_title_not_first_search_hit() {
+        let game = DetectedGame {
+            id: "epic-app".into(),
+            name: "inZOI ModKit".into(),
+            launcher: LauncherKind::Epic,
+            install_dir: PathBuf::from("C:/Game"),
+            app_id: None,
+            native_ids: BTreeMap::from([
+                ("catalog_namespace".into(), "namespace".into()),
+                ("catalog_item_id".into(), "old-item".into()),
+            ]),
+            art: GameArt::unavailable(GameArtSource::EpicManifest, "missing"),
+            image_url: None,
+            size_bytes: None,
+        };
+        let offer = serde_json::json!({"namespace":"namespace","title":"inZOI MODkit","items":[{"id":"new-item"}],"keyImages":[{"type":"OfferImageWide","url":"https://cdn1.epicgames.com/cover.jpg","width":1920,"height":1080},{"type":"OfferImageTall","url":"https://cdn1.epicgames.com/portrait.jpg","width":1200,"height":1600}]});
+        let response = serde_json::json!({"data":{"Catalog":{"searchStore":{"elements":[{"namespace":"other","title":"inZOI ModKit"},offer.clone()]}}}});
+        let candidates = epic_catalog_candidates(&response, &game).unwrap();
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].source, GameArtSource::EpicCatalog);
+        let duplicate = serde_json::json!({"data":{"Catalog":{"searchStore":{"elements":[offer.clone(),offer]}}}});
+        assert_eq!(
+            epic_catalog_candidates(&duplicate, &game).unwrap_err(),
+            "ambiguous_or_missing_offer"
+        );
+    }
+
+    fn png(width: u32, height: u32) -> Vec<u8> {
+        let mut bytes = vec![0_u8; 24];
+        bytes[..8].copy_from_slice(&[137, 80, 78, 71, 13, 10, 26, 10]);
+        bytes[16..20].copy_from_slice(&width.to_be_bytes());
+        bytes[20..24].copy_from_slice(&height.to_be_bytes());
+        bytes
+    }
+
+    #[test]
+    fn steam_appid_builds_official_candidates_without_name_lookup() {
+        let candidates = steam_landscape_candidates("4001890");
+        assert_eq!(candidates[0].variant, "library_hero");
+        assert_eq!(
+            candidates[0].locator,
+            "https://cdn.cloudflare.steamstatic.com/steam/apps/4001890/library_hero.jpg"
+        );
+        assert!(candidates
+            .iter()
+            .all(|candidate| !candidate.locator.contains("How%20to%20Fish")));
+    }
+
+    #[tokio::test]
+    async fn steam_variant_fallback_is_ordered_and_missing_is_unavailable() {
+        let candidates = steam_portrait_candidates("4001890");
+        let mut observed = Vec::new();
+        let found = first_available_with_probe(&candidates, |candidate| {
+            observed.push(candidate.variant.clone());
+            std::future::ready(if candidate.variant == "library_600x900_2x" {
+                RemoteProbe::Missing
+            } else {
+                RemoteProbe::Found(png(600, 900))
+            })
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(observed, vec!["library_600x900_2x", "library_600x900"]);
+        assert_eq!(found.candidate.variant, "library_600x900");
+        assert_eq!((found.width, found.height), (600, 900));
+
+        let missing =
+            first_available_with_probe(&candidates, |_| std::future::ready(RemoteProbe::Missing))
+                .await
+                .unwrap();
+        let art = if missing.is_none() {
+            GameArt::unavailable(GameArtSource::SteamOfficialCdn, "all_variants_missing")
+        } else {
+            unreachable!()
+        };
+        assert_eq!(art.state, GameArtState::Unavailable);
+        assert!(!art.retryable);
+    }
+
+    #[test]
+    fn transient_network_failure_is_retryable_and_not_cached_as_absence() {
+        let root = std::env::temp_dir().join("dlssync-art-transient-cache-test");
+        let _ = std::fs::remove_dir_all(&root);
+        let art = GameArt::source_failed(GameArtSource::SteamOfficialCdn, "request_failed");
+        assert_eq!(art.state, GameArtState::SourceFailed);
+        assert!(art.retryable);
+        assert!(!should_persist_art(&art));
+        let returned = store_cached_art(&root, "steam:4001890", art, 1_000).unwrap();
+        assert_eq!(returned.cache_status, ArtCacheStatus::TransientFailure);
+        assert!(!cache_metadata_path(&root, "steam:4001890").exists());
+    }
+
+    #[test]
+    fn nexus_automatic_resolution_emits_no_remote_probe() {
+        let probes = Arc::new(AtomicUsize::new(0));
+        if remote_art_allowed(DistributionChannel::Nexus, ArtResolveTrigger::Automatic) {
+            probes.fetch_add(1, Ordering::SeqCst);
+        }
+        assert_eq!(probes.load(Ordering::SeqCst), 0);
+        assert!(remote_art_allowed(
+            DistributionChannel::Nexus,
+            ArtResolveTrigger::UserScan
+        ));
+        assert!(remote_art_allowed(
+            DistributionChannel::Nexus,
+            ArtResolveTrigger::ExplicitRetry
+        ));
+    }
 }

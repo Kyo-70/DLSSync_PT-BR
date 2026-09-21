@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 /// Risk category a detected protection falls into. Drives the warning copy and
 /// tone: anti-cheat carries account-ban risk, anti-tamper carries launch-fail
 /// risk, store DRM is informational.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ProtectionKind {
     AntiCheat,
@@ -13,7 +13,7 @@ pub enum ProtectionKind {
 
 /// Where a detection came from: a matched binary filename on disk, the parsed
 /// PE structure of the game executable, or the bundled/manifest dataset.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum HitSource {
     Binary,

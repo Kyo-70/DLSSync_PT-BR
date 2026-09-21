@@ -35,6 +35,7 @@ fn build_xess_like_zip(filenames: &[&str], payload: &[u8]) -> Vec<u8> {
 
 fn release_for(filename: &str, cdn_url: &str, sha: &str, size: u64) -> Release {
     Release {
+        artifact: None,
         version: "3.0.1".into(),
         version_packed: 0,
         filename: filename.into(),

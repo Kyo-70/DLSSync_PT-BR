@@ -3,7 +3,7 @@ name = "DLSSync"
 repository = "https://github.com/xt0n1-t3ch/DLSSync"
 manifest_repository = "https://github.com/xt0n1-t3ch/DLSSync-Manifest"
 nexus = "https://www.nexusmods.com/site/mods/1922"
-homepage = "https://xt0n1-t3ch.github.io/DLSSync/"
+homepage = "https://github.com/xt0n1-t3ch/DLSSync"
 
 [links]
 releases = "https://github.com/xt0n1-t3ch/DLSSync/releases"
@@ -16,8 +16,12 @@ kofi = "https://ko-fi.com/xt0n1"
 anticheat_faq = "https://www.pcgamingwiki.com/wiki/Glossary:Anti-cheat"
 
 [catalog]
-canonical_manifest = "https://cdn.jsdelivr.net/gh/xt0n1-t3ch/dlssync-manifest@main/manifest.json"
+canonical_manifest = "https://cdn.jsdelivr.net/gh/xt0n1-t3ch/dlssync-manifest@main/manifest-v3.json"
+nexus_manifest = "https://cdn.jsdelivr.net/gh/xt0n1-t3ch/dlssync-manifest@9c5b4a3b717e3637c0b8e708f93c66c38dd6d912/manifest.json"
 signature_suffix = ".sig"
+schema_version = 3
+max_age_days = 180
+max_future_clock_skew_minutes = 10
 
 [distribution.standard]
 app_updates = true

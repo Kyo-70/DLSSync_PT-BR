@@ -1,11 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
+import { applyStreamlineSet } from "../../frontend/src/lib/api";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "../../frontend/src");
-const api = readFileSync(resolve(root, "lib/api.ts"), "utf8");
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 const controller = readFileSync(resolve(root, "lib/applyController.ts"), "utf8");
 // v1.6.7 drawer decomposition: the set-action button + its override-note title
 // live in DrawerFooter; the enabler banner in DrawerHero; the members $derived +
@@ -16,15 +18,11 @@ const footer = readFileSync(resolve(root, "components/DrawerFooter.svelte"), "ut
 const enCatalog = readFileSync(resolve(root, "lib/i18n/locales/en.json"), "utf8");
 
 describe("api — applyStreamlineSet binding", () => {
-  it("declares StreamlineSetResult with success/applied/error/rolled_back", () => {
-    expect(api).toMatch(/export interface StreamlineSetResult/);
-    expect(api).toMatch(/rolled_back: boolean/);
-    expect(api).toMatch(/applied: ApplyOutcome\[\]/);
-  });
-
-  it("invokes the apply_streamline_set command with items", () => {
-    expect(api).toMatch(/export async function applyStreamlineSet/);
-    expect(api).toMatch(/transport\(COMMANDS\.apply_streamline_set, \{ items \}\)/);
+  it("preserves a failed recovery from the backend", async () => {
+    const result = { success: false, applied: [], error: "restore failed", rolled_back: false };
+    vi.mocked(invoke).mockResolvedValueOnce(result);
+    expect(await applyStreamlineSet([])).toEqual(result);
+    expect(invoke).toHaveBeenCalledWith("apply_streamline_set", { items: [] });
   });
 });
 

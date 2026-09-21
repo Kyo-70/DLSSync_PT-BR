@@ -13,7 +13,7 @@ pub enum BackupError {
     InvalidColumn(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct BackupEntry {
     pub id: String,
     pub game_id: String,
@@ -43,10 +43,18 @@ pub struct BackupEntry {
     pub driver_provider: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RestoreVerificationRecord {
+    pub verified: bool,
+    pub at: Option<chrono::DateTime<chrono::Utc>>,
+    pub detail: Option<String>,
+}
+
 fn default_backup_type() -> String {
     "dll".to_string()
 }
 
+#[derive(Clone)]
 pub struct BackupStore {
     db_path: PathBuf,
     pub root_dir: PathBuf,
@@ -89,6 +97,14 @@ impl BackupStore {
         ensure_column(&conn, "device_class", "TEXT")?;
         ensure_column(&conn, "hardware_id", "TEXT")?;
         ensure_column(&conn, "driver_provider", "TEXT")?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS restore_verifications (
+                backup_id TEXT PRIMARY KEY,
+                verified INTEGER NOT NULL,
+                verified_at TEXT,
+                detail TEXT
+            );",
+        )?;
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_backups_type ON backups(backup_type)",
             [],
@@ -170,6 +186,49 @@ impl BackupStore {
         Ok(())
     }
 
+    pub fn record_restore_verification(
+        &self,
+        id: &str,
+        verification: &RestoreVerificationRecord,
+    ) -> Result<(), BackupError> {
+        self.conn()?.execute(
+            "INSERT INTO restore_verifications (backup_id, verified, verified_at, detail)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(backup_id) DO UPDATE SET
+               verified=excluded.verified,
+               verified_at=excluded.verified_at,
+               detail=excluded.detail",
+            rusqlite::params![
+                id,
+                verification.verified,
+                verification.at.map(|at| at.to_rfc3339()),
+                verification.detail,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn restore_verification(
+        &self,
+        id: &str,
+    ) -> Result<Option<RestoreVerificationRecord>, BackupError> {
+        let conn = self.conn()?;
+        let mut query = conn.prepare(
+            "SELECT verified, verified_at, detail
+             FROM restore_verifications WHERE backup_id=?1",
+        )?;
+        let mut rows = query.query([id])?;
+        let Some(row) = rows.next()? else {
+            return Ok(None);
+        };
+        let at: Option<String> = row.get(1)?;
+        Ok(Some(RestoreVerificationRecord {
+            verified: row.get(0)?,
+            at: at.as_deref().map(parse_iso).transpose()?,
+            detail: row.get(2)?,
+        }))
+    }
+
     pub fn list(&self) -> Result<Vec<BackupEntry>, BackupError> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
@@ -191,6 +250,10 @@ impl BackupStore {
     pub fn delete(&self, id: &str, remove_file: bool) -> Result<DeleteOutcome, BackupError> {
         let entry = self.get(id)?;
         let conn = self.conn()?;
+        conn.execute(
+            "DELETE FROM restore_verifications WHERE backup_id = ?1",
+            rusqlite::params![id],
+        )?;
         let affected = conn.execute("DELETE FROM backups WHERE id = ?1", rusqlite::params![id])?;
         if affected == 0 {
             return Err(BackupError::NotFound(id.to_string()));
@@ -254,7 +317,7 @@ impl BackupStore {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, specta::Type)]
 pub struct DeleteOutcome {
     pub removed_file: bool,
     pub removed_empty_dirs: usize,
@@ -508,6 +571,34 @@ mod tests {
         assert_eq!(drv.device_class.as_deref(), Some("Audio"));
         assert_eq!(drv.hardware_id.as_deref(), Some(r"PCI\VEN_10EC&DEV_0256"));
         assert_eq!(drv.driver_provider.as_deref(), Some("Realtek"));
+    }
+
+    #[test]
+    fn restore_verification_round_trips_and_is_removed_with_backup() {
+        let dir = tempdir().unwrap();
+        let store = fresh_store(&dir);
+        let entry = fake_entry(&store, "game-a", "nvngx_dlss.dll");
+        std::fs::write(&entry.backup_path, b"backup").unwrap();
+        store.insert(&entry).unwrap();
+        let at = chrono::DateTime::parse_from_rfc3339("2026-09-18T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        store
+            .record_restore_verification(
+                &entry.id,
+                &RestoreVerificationRecord {
+                    verified: true,
+                    at: Some(at),
+                    detail: Some("sha256 matched".to_string()),
+                },
+            )
+            .unwrap();
+        let verification = store.restore_verification(&entry.id).unwrap().unwrap();
+        assert!(verification.verified);
+        assert_eq!(verification.at, Some(at));
+        assert_eq!(verification.detail.as_deref(), Some("sha256 matched"));
+        store.delete(&entry.id, false).unwrap();
+        assert!(store.restore_verification(&entry.id).unwrap().is_none());
     }
 
     #[test]

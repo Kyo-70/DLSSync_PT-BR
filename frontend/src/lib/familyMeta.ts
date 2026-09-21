@@ -14,8 +14,8 @@ export type VendorKey = "nvidia" | "amd" | "intel" | "microsoft";
  *
  *  Two families historically disagreed across the old tables:
  *  - `streamline_direct_sr` is Microsoft DirectSR wrapped in an NVIDIA
- *    Streamline plug-in. The upstream technology (and therefore the download
- *    source) is Microsoft, so the vendor is `microsoft`.
+ *    Streamline plug-in. The DLL belongs to NVIDIA's Streamline package;
+ *    the wrapped API does not change the artifact publisher.
  *  - `direct_storage_core` is a Microsoft DirectStorage component
  *    (`startsWith("direct_storage")`) and resolves to `microsoft`. */
 export interface FamilyMeta {
@@ -43,7 +43,7 @@ export const FAMILY_META: Record<DllFamily, FamilyMeta> = {
   streamline_common: meta("nvidia"),
   streamline_pcl: meta("nvidia"),
   streamline_nis: meta("nvidia"),
-  streamline_direct_sr: meta("microsoft"),
+  streamline_direct_sr: meta("nvidia"),
   reflex: meta("nvidia"),
   xess_sr: meta("intel"),
   xess_sr_dx11: meta("intel"),

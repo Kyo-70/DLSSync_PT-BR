@@ -1,4 +1,5 @@
-use crate::{DetectedGame, LauncherKind, LauncherScanner, ScanError};
+use crate::{DetectedGame, GameArt, GameArtSource, LauncherKind, LauncherScanner, ScanError};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use winreg::enums::HKEY_LOCAL_MACHINE;
 use winreg::RegKey;
@@ -30,12 +31,31 @@ impl LauncherScanner for GogScanner {
                     name: game_name,
                     launcher: LauncherKind::Gog,
                     install_dir: p,
-                    app_id: Some(name),
+                    app_id: Some(name.clone()),
+                    native_ids: BTreeMap::from([("product_id".to_string(), name.clone())]),
+                    art: launcher_art(),
                     image_url: None,
                     size_bytes: None,
                 });
             }
         }
         Ok(games)
+    }
+}
+
+fn launcher_art() -> GameArt {
+    GameArt::unavailable(GameArtSource::GogRegistry, "no_cover_metadata")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::GameArtState;
+
+    #[test]
+    fn gog_registry_without_cover_metadata_is_explicitly_unavailable() {
+        let art = launcher_art();
+        assert_eq!(art.state, GameArtState::Unavailable);
+        assert!(!art.retryable);
     }
 }

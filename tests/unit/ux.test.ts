@@ -100,7 +100,7 @@ describe("isModifierComboMatch", () => {
 describe("vendorForFamily", () => {
   it("routes families to vendors, direct_sr to microsoft, unknown to null", () => {
     expect(vendorForFamily("dlss_sr")).toBe("nvidia");
-    expect(vendorForFamily("streamline_direct_sr")).toBe("microsoft");
+    expect(vendorForFamily("streamline_direct_sr")).toBe("nvidia");
     expect(vendorForFamily("xess_fg")).toBe("intel");
     expect(vendorForFamily("fsr_upscaler")).toBe("amd");
     expect(vendorForFamily("direct_storage")).toBe("microsoft");

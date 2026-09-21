@@ -6,17 +6,21 @@
 
   let {
     label,
+    iconOnly = false,
     options,
     selectedId,
     onSelect,
   }: {
     label: string;
+    iconOnly?: boolean;
     options: Option[];
     selectedId: string;
     onSelect: (id: string) => void;
   } = $props();
 
+  const menuId = $props.id();
   let open = $state(false);
+  let alignEnd = $state(false);
   let triggerEl: HTMLButtonElement | undefined = $state();
   let panelEl: HTMLDivElement | undefined = $state();
   let activeIndex = $state(0);
@@ -28,13 +32,21 @@
   let selected = $derived(options.find((o) => o.id === selectedId) ?? options[0]);
   let activeLabel = $derived(selected?.label ?? "");
   let activeDescendant = $derived(
-    options[activeIndex] ? `filter-opt-${options[activeIndex].id}` : undefined,
+    options[activeIndex] ? `filter-${menuId}-${options[activeIndex].id}` : undefined,
   );
 
   function openMenu(): void {
+    alignEnd = false;
     open = true;
     activeIndex = Math.max(0, options.findIndex((o) => o.id === selectedId));
-    void tick().then(() => panelEl?.focus());
+    void tick().then(() => {
+      if (triggerEl && panelEl) {
+        const bounds = panelEl.getBoundingClientRect();
+        const main = triggerEl.closest("main")?.getBoundingClientRect();
+        alignEnd = bounds.right > Math.min(main?.right ?? window.innerWidth, window.innerWidth) - 8;
+        panelEl.focus();
+      }
+    });
   }
 
   function closeMenu(returnFocus = true): void {
@@ -104,6 +116,10 @@
 <div class="filter-menu">
   <button
     class="filter-menu-trigger"
+    class:icon-only={iconOnly}
+    class:has-selection={selectedId !== "all"}
+    aria-label={`${label}: ${activeLabel}`}
+    title={`${label}: ${activeLabel}`}
     type="button"
     bind:this={triggerEl}
     aria-haspopup="listbox"
@@ -111,14 +127,19 @@
     onclick={toggle}
     onkeydown={onTriggerKey}
   >
-    <span class="filter-menu-label">{label}</span>
-    <span class="filter-menu-value">{activeLabel}</span>
+    {#if iconOnly}
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M7 12h10M10 17h4"/></svg>
+    {:else}
+      <span class="filter-menu-label">{label}</span>
+      {#if selectedId !== "all"}<span class="filter-menu-value">{activeLabel}</span>{/if}
+    {/if}
     <svg class="filter-menu-chevron" class:is-open={open} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
   </button>
 
   {#if open}
     <div
       class="filter-menu-popover surface"
+      class:align-end={alignEnd}
       role="listbox"
       aria-label={label}
       aria-activedescendant={activeDescendant}
@@ -130,7 +151,7 @@
       {#each options as opt, i (opt.id)}
         <button
           class="filter-menu-option"
-          id="filter-opt-{opt.id}"
+          id="filter-{menuId}-{opt.id}"
           class:active={i === activeIndex}
           class:chosen={opt.id === selectedId}
           class:tone-danger={opt.tone === "danger"}
@@ -230,10 +251,13 @@
     z-index: 60;
     min-width: max(100%, 13rem);
     max-width: min(20rem, 90vw);
+    max-height: min(360px, 60vh);
+    overflow-y: auto;
     padding: 4px;
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg);
   }
+  .filter-menu-popover.align-end { inset-inline-start: auto; inset-inline-end: 0; }
   .filter-menu-option {
     display: flex;
     align-items: center;

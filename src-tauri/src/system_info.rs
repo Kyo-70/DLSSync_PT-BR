@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct SystemInfo {
     pub os: OsInfo,
     pub cpu: CpuInfo,
@@ -9,7 +9,7 @@ pub struct SystemInfo {
     pub collected_at: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Default, specta::Type)]
 pub struct OsInfo {
     pub name: String,
     pub version: String,
@@ -17,27 +17,27 @@ pub struct OsInfo {
     pub edition: String,
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Default, specta::Type)]
 pub struct CpuInfo {
     pub brand: String,
     pub physical_cores: usize,
     pub logical_cores: usize,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct RamModule {
     pub capacity_bytes: u64,
     pub mhz: u32,
     pub type_label: String,
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+#[derive(Debug, Clone, Serialize, Default, specta::Type)]
 pub struct RamInfo {
     pub total_bytes: u64,
     pub modules: Vec<RamModule>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum GpuVendor {
     Nvidia,
@@ -46,7 +46,7 @@ pub enum GpuVendor {
     Other,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct GpuInfo {
     pub vendor: GpuVendor,
     pub pci_vendor_id: u16,

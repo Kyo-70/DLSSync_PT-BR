@@ -2,15 +2,16 @@ import { describe, it, expect } from "vitest";
 import type { DlssPreset } from "@/lib/api";
 import {
   SR_PRESET_OPTIONS,
+  RR_PRESET_OPTIONS,
   FG_MODE_OPTIONS,
   FG_COUNT_OPTIONS,
   emptyDlssConfig,
   presetLabel,
-  dlss4Available,
   dynamicMfgAvailable,
+  dlss5Available,
   hasActiveOverride,
-  DLSS4_MIN_DRIVER_PACKED,
   DYNAMIC_MFG_MIN_DRIVER_PACKED,
+  DLSS5_MIN_DRIVER_PACKED,
 } from "@/lib/dlss";
 
 describe("dlss override option tables", () => {
@@ -38,12 +39,6 @@ describe("dlss override option tables", () => {
 });
 
 describe("driver-version gating", () => {
-  it("requires 572.16 for DLSS 4 overrides", () => {
-    expect(dlss4Available(DLSS4_MIN_DRIVER_PACKED)).toBe(true);
-    expect(dlss4Available(DLSS4_MIN_DRIVER_PACKED - 1)).toBe(false);
-    expect(dlss4Available(59174)).toBe(true);
-  });
-
   it("requires 595.97 for dynamic multi frame generation", () => {
     expect(DYNAMIC_MFG_MIN_DRIVER_PACKED).toBe(59597);
     expect(dynamicMfgAvailable(DYNAMIC_MFG_MIN_DRIVER_PACKED)).toBe(true);
@@ -75,5 +70,38 @@ describe("config helpers", () => {
     expect(hasActiveOverride({ ...emptyDlssConfig(), enable_sr_dll_override: true })).toBe(true);
     expect(hasActiveOverride({ ...emptyDlssConfig(), fg_mode: "dynamic" })).toBe(true);
     expect(hasActiveOverride({ ...emptyDlssConfig(), fg_dynamic_target_fps: 240 })).toBe(true);
+  });
+
+  it("RR fields mark the config active (issue #32)", () => {
+    expect(hasActiveOverride({ ...emptyDlssConfig(), enable_rr_dll_override: true })).toBe(true);
+    expect(hasActiveOverride({ ...emptyDlssConfig(), rr_preset: "k" })).toBe(true);
+    expect(hasActiveOverride({ ...emptyDlssConfig(), rr_preset: "recommended" })).toBe(true);
+  });
+});
+
+describe("ray reconstruction options (issue #32)", () => {
+  it("exposes an RR preset table with recommended + K + full A-O range", () => {
+    expect(RR_PRESET_OPTIONS.some((o) => o.value === "recommended")).toBe(true);
+    expect(RR_PRESET_OPTIONS.some((o) => o.value === "default")).toBe(true);
+    expect(RR_PRESET_OPTIONS.some((o) => o.value === "k")).toBe(true);
+    for (const letter of ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o"] as DlssPreset[]) {
+      expect(RR_PRESET_OPTIONS.some((o) => o.value === letter)).toBe(true);
+    }
+  });
+
+  it("RR options carry labels, descriptions and https source URLs", () => {
+    for (const option of RR_PRESET_OPTIONS) {
+      expect(option.label.length).toBeGreaterThan(0);
+      expect(option.description.length).toBeGreaterThan(12);
+      expect(option.sourceUrl).toMatch(/^https:\/\//);
+    }
+  });
+});
+
+describe("DLSS5 gating", () => {
+  it("requires 610.47 for DLSS5 features", () => {
+    expect(DLSS5_MIN_DRIVER_PACKED).toBe(61047);
+    expect(dlss5Available(DLSS5_MIN_DRIVER_PACKED)).toBe(true);
+    expect(dlss5Available(DLSS5_MIN_DRIVER_PACKED - 1)).toBe(false);
   });
 });

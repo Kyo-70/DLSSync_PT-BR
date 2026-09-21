@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<root>
+  <driver version="26.6.1" operating-system="Windows">
+    <whql>WHQL</whql>
+    <download-url>https://www.amd.com/en/resources/support-articles/release-notes/RN-RAD-WIN-26-6-1.html</download-url>
+    <windows-version>32.0.31007.6001</windows-version>
+    <release-date>2026-06-10</release-date>
+  </driver>
+</root>

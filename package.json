@@ -19,10 +19,8 @@
     "@tauri-apps/cli": "^2.0.0",
     "axe-core": "4.10.3"
   },
-  "pnpm": {
-    "overrides": {
-      "esbuild": "0.28.1"
-    }
-  },
-  "packageManager": "pnpm@9.0.0"
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": "24.18.0"
+  }
 }

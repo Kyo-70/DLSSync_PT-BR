@@ -8,19 +8,19 @@ test.describe("catalog", () => {
     const { page } = app;
     await gotoView(page, "catalog");
 
-    await expect(page.getByRole("heading", { name: "Trust Center", exact: true })).toBeVisible();
-    await expect(page.getByText("Signature verified", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Trust Center", exact: true })).toHaveCount(0);
+    await expect(page.locator(".catalog-foot")).toContainText("Catalog ready");
 
-    await expect(page.locator(".vendor-card").first()).toBeVisible();
-    await expect(page.locator(".feature-row, .feature-row-btn").first()).toBeVisible();
+    await expect(page.locator(".catalog-vendor").first()).toBeVisible();
+    await expect(page.locator(".catalog-family:visible").first()).toBeVisible();
 
     let visibleFamilies = 0;
     for (const fam of FAMILIES) {
-      if (await page.getByText(fam, { exact: false }).first().count()) visibleFamilies++;
+      if (await page.locator(".catalog-family:visible").filter({ hasText: new RegExp(fam, "i") }).count()) visibleFamilies++;
     }
     expect(visibleFamilies).toBeGreaterThanOrEqual(2);
 
-    const picker = page.locator(".feature-row-btn").first();
+    const picker = page.locator(".catalog-family:visible").first();
     if (await picker.count()) {
       await picker.click();
       await expect(
@@ -30,16 +30,17 @@ test.describe("catalog", () => {
     }
   });
 
-  test("DirectStorage advanced catalog entry renders from the embedded manifest", async ({ app }) => {
+  test("DirectStorage catalog search opens the version history", async ({ app }) => {
     const { page } = app;
     await gotoView(page, "catalog");
     await page.locator(".runtime-search input").fill("DirectStorage");
-    const microsoftCard = page.locator(".vendor-card", { hasText: "Microsoft" }).first();
+    const microsoftCard = page.getByRole("region", { name: "Microsoft", exact: true });
     await expect(microsoftCard).toBeVisible();
-    await microsoftCard.locator(".feature-row-btn.is-advanced").click();
-    const directStorage = page.getByRole("button", { name: "View versions of DirectStorage", exact: true });
+    const directStorage = microsoftCard.getByRole("button", { name: /^View .*DirectStorage.* versions$/ }).first();
     await expect(directStorage).toBeVisible();
     await directStorage.click();
     await expect(page.getByRole("button", { name: /Download/i }).first()).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "DirectStorage" })).toHaveCount(0);
   });
 });

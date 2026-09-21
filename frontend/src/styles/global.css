@@ -21,7 +21,7 @@
   --text-primary: #ffffff;
   --text-secondary: #c7c7cc;
   --text-muted: #86868b;
-  --text-placeholder: #48484a;
+  --text-placeholder: #909098;
 
   --accent: #e9ebef;
   --accent-hover: #ffffff;
@@ -164,14 +164,27 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in: cubic-bezier(0.4, 0, 1, 1);
   --ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
-  --ease-elastic: cubic-bezier(0.68, -0.55, 0.32, 1.55);
-  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-elastic: cubic-bezier(0.16, 1, 0.3, 1);
+  --spring: cubic-bezier(0.16, 1, 0.3, 1);
 
   --dur-instant: 80ms;
   --dur-fast: 140ms;
   --dur-normal: 220ms;
   --dur-slow: 360ms;
   --dur-stagger: 12ms;
+
+  /* Layer scale. One ordered set replaces ad-hoc numbers, so an overlay cannot be trapped below the
+     surface that opened it. Overlays that must clear the shell also leave their parent stacking
+     context with the `portal` action; a high layer alone is not enough inside a transformed
+     ancestor. */
+  --layer-base: 1;
+  --layer-raised: 2;
+  --layer-sticky: 10;
+  --layer-dock: 120;
+  --layer-drawer: 180;
+  --layer-overlay-backdrop: 220;
+  --layer-overlay: 221;
+  --layer-toast: 320;
 
   --sidebar-width: 232px;
   --sidebar-width-collapsed: 64px;
@@ -232,8 +245,8 @@
 
   --text-primary: #000000;
   --text-secondary: #2b2b2e;
-  --text-muted: #86868b;
-  --text-placeholder: #aeaeb2;
+  --text-muted: #63636b;
+  --text-placeholder: #686870;
 
   --accent: #1b1d22;
   --accent-hover: #34373e;
@@ -344,25 +357,8 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-:root { --scrollbar-thumb: rgba(255, 255, 255, 0.22); --scrollbar-thumb-hover: rgba(255, 255, 255, 0.34); }
-[data-theme="light"] { --scrollbar-thumb: rgba(0, 0, 0, 0.16); --scrollbar-thumb-hover: rgba(0, 0, 0, 0.26); }
-::-webkit-scrollbar { width: 12px; height: 12px; background: transparent; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-corner { background: transparent; }
-::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
-  border: 4px solid transparent;
-  background-clip: padding-box;
-  border-radius: var(--radius-full);
-  transition: background-color var(--dur-fast) var(--ease);
-}
-::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); background-clip: padding-box; }
-@supports not selector(::-webkit-scrollbar) {
-  * { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
-}
-@media (forced-colors: active) {
-  ::-webkit-scrollbar-thumb { background: CanvasText; border-color: Canvas; }
-}
+:root { color-scheme: dark; }
+html[data-theme="light"] { color-scheme: light; }
 
 button { cursor: pointer; border: none; background: none; font: inherit; color: inherit; }
 button:focus-visible,
@@ -370,6 +366,15 @@ select:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 [role="button"]:focus-visible {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-ring);
+}
+
+/* An overlay moves focus programmatically, and a programmatic focus does not always satisfy
+   `:focus-visible`. The focus trap marks the element it focused first, so the ring stays visible
+   until the user moves focus or uses a pointer. */
+[data-initial-focus="true"]:focus {
   outline: none;
   border-color: var(--border-focus);
   box-shadow: var(--shadow-ring);
@@ -941,34 +946,16 @@ input::placeholder, textarea::placeholder { color: var(--text-placeholder); }
   .glass-panel { background: var(--bg-elevated); }
 }
 
-/* The single floating-dialog material: one blur level, lg shadow, a 3px accent
-   leading stripe and a 32px close affordance. Every modal/flyout/popover shares
-   this — do NOT hand-roll per-component glass surfaces. */
+/* Opaque dialogs keep file versions and actions readable above artwork. */
 .glass-dialog {
   position: relative;
   overflow: hidden;
-  background: var(--glass-strong);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
+  background: var(--bg-card);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-lg), var(--glass-edge);
-}
-.glass-dialog::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  background: linear-gradient(
-    to bottom,
-    var(--edge-color, var(--accent)),
-    color-mix(in oklab, var(--edge-color, var(--accent)) 30%, transparent)
-  );
-  pointer-events: none;
-  z-index: 1;
-}
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .glass-dialog { background: var(--glass-fallback); }
+  box-shadow: var(--shadow-lg);
 }
 .dialog-close {
   position: absolute;
@@ -1059,7 +1046,7 @@ input::placeholder, textarea::placeholder { color: var(--text-placeholder); }
    Shared control + signature primitives, centralized so every view reads as
    one app. Views must NOT redefine these locally — extend with modifiers. */
 
-/* Accent-edge signature: a 3px leading-edge bar marking a feature/active panel
+/* Accent-edge signature: a 1px leading-edge rule marking a feature/active panel
    (hero, GPU card, KPI strip…). The host must be position:relative with
    overflow:hidden + a border-radius so the bar clips to the corner. Override
    the hue per-instance with --edge-color (defaults to the celeste accent). */
@@ -1068,7 +1055,7 @@ input::placeholder, textarea::placeholder { color: var(--text-placeholder); }
   content: "";
   position: absolute;
   inset: 0 auto 0 0;
-  width: 3px;
+  width: 1px;
   background: linear-gradient(
     to bottom,
     var(--edge-color, var(--accent)),
@@ -1150,3 +1137,15 @@ input::placeholder, textarea::placeholder { color: var(--text-placeholder); }
   .halo::after { animation: none !important; }
   .skeleton { background-position: 0 0 !important; }
 }
+
+/* A restrained scrollbar shared by page, dialog and disclosure scroll areas. */
+:root { --scrollbar-thumb: #555961; --scrollbar-thumb-hover: #818792; }
+:root[data-theme="light"] { --scrollbar-thumb: #a4a9b1; --scrollbar-thumb-hover: #737b87; }
+@supports not selector(::-webkit-scrollbar) { * { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; } }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border: 2px solid transparent; background-clip: padding-box; border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background-color: var(--scrollbar-thumb-hover); }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+::-webkit-scrollbar-corner { background: transparent; }
+@media (forced-colors: active) { * { scrollbar-color: auto; scrollbar-width: auto; } }

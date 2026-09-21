@@ -1,4 +1,4 @@
-use dlssync_contracts::{JournalFilter, OperationRecord, UpdatePlan};
+use dlssync_contracts::{JournalFilter, OperationRecord, StateEvent, UpdatePlan};
 use std::path::{Path, PathBuf};
 
 pub trait FileSystemPort {
@@ -35,4 +35,30 @@ pub trait PlanStorePort {
 
     fn save(&self, plan: &UpdatePlan) -> Result<(), Self::Error>;
     fn load(&self, id: &str) -> Result<UpdatePlan, Self::Error>;
+}
+
+pub trait StateClock: Send + Sync {
+    fn now_utc(&self) -> String;
+}
+
+pub trait StateEventPublisher: Send + Sync {
+    fn publish(&self, event: &StateEvent) -> Result<(), String>;
+}
+
+#[derive(Debug, Default)]
+pub struct SystemStateClock;
+
+impl StateClock for SystemStateClock {
+    fn now_utc(&self) -> String {
+        chrono::Utc::now().to_rfc3339()
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct NullStateEventPublisher;
+
+impl StateEventPublisher for NullStateEventPublisher {
+    fn publish(&self, _event: &StateEvent) -> Result<(), String> {
+        Ok(())
+    }
 }

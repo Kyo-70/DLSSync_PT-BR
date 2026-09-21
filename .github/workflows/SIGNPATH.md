@@ -48,11 +48,16 @@ This emits the private key on disk (used as TAURI_SIGNING_PRIVATE_KEY secret) an
 
 Treat the private key like a master password. A compromised key lets an attacker push a malicious update to every installed copy.
 
-## Step 4 — Enable signing in the release workflow
+## Step 4 - Select the signing lane in the release workflow
 
-The release workflow at .github/workflows/release.yml contains an opt-in sign-windows job gated by `if: vars.SIGNPATH_ENABLED == 'true'`. To switch it on, set the repository variable SIGNPATH_ENABLED=true in https://github.com/xt0n1-t3ch/DLSSync/settings/variables/actions.
+The release workflow has two explicit lanes, selected by the repository variable `SIGNPATH_ENABLED` in https://github.com/xt0n1-t3ch/DLSSync/settings/variables/actions.
 
-Until that variable is true, the workflow builds and publishes unsigned artifacts so the first releases can ship while the SignPath application is in review.
+- `SIGNPATH_ENABLED=true`: `sign-windows` submits the exact artifact set to SignPath and `verify-signatures` refuses to continue unless every file reports a valid Authenticode signature.
+- Variable absent or any other value: `stage-unsigned` reads each exact file, refuses any file that unexpectedly carries a signature, and records `NotSigned` in `AUTHENTICODE-STATE.json`. The release notes then state plainly that the files are not Authenticode-signed.
+
+`publish` requires a state that one of those lanes actually read, and `scripts/release-safety.test.mjs` asserts the whole contract, including that no lane self-signs, disables SmartScreen or Windows Defender, or weakens the publisher check that DLSSync applies to downloaded game DLLs.
+
+The unsigned lane exists so the project can ship while the SignPath application is in review. It never claims a signature. The Tauri updater signature is required in both lanes; publication fails without a nonempty matching signature in `latest.json`.
 
 ## Step 5 — Verify after the first signed release
 

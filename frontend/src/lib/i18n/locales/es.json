@@ -22,7 +22,9 @@
     "download": "Descargar",
     "install": "Instalar",
     "open": "Abrir",
-    "undo": "Deshacer"
+    "undo": "Deshacer",
+    "technicalDetails": "Detalles técnicos",
+    "update": "Actualizar"
   },
   "status": {
     "outdated": "Actualización disponible",
@@ -34,10 +36,10 @@
   },
   "view": {
     "journal": {
-      "title": "Historial de operaciones",
-      "subtitle": "Un registro duradero de análisis, catálogo, planes, aplicaciones, restauraciones y controladores.",
-      "export": "Copiar JSON redactado",
-      "filters": "Filtros del historial",
+      "title": "Actividad",
+      "subtitle": "Tus actualizaciones, copias de seguridad y búsquedas de juegos.",
+      "export": "Copiar historial",
+      "filters": "Filtrar historial",
       "kind": "Operación",
       "result": "Resultado",
       "all": "Todas",
@@ -50,8 +52,8 @@
       "kinds": {
         "scan": "Análisis",
         "catalog_refresh": "Catálogo",
-        "plan": "Plan",
-        "dll_apply": "Aplicación",
+        "plan": "Comprobación",
+        "dll_apply": "Actualización",
         "rollback": "Restauración",
         "driver_install": "Controlador"
       },
@@ -59,7 +61,13 @@
         "gui": "App",
         "cli": "CLI",
         "background": "Segundo plano"
-      }
+      },
+      "recovery": {
+        "rolled_back": "Restaurada",
+        "rollback_failed": "Falló al restaurar",
+        "rolling_back": "Restaurando"
+      },
+      "syncPending": "Sincronizando historial…"
     },
     "library": {
       "title": "Biblioteca",
@@ -81,13 +89,13 @@
         "segAria": "Actualizaciones pendientes por fabricante",
         "kpiGames": "Juegos",
         "kpiUpToDate": "Al día",
-        "kpiProtected": "Protegidos",
+        "kpiProtected": "Con copia",
         "kpiProtectedTitle": "Juegos con puntos de restauración en Copias",
-        "review": "Revisar",
+        "review": "Ver actualizaciones",
         "reviewTitle": "Filtra la biblioteca para mostrar solo los juegos con actualizaciones pendientes",
-        "applyAll": "Aplicar todo",
+        "applyAll": "Actualizar todo",
         "applyAllTitle": "Aplica todas las actualizaciones detectadas en la biblioteca",
-        "manifestStamp": "Manifiesto {stamp}",
+        "manifestStamp": "Lista actualizada {stamp}",
         "manifestTitle": "Hora de actualización del manifiesto del catálogo"
       },
       "filter": {
@@ -140,7 +148,8 @@
       "section": {
         "needsUpdate": "Necesita actualización",
         "upToDate": "Actualizados",
-        "viewAll": "Ver todos →"
+        "viewAll": "Ver todos →",
+        "otherGames": "Otros juegos"
       },
       "noDllsZone": {
         "title": "Juegos sin tecnologías compatibles",
@@ -171,11 +180,17 @@
       },
       "applyAllCount_one": "Aplicar {count} actualizacion",
       "applyAllCount_other": "Aplicar todas ({count})",
-      "applyAllTitle": "Aplica todas las actualizaciones detectadas en la biblioteca"
+      "applyAllTitle": "Aplica todas las actualizaciones detectadas en la biblioteca",
+      "shown": "{count} visibles",
+      "gameCount": "{count} juegos",
+      "summaryUpdates": "{count} actualizaciones en {games} juegos",
+      "updatesTab": "Actualizaciones",
+      "filtersTitle": "Filtros"
     },
     "catalog": {
       "title": "Catálogo",
-      "subtitle": "Todas las tecnologías de escalado y generación de fotogramas que DLSSync rastrea. Haz clic en una función para ver cada versión, copiar una URL de CDN o ir directo a una descarga.",
+      "latest": "Más reciente",
+      "subtitle": "Explora versiones de componentes y descargas disponibles.",
       "refreshing": "Actualizando",
       "refreshManifest": "Actualizar manifiesto",
       "stat": {
@@ -243,11 +258,14 @@
         "hours_other": "hace {count} h",
         "days_one": "hace {count} día",
         "days_other": "hace {count} días"
-      }
+      },
+      "browseSummary": "Explora {families} bibliotecas y {versions} versiones.",
+      "allVendors": "Todos",
+      "noMatches": "Ninguna biblioteca coincide con estos filtros."
     },
     "drivers": {
       "title": "Controladores",
-      "subtitle": "El controlador de GPU más reciente para cada adaptador detectado, comprobado en directo con el fabricante, además de controles de preajuste de DLSS y de generación de fotogramas.",
+      "subtitle": "Comprueba los drivers gráficos y de Windows de este equipo.",
       "health": {
         "aria": "Resumen de salud de los controladores",
         "gpuUpdates_one": "{count} actualización de controlador de GPU",
@@ -285,11 +303,11 @@
       "rescan": "Volver a analizar",
       "systemSub": "Actualizaciones de controladores para el resto de tu PC: audio, red, Bluetooth, chipset, entrada y almacenamiento. Provienen de Windows Update y del Microsoft Update Catalog, se mantienen firmadas por el fabricante y nunca ofrecemos una más antigua que el controlador que ya tienes.",
       "betaNote": "La detección puede pasar por alto o interpretar mal parte del hardware, así que revisa cada actualización antes de aplicarla. Si alguna causa problemas, la copia de seguridad automática la revierte.",
-      "systemSummary": "Mantiene al día el resto de tu PC: controladores de audio, red, chipset, entrada y almacenamiento directamente desde Windows Update.",
+      "systemSummary": "Drivers que Windows Update ofrece para este PC.",
       "learnMore": "Más información",
       "showLess": "Mostrar menos",
       "scanningWindowsUpdate": "Buscando controladores de componentes en Windows Update…",
-      "allComponentsUpToDate": "Todos los componentes están actualizados; Windows Update no tiene ningún controlador más reciente.",
+      "allComponentsUpToDate": "Windows Update no encontró drivers disponibles.",
       "latestFallback": "más reciente",
       "versionHistoryTitle": "Mostrar las versiones instaladas y previamente instaladas de este controlador",
       "versionHistoryAria": "Historial de versiones",
@@ -298,6 +316,7 @@
       "driverInfoAria": "Información del controlador",
       "update": "Actualizar",
       "installStageFallback": "En curso",
+      "installFailedNote": "Instalación fallida",
       "readingDriverStore": "Leyendo el almacén de controladores local…",
       "readVersionsError": "No se pudieron leer las versiones del controlador.",
       "noCachedVersions": "No hay versiones anteriores en caché en este PC. Última disponible: {version}.",
@@ -308,11 +327,14 @@
       "dlssOverridesSub": "Fuerza el preajuste de DLSS, el modo de generación de fotogramas y el multiplicador de forma global mediante el perfil del controlador de NVIDIA, el mismo mecanismo que usa la app de NVIDIA. Las anulaciones por juego están en el panel de detalle de cada juego.",
       "upscalingOn": "Escalado en {vendors}",
       "upscalingSub": "Las anulaciones de preajuste por perfil del controlador son exclusivas de NVIDIA (NVAPI). En AMD e Intel, FSR y XeSS se controlan por juego intercambiando sus DLL; gestiónalos desde el panel de detalle del juego y el Catalog. Esta pestaña mantiene actualizado tu propio controlador de AMD / Intel arriba.",
-      "openLinkFailed": "Error al abrir el enlace: {error}"
+      "openLinkFailed": "Error al abrir el enlace: {error}",
+      "graphics": "Gráficos",
+      "devices": "Dispositivos",
+      "notChecked": "Sin comprobar actualizaciones"
     },
     "backups": {
       "title": "Copias de seguridad",
-      "subtitle": "Cada DLL que DLSSync reemplaza se respalda primero. Restaura cuando quieras, con un clic.",
+      "subtitle": "Archivos guardados de actualizaciones anteriores.",
       "activityTab": "Actividad",
       "expandAll": "Expandir todo",
       "collapseAll": "Contraer todo",
@@ -329,7 +351,9 @@
         "newest": "Más reciente",
         "oldest": "Más antigua",
         "missingHint": "Los archivos de la copia ya no están en el disco; se movieron o eliminaron fuera de DLSSync. Elimina las filas para limpiar la lista.",
-        "missingCount": "{count} faltante"
+        "missingCount": "{count} faltante",
+        "unverified": "Sin verificar",
+        "unverifiedHint": "Copias que la aplicación todavía no ha comprobado en disco."
       },
       "legend": {
         "label": "Qué significan los recuentos",
@@ -387,7 +411,8 @@
         "missing": "{count} faltante",
         "missing_one": "{count} faltante",
         "missing_other": "{count} faltantes",
-        "latest": "última {date}"
+        "latest": "última {date}",
+        "unverifiedWord": "sin verificar"
       },
       "entry": {
         "selectHint": "Seleccionar para restaurar/eliminar en lote",
@@ -408,7 +433,9 @@
         "restoreHint": "Revertir la DLL original en la carpeta del juego",
         "restoreAgain": "Restaurar de nuevo",
         "restoreAgainHint": "Restaurar esta instantánea de nuevo: útil si aplicaste una DLL más reciente tras la última restauración",
-        "restoring": "Restaurando"
+        "restoring": "Restaurando",
+        "unverified": "Sin verificar",
+        "unverifiedHint": "DLSSync todavía no ha comprobado este archivo de copia, así que la restauración puede funcionar o no."
       },
       "cancel": "Cancelar",
       "delete": "Eliminar",
@@ -477,7 +504,19 @@
         "rebootSuffix": " — reinicia para terminar",
         "notifTitle": "Se revirtió el controlador de {deviceClass}",
         "toastRollbackFailed": "Error al revertir: {error}"
-      }
+      },
+      "eligibility": {
+        "snapshot_absent": "No se puede restaurar: el archivo de copia ya no está en el disco.",
+        "snapshot_unavailable": "No se puede restaurar: el archivo de copia no está disponible.",
+        "already_restored": "Ya restaurada: vuelve a restaurar solo si aplicaste una DLL más nueva después.",
+        "unverified": "Sin comprobar: la aplicación no puede confirmar que esta copia se pueda restaurar.",
+        "operation_in_flight": "Hay una operación en curso sobre este archivo.",
+        "unspecified": "La restauración está bloqueada y no se informó un motivo."
+      },
+      "toastRestoreUnverified": "La restauración de {file} todavía no está confirmada: revisa Actividad para ver el resultado.",
+      "toastRestoreUnverifiedCount_one": "{count} restauración todavía sin confirmar",
+      "toastRestoreUnverifiedCount_other": "{count} restauraciones todavía sin confirmar",
+      "fileDetails": "Detalles del archivo"
     },
     "settings": {
       "title": "Ajustes",
@@ -550,6 +589,9 @@
           },
           "runAtStartup": {
             "label": "Iniciar con Windows (minimizado en la bandeja)",
+            "readFailed": "No se pudo leer la entrada de arranque de Windows: {error}",
+            "notVerified": "Entrada de arranque de Windows sin verificar",
+            "mismatch": "Windows informa un valor distinto al solicitado; el valor mostrado es el releído de Windows",
             "sub": "Inicia DLSSync oculto en la bandeja al arrancar Windows, sin ventana visible hasta que lo abras."
           },
           "notifyToast": {
@@ -636,6 +678,15 @@
           "available": "v{version} está disponible — consulta el aviso.",
           "latest": "Tienes la última versión (v{version}).",
           "checkFailed": "Error al buscar actualizaciones: {error}"
+        },
+        "status": {
+          "unchecked": "Sin comprobar en esta sesión",
+          "checking": "Comprobando…",
+          "available": "Actualización disponible: v{version}",
+          "upToDate": "Al día (v{version})",
+          "indeterminate": "La comprobación no devolvió una respuesta utilizable, así que la disponibilidad no está determinada",
+          "error": "Error al buscar actualizaciones: {error}",
+          "manualOnly": "Build {distribution}: actualizaciones manuales de la app, sin comprobación automática"
         },
         "manualOnly": "Build {distribution}: actualizaciones manuales de la app",
         "openReleases": "Abrir página de Nexus Mods"
@@ -762,16 +813,22 @@
           "sub": "Los reemplazos de preajuste DLSS y de generación de fotogramas se trasladaron a la pestaña {drivers}, junto a las actualizaciones del controlador de la GPU. Los reemplazos por juego permanecen en la ficha de detalle de cada juego.",
           "driversTabBold": "Controladores",
           "openDrivers": "Abrir la pestaña Controladores"
-        }
-      }
+        },
+        "optionsTitle": "Opciones avanzadas",
+        "optionsIntro": "Ajusta el diagnóstico y las descargas.",
+        "registryDetails": "Detalles del registro"
+      },
+      "subtitle": "Configura la apariencia, las actualizaciones y la detección de juegos.",
+      "filesAndLogs": "Archivos y registros"
     },
     "about": {
       "title": "Acerca de",
-      "subtitle": "DLSSync mantiene las tecnologías DLSS, FSR y XeSS sincronizadas con las versiones del fabricante: verificadas por hash, firmadas por el fabricante y totalmente reversibles.",
+      "subtitle": "Actualiza componentes de juegos y conserva registros de copias verificadas.",
       "action": {
         "sourceTitle": "Abrir el código fuente de DLSSync en GitHub",
         "manifestTitle": "Abrir el repositorio público del catálogo firmado",
         "manifest": "Manifiesto",
+        "sponsor": "Patrocinar",
         "sponsorTitle": "GitHub Sponsors: apoyo recurrente o puntual",
         "kofiTitle": "Ko-fi: propina rápida y puntual",
         "nexusTitle": "DLSSync en Nexus Mods: recomiéndalo para aumentar su visibilidad",
@@ -794,7 +851,8 @@
       "whatsNew": {
         "eyebrow": "Novedades",
         "viewChangelog": "Ver el registro de cambios completo →",
-        "openReleasesTitle": "Abrir las versiones de GitHub"
+        "openReleasesTitle": "Abrir las versiones de GitHub",
+        "unreleased": "Sin publicar"
       },
       "kpi": {
         "familiesTracked": "Familias supervisadas",
@@ -862,6 +920,9 @@
       },
       "update": {
         "checking": "Buscando en GitHub Releases…",
+        "status": {
+          "indeterminate": "La comprobación no devolvió una respuesta utilizable, así que la disponibilidad no está determinada"
+        },
         "available": "Actualización disponible: v{version}. Visita la página de versiones para descargarla.",
         "latest": "Tienes la versión más reciente (v{version}).",
         "failed": "Error al buscar actualizaciones: {error}. Puede que el servidor no sea accesible o que aún no haya ninguna versión publicada."
@@ -1034,19 +1095,27 @@
     }
   },
   "applyStage": {
-    "download": "Descargar",
-    "verify_sha": "Verificar SHA",
-    "verify_signature": "Verificar firma",
-    "backup_current": "Copia de seguridad del actual",
-    "install_new": "Instalar nuevo",
-    "verify_installed": "Verificar instalado",
-    "done": "Listo"
+    "download": "Descargando",
+    "verify_sha": "Comprobando archivos",
+    "verify_signature": "Comprobando origen",
+    "backup_current": "Guardando copia",
+    "install_new": "Actualizando",
+    "verify_installed": "Finalizando",
+    "done": "Actualizado",
+    "backup": "Guardando copia",
+    "replace": "Actualizando",
+    "verify_post": "Finalizando",
+    "complete": "Actualizado"
   },
   "installStage": {
     "downloading": "Descargando",
     "installing": "Instalando",
     "completed": "Listo",
-    "failed": "Error"
+    "failed": "Error",
+    "launching": "Iniciando",
+    "cancelled": "Cancelada",
+    "queued": "En cola",
+    "verifying": "Verificando"
   },
   "driverStatus": {
     "update_available": "Actualización disponible",
@@ -1099,6 +1168,26 @@
       "label": "Desconocido",
       "short": "Error inesperado",
       "hint": "Ocurrió un fallo sin clasificar. Usa «Copiar informe» y abre un issue si persiste."
+    },
+    "streamline_locked": {
+      "label": "Streamline desactivado",
+      "short": "Streamline desactivado",
+      "hint": "Las actualizaciones de Streamline están desactivadas. Revisa Ajustes → Avanzado y actualiza el conjunto compatible completo."
+    },
+    "driver_too_old": {
+      "label": "Requiere actualizar el driver",
+      "short": "Requiere actualizar el driver",
+      "hint": "El driver instalado no cumple el requisito de esta biblioteca. Revisa Drivers antes de aplicar."
+    },
+    "game_running": {
+      "label": "Juego abierto",
+      "short": "Juego abierto",
+      "hint": "Cierra el juego antes de cambiar sus archivos y vuelve a intentar."
+    },
+    "architecture": {
+      "label": "Arquitectura",
+      "short": "Arquitectura",
+      "hint": "La arquitectura de la DLL no corresponde al juego. Actualiza el catálogo y revisa un candidato compatible."
     }
   },
   "notifKind": {
@@ -1285,32 +1374,33 @@
   },
   "component": {
     "updatePlan": {
-      "eyebrow": "Simulación con procedencia",
-      "title": "Revisar plan de actualización",
-      "subtitle": "Nada cambia hasta confirmar este plan firmado exacto.",
-      "loading": "Cargando pruebas de confianza…",
+      "eyebrow": "Detalles de actualización",
+      "title": "Todo listo para actualizar",
+      "subtitle": "Guardaremos una copia de tus archivos antes de actualizarlos. Podrás restaurarlos después.",
+      "loading": "Buscando actualizaciones…",
       "files": "archivos",
       "signerPending": "Comprobando editor…",
-      "export": "Copiar JSON del plan",
-      "apply": "Aplicar seleccionados"
+      "export": "Copiar detalles",
+      "apply": "Actualizar",
+      "dependencies": "También se necesita"
     },
     "applyModal": {
       "eyebrow": {
-        "completedWithFailures": "Aplicación completada con errores",
-        "complete": "Aplicación completa",
-        "applying": "Aplicando actualizaciones"
+        "completedWithFailures": "Algunas actualizaciones necesitan atención",
+        "complete": "Actualizaciones terminadas",
+        "applying": "Actualizando tus juegos"
       },
       "headline": {
         "someUpdated": "{done} de {total} actualizadas",
-        "allUpdated_one": "{count} función actualizada",
-        "allUpdated_other": "{count} funciones actualizadas",
+        "allUpdated_one": "Actualización instalada",
+        "allUpdated_other": "{count} actualizaciones instaladas",
         "updating": "Actualizando {running} de {total}",
-        "queued_one": "{count} función en cola",
-        "queued_other": "{count} funciones en cola"
+        "queued_one": "Preparando actualización",
+        "queued_other": "Preparando {count} actualizaciones"
       },
       "stat": {
         "done": "listas",
-        "inFlight": "en curso",
+        "inFlight": "actualizando",
         "failed": "fallidas",
         "total": "total",
         "running": "en curso",
@@ -1471,7 +1561,7 @@
       "topbar": {
         "searchPlaceholder": "Buscar juegos",
         "commandPaletteTitle": "Paleta de comandos ({mod}K)",
-        "commandPaletteAria": "Abrir la paleta de comandos",
+        "commandPaletteAria": "Buscar juegos y comandos",
         "notifications": "Notificaciones",
         "unreadNotifications_one": "{count} notificación sin leer",
         "unreadNotifications_other": "{count} notificaciones sin leer",
@@ -1535,6 +1625,8 @@
       },
       "status": {
         "notInCatalog": "No está en el catálogo",
+        "externallyManaged": "Gestionado fuera de DLSSync",
+        "incompatible": "Reportado como no compatible",
         "disabled": "Desactivado",
         "updatesReady": "Actualizaciones listas",
         "updateReady": "Actualización lista",
@@ -1587,7 +1679,7 @@
         "pickDifferent": "Elegir otra versión",
         "choose": "Elegir una versión",
         "chooseVersion": "elegir versión",
-        "catalogAside": "· catálogo v{version}",
+        "catalogAside": "Paquete v{version}",
         "pinned": "Fijada",
         "pinnedTitle": "Fijada por ti"
       },
@@ -1750,10 +1842,33 @@
       "grdRequired": "Se necesita el Game Ready Driver 572.16 o más reciente para las anulaciones de DLSS 4.",
       "superResolution": "Super Resolution",
       "frameGeneration": "Frame Generation",
+      "capabilityUnknown": "No se obtuvo una respuesta de capacidad, así que no se ofrece ninguna escritura.",
+      "blocked": {
+        "host_not_windows": "Este equipo no es Windows, así que no se usó la API de perfiles del driver.",
+        "nvapi_unavailable": "La API del driver NVIDIA no se cargó en este sistema.",
+        "nvapi_version_unknown": "La API del driver NVIDIA se cargó pero no reportó una versión verificada.",
+        "adapter_not_nvidia": "Este adaptador no es un adaptador NVIDIA.",
+        "nvidia_driver_version_unknown": "No se observó la versión instalada del driver NVIDIA.",
+        "adapter_class_unknown": "No se observó la clase del adaptador.",
+        "hardware_unrecognized": "Este hardware no se emparejó con un registro de adaptador conocido.",
+        "provider_applicability_unknown": "No se observó si el proveedor aplica aquí.",
+        "provider_incompatible": "El proveedor reportó esta combinación como incompatible.",
+        "game_integration_unknown": "No se observó la integración del juego.",
+        "game_integration_incompatible": "La integración del juego se observó como incompatible.",
+        "runtime_stack_unknown": "No se observó la pila de ejecución.",
+        "runtime_stack_incompatible": "La pila de ejecución se observó como incompatible.",
+        "preset_runtime_mapping_unknown": "No se observó la correspondencia entre preajuste y ejecución.",
+        "preset_runtime_mapping_incompatible": "La correspondencia entre preajuste y ejecución se observó como incompatible."
+      },
+      "neuralRendering": "Renderizado neuronal",
+      "writeUnavailable": "Los cambios del perfil del driver no están disponibles: no se estableció la evidencia de capacidad requerida.",
+      "rayReconstruction": "Reconstrucción de rayos",
+      "forceLatestRrDll": "Forzar la DLL más reciente de Reconstrucción de rayos instalada",
       "forceLatestSrDll": "Forzar la DLL de DLSS instalada más reciente",
       "forceLatestFgDll": "Forzar la DLL de Frame Generation instalada más reciente",
       "modelPreset": "Ajuste del modelo",
       "modelPresetAria": "Ajuste del modelo DLSS",
+      "rrPresetAria": "Preset del modelo de Reconstrucción de rayos",
       "noPresetOverride": "Sin anulación de ajuste",
       "mode": "Modo",
       "modeAria": "Modo de Frame Generation",
@@ -1768,7 +1883,8 @@
       "learnMore": "Más información ↗",
       "working": "Procesando…",
       "resetToDefault": "Restablecer a predeterminado",
-      "note": "Escribe un perfil de aplicación del controlador NVIDIA — el mismo mecanismo que usa la app de NVIDIA. Totalmente reversible con Restablecer. Los títulos multijugador con anti-trampas pueden marcar un perfil forzado; consulta primero la política del juego.",
+      "note": "Modifica el perfil NVIDIA. El soporte y los efectos dependen del juego y la GPU. Restablecer elimina estas configuraciones locales.",
+      "rrNote": "Reconstrucción de rayos usa su propio ajuste del driver (0x10E41DF7), separado de Super Resolution. Requiere GPU RTX y un juego compatible.",
       "toast": {
         "openLinkFailed": "No se pudo abrir el enlace: {error}",
         "needsElevation": "Super Resolution aplicado. Las anulaciones de Frame Generation requieren administrador — reinicia DLSSync como administrador para aplicarlas.",
@@ -1776,11 +1892,14 @@
         "applyFailed": "Error al aplicar: {error}",
         "reset": "Anulación de DLSS restablecida al predeterminado del controlador.",
         "resetFailed": "Error al restablecer: {error}"
-      }
+      },
+      "profileSaved": "Guardado en el perfil NVIDIA y verificado mediante lectura.",
+      "profileUnverified": "El driver no confirmó los valores solicitados. Actualiza el perfil antes de reintentar.",
+      "profileAccess": "El driver NVIDIA {version} ofrece estos ajustes de perfil. Guardar un ajuste no demuestra que un juego lo use."
     },
     "palette": {
       "aria": "Paleta de comandos",
-      "placeholder": "Busca comandos o salta a una vista",
+      "placeholder": "Buscar juegos y comandos",
       "tabToCycle": "Tab para alternar",
       "recent": "Recientes",
       "empty": {
@@ -1803,6 +1922,177 @@
         "drawer": "Panel del juego",
         "modal": "Ventana modal",
         "palette": "Paleta de comandos"
+      },
+      "games": "Juegos"
+    },
+    "cover": {
+      "unavailable": "Portada no disponible"
+    },
+    "recipes": {
+      "heading": "Mods",
+      "sub": "Instala archivos locales de mods y conserva registros de recuperación verificados.",
+      "empty": {
+        "catalog": "No hay mods revisados en el catálogo."
+      },
+      "installed": {
+        "heading": "Mods instalados",
+        "empty": "DLSSync no ha instalado mods para este juego."
+      },
+      "add": {
+        "heading": "Añadir un mod local",
+        "recipeFile": "Elegir archivo del mod",
+        "recipeFileLabel": "Receta del mod",
+        "sourceFolder": "Elegir carpeta de origen",
+        "sourceFolderLabel": "Archivos extraídos",
+        "sourceFolderHint": "Selecciona la carpeta con los archivos que ya descargaste.",
+        "nothingChosen": "Nada seleccionado",
+        "clear": "Limpiar"
+      },
+      "intent": {
+        "label": "Acción",
+        "apply": "Instalar archivos",
+        "configure": "Cambiar ajustes"
+      },
+      "check": "Comprobar archivos",
+      "checking": "Comprobando archivos…",
+      "apply": "Instalar mod",
+      "configure": "Guardar ajustes del mod",
+      "working": "Procesando…",
+      "remove": "Retirar mod",
+      "removing": "Retirando…",
+      "preview": {
+        "heading": "Archivos y ajustes",
+        "filesLabel": "Archivos",
+        "settingsLabel": "Ajustes",
+        "recheck": "Vuelve a comprobar si cambian el juego o los archivos de origen.",
+        "action": {
+          "create": "Crear",
+          "replace": "Reemplazar",
+          "remove": "Retirar",
+          "configure": "Configurar"
+        }
+      },
+      "conflicts": {
+        "heading": "Conflictos de archivos",
+        "blocked": "Resuelve los conflictos antes de continuar."
+      },
+      "issues": {
+        "heading": "Detalles"
+      },
+      "error": {
+        "actionFailed": "La acción del mod falló.",
+        "listFailed": "No se pudieron leer los mods instalados."
+      },
+      "import": {
+        "unverified": "Origen local. La compatibilidad no está verificada."
+      },
+      "state": {
+        "note": "La propiedad, los archivos detectados y la compatibilidad son resultados distintos.",
+        "ownership": {
+          "none": "Sin propiedad",
+          "installed_by_dlssync": "Instalado por DLSSync",
+          "owned_modified": "Cambio externo",
+          "owned_missing": "Faltan archivos",
+          "partially_removed": "Retirado parcialmente",
+          "removed": "Retirado"
+        },
+        "observation": {
+          "not_observed": "No observado",
+          "files_detected": "Archivos detectados",
+          "runtime_detected": "Runtime detectado",
+          "unknown_or_inaccessible": "No se pudo inspeccionar"
+        },
+        "compatibility": {
+          "unknown": "Compatibilidad desconocida",
+          "documented_only": "Solo documentado",
+          "tested_pass": "Prueba superada",
+          "tested_fail": "Prueba fallida",
+          "stale": "Evidencia desactualizada"
+        },
+        "support": {
+          "unknown": "Soporte desconocido",
+          "experimental": "Experimental",
+          "official": "Oficial",
+          "local_import": "Importación local"
+        }
+      },
+      "result": {
+        "completed": "Cambios verificados",
+        "failed": "Cambios fallidos",
+        "changedLabel": "Modificados",
+        "retainedLabel": "Conservados",
+        "retainedHint": "Los archivos conservados no se retiraron. Lee los detalles antes de reintentar."
+      },
+      "blocked": {
+        "no_selection": "Selecciona un archivo del mod",
+        "not_checked": "Comprueba primero los archivos",
+        "expired": "Comprobación vencida. Repite la comprobación.",
+        "conflicts": "Resuelve los conflictos",
+        "not_allowed": "Esta acción no está disponible",
+        "busy": "Espera a que termine la acción"
+      },
+      "role": {
+        "proxy": "Proxy",
+        "addon": "Complemento",
+        "shader": "Shader",
+        "data": "Datos",
+        "notice": "Aviso"
+      }
+    },
+    "hardware": {
+      "otherTechnologies": "Otras tecnologías",
+      "otherHelp": "Estas bibliotecas también están presentes. Puedes revisarlas aquí; no se incluyen en la selección inicial para tu hardware.",
+      "supportLibraries": "Bibliotecas de apoyo",
+      "otherUpdates": "Otras actualizaciones",
+      "forThisPc": "Para este PC",
+      "selectRecommended": "Seleccionar recomendadas ({count})",
+      "supportHelp": "Complementos y archivos compartidos de las tecnologías principales. Cada archivo tiene su propia versión.",
+      "catalogOtherHelp": "Explora otros fabricantes. Estas entradas no indican compatibilidad con tu hardware.",
+      "unknown": "La información del hardware no está disponible. Revisa las bibliotecas detectadas antes de seleccionar actualizaciones.",
+      "noRecommended": "No hay actualizaciones recomendadas pendientes. Las otras tecnologías siguen disponibles en los detalles del juego.",
+      "reviewUpdates": "Revisar actualizaciones"
+    },
+    "detail": {
+      "updates": "Actualizaciones",
+      "advanced": "Avanzado",
+      "installLocation": "Carpeta de instalación",
+      "localPackages": "Paquetes locales",
+      "localPackagesHelp": "Gestiona archivos que proporcionas tú. Estos paquetes son independientes de las actualizaciones del catálogo.",
+      "installedIn": "Instalado en {games}",
+      "catalogMatchHelp": "La etiqueta de instalado requiere una coincidencia exacta del archivo en el último escaneo.",
+      "installedFile": "Archivo instalado",
+      "catalogVersion": "Versión del catálogo",
+      "noExactMatch": "Sin coincidencia exacta en el catálogo",
+      "availableVersions": "Versiones disponibles"
+    },
+    "devices": {
+      "heading": "Dispositivos instalados",
+      "localHelp": "Inventario local de Windows. Abre una categoría para ver versiones y detalles.",
+      "search": "Buscar dispositivos",
+      "attention": "Requiere atención",
+      "noMatches": "No hay dispositivos coincidentes.",
+      "details": "Detalles",
+      "identity": "Identidad del dispositivo",
+      "date": "Fecha del driver",
+      "problem": "Windows informa del error {code} en este dispositivo.",
+      "classes": {
+        "audio": "Audio",
+        "display": "Gráficos",
+        "monitor": "Monitores",
+        "network": "Red",
+        "bluetooth": "Bluetooth",
+        "input": "Teclado y ratón",
+        "storage": "Almacenamiento",
+        "printer": "Impresoras",
+        "camera": "Cámaras",
+        "sensor": "Sensores",
+        "battery": "Batería y energía",
+        "smart_card": "Lectores de tarjetas",
+        "firmware": "Firmware",
+        "chipset": "Chipset",
+        "system": "Sistema",
+        "usb": "Controladores USB",
+        "other": "Otros dispositivos"
       }
     }
   },
@@ -1823,8 +2113,8 @@
     "settingsSaveFailed": "No se pudo guardar la configuración: {msg}",
     "saveFailed": "No se pudo guardar: {msg}",
     "nothingSelected": "Nada seleccionado",
-    "updatePlanStale": "El catálogo cambió mientras el plan estaba abierto. Revisa un plan nuevo antes de aplicar.",
-    "applyInProgress": "Ya hay una aplicación en curso; espera a que termine antes de iniciar otra",
+    "updatePlanStale": "Los archivos del juego o las actualizaciones cambiaron. Busca actualizaciones de nuevo.",
+    "applyInProgress": "Ya hay una actualización en curso.",
     "cancelFailed": "No se pudo cancelar: {msg}",
     "queuedAcross": "{updates} en cola {games}",
     "queuedUpdates_one": "{count} actualización",

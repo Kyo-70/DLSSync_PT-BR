@@ -1,46 +1,31 @@
-# DLSS preset and frame-generation overrides
+# Choose and reset NVIDIA profile settings
 
-DLSSync can force the DLSS Super Resolution model preset and the frame-generation mode for a game
-without that game shipping native support, matching what the NVIDIA app exposes. This is
-NVIDIA-only: Intel and AMD expose no equivalent per-application override.
+DLSSync changes NVIDIA driver-profile settings through NVAPI DRS. It does not add DLSS to games, and a saved profile does not prove an effect inside a game.
 
-## Scope: global and per-game
+## Choose the scope
 
-- Global — the Drivers tab → DLSS Overrides (next to the NVIDIA driver card). Writes the NVIDIA Base
-  profile, applying to every application that does not have its own profile.
-- Per-game — each game's detail drawer → DLSS Overrides. Writes that game's application profile,
-  keyed to its detected executable. A per-game profile takes priority over the global one, the same
-  precedence the NVIDIA driver enforces (Application profile > Current Global > Base).
+- **Per-game:** open the centered game dialog and its DLSS Overrides section. The application profile is resolved from the game executable, with NVIDIA basename matching as a fallback.
+- **Global:** open **Drivers > DLSS Overrides**. These changes affect the NVIDIA Base profile.
+- Per-game settings can inherit global values. Reset removes local overrides; an inherited value can remain active.
 
-## What can be set
+## Apply and verify
 
-- DLSS DLL override — force the game to use the latest installed Super Resolution or Frame
-  Generation DLL.
-- Super Resolution preset — `K`/`J`/`L`/`M` (transformer), the legacy CNN presets, or `Recommended`
-  (the latest transformer model).
-- Frame Generation mode — `Fixed` (a set multiplier) or `Dynamic` (DLSS 4.5, adjusts to a target
-  frame rate).
-- Fixed multiplier — `2×`, `3×` or `4×`.
-- Dynamic target frame rate — used when the mode is `Dynamic`.
+1. Read the current values from the driver.
+2. Change the intended settings. Unchanged settings are not rewritten.
+3. Apply. The app saves the requested changes and opens a new DRS session to read them back.
+4. A success message requires matching readback. A rejected write, missing privilege or readback mismatch remains visible.
+5. Restart the game to test its behavior. Check the game's protection policy before changing its profile.
 
-Each dropdown option shows a plain-language description of what it does and a "Learn more" link to the
-canonical NVIDIA source, so the choice is explained inline.
+The installed driver reports its interface version, driver version and available setting IDs. This profile-access evidence is separate from the conservative game/runtime capability assessment. Unknown game support is not changed to compatible just to enable profile editing. Neural Rendering remains read-only in the preset registry.
 
-## How it is applied
+SR, RR and FG retain separate preset namespaces. Latest and FG Default are distinct numeric values. These values are not a quality ranking. A GPU or game can ignore a stored setting that it does not support.
 
-Overrides are written to the NVIDIA driver application profile through NVAPI DRS
-(`NvAPI_DRS_SetSetting` / `NvAPI_DRS_SaveSettings`), the same mechanism the NVIDIA app and NVIDIA
-Profile Inspector use. This is not DLL injection and not a kernel hook, and it needs no
-administrator rights. The setting catalog (ids and value encodings) lives in the `nvapi-drs` crate;
-the `nvapi64.dll` binding resolves functions through `nvapi_QueryInterface`.
+**Reset to default** restores the known, exposed settings in the selected scope, then checks that local overrides are absent. It does not restore DLL files or every NVIDIA setting. Profile updates requiring administrator privileges report that requirement; they do not bypass Windows security.
 
-`Reset to default` clears every override setting on the profile, restoring the driver default.
+## Implementation and evidence
 
-## Driver requirements
+The loader resolves `nvapi64.dll` from System32. See [NVAPI DRS](../crates/nvapi-drs/src/ffi.rs), [commands](../src-tauri/src/commands/dlss_profile.rs) and [wire contracts](../crates/dlssync-contracts/src/dlss_profile.rs).
 
-- DLSS 4 overrides require NVIDIA Game Ready Driver 572.16 or newer.
-- Dynamic Multi Frame Generation (and 6×) requires Game Ready Driver 595.97 or newer on a GeForce
-  RTX 50 series GPU; the panel disables the Dynamic option below that.
-- Multiplayer titles with anti-cheat may treat a forced profile as tampering — the game drawer shows a
-  ban-risk warning when anti-cheat is detected. See [anticheat.md](anticheat.md).
-- Restart the game after applying an override for it to take effect.
+The isolated validation example creates an unbound profile, saves SR/RR/FG values, reads them through a new session, deletes only that profile and verifies its absence. This proves profile persistence on the tested driver, not in-game effects.
+
+Primary API definitions: [NVIDIA NVAPI](https://github.com/NVIDIA/nvapi/blob/main/nvapi.h) and [driver setting IDs](https://github.com/NVIDIA/nvapi/blob/main/NvApiDriverSettings.h).

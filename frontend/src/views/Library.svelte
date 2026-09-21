@@ -1,9 +1,150 @@
+<script module lang="ts">
+  /** Authoritative readers for the Library surface.
+   *
+   *  Every function here READS a value Rust published. None of them compares versions, resolves a
+   *  target version, or decides compatibility, trust or install success. `unchecked`, `unknown`,
+   *  `no_components` and `non_actionable` stay distinct from `update_available`: none of them is
+   *  presented as an available update, and none of them joins the apply set. */
+  import type { DllRecord, GameSnapshot, LauncherKind, OperationSnapshot, StateCounts } from "../lib/api";
+  import type { ComponentState, GameStateStatus } from "../generated/bindings";
+  import type { UpdateStatus } from "../lib/labels";
+  import { gameOperationLabel as operationLabel } from "../lib/labels";
+  import type { ApplyTarget } from "../lib/applyController";
+  import type { OutdatedDllItem } from "../lib/stores";
+
+  /** Rust publishes the component path relative to the game install root, with `/` separators. */
+  function componentPath(installDir: string, relativePath: string): string {
+    const root = installDir.replace(/[\\/]+$/, "");
+    const relative = relativePath.replace(/^[\\/]+/, "").replaceAll("/", "\\");
+    return `${root}\\${relative}`;
+  }
+
+  /** One apply target built from an authoritative component, or `null` when Rust published no
+   *  candidate for it. The target version is the candidate's package version as published; the
+   *  view never derives it. */
+  function targetFromComponent(game: GameSnapshot, component: ComponentState): ApplyTarget | null {
+    if (component.status !== "update_available" || component.applicability === "not_applicable") return null;
+    const candidate = component.candidate;
+    if (candidate === null) return null;
+    const observedHash = component.observed_hash;
+    return {
+      game_id: game.id,
+      game_label: operationLabel((game.launcher ?? "manual") as LauncherKind, game.name),
+      target_version: candidate.package_version,
+      catalog_family: candidate.family,
+      record: {
+        family: component.identity.family as DllRecord["family"],
+        path: componentPath(game.install_dir, component.identity.relative_path),
+        current_version: component.observed_version,
+        sha256: observedHash !== null && observedHash.algorithm === "sha256" ? observedHash.digest : null,
+        file_description: null,
+      },
+    };
+  }
+
+  /** Membership of the "update all" set, read from the authoritative snapshot. Hiding a game stays
+   *  a local presentation preference, so it is the only frontend filter applied here. */
+  export function authoritativeApplyTargets(
+    snapshotGames: GameSnapshot[],
+    hidden: ReadonlySet<string>,
+  ): ApplyTarget[] {
+    const targets: ApplyTarget[] = [];
+    for (const game of snapshotGames) {
+      if (hidden.has(game.id)) continue;
+      if (game.status !== "update_available") continue;
+      for (const component of game.components ?? []) {
+        const target = targetFromComponent(game, component);
+        if (target !== null) targets.push(target);
+      }
+    }
+    return targets;
+  }
+
+  /** Shape adapter for the shared store helper used while Rust publishes no game observation.
+   *  The comparison and the target version are owned by that helper, not by this view. */
+  export function targetsFromStoreItems(items: OutdatedDllItem[]): ApplyTarget[] {
+    return items.map((item) => ({
+      game_id: item.game.id,
+      game_label: operationLabel(item.game.launcher, item.game.name),
+      record: item.record,
+      target_version: item.target,
+      catalog_family: item.catalogFamily,
+    }));
+  }
+
+  /** Presentation status for one authoritative game state. The four non-actionable states keep
+   *  their own presentation and never read as "update available". */
+  export function presentedGameStatus(status: GameStateStatus | undefined): UpdateStatus {
+    switch (status) {
+      case "update_available":
+        return "outdated";
+      case "current":
+        return "up_to_date";
+      case "no_components":
+        return "no_dlls";
+      default:
+        return "unknown";
+    }
+  }
+
+  /** Games Rust reports as current, minus the ones the user hides locally. */
+  export function upToDateGameCount(
+    snapshotGames: GameSnapshot[],
+    hidden: ReadonlySet<string>,
+  ): number {
+    return snapshotGames.reduce(
+      (total, game) => (!hidden.has(game.id) && game.status === "current" ? total + 1 : total),
+      0,
+    );
+  }
+
+  /** Highest observation revision Rust published for the games an apply touched, taken from the
+   *  operation that carries them and from the game snapshots themselves. `null` while no such
+   *  revision is installed. The view waits for this instead of rescanning each game. */
+  export function applyObservationRevision(
+    snapshotGames: GameSnapshot[],
+    operations: OperationSnapshot[],
+    gameIds: ReadonlySet<string>,
+  ): string | null {
+    if (gameIds.size === 0) return null;
+    let highest: bigint | null = null;
+    let raw: string | null = null;
+    const consider = (value: string | undefined | null): void => {
+      if (value === undefined || value === null || value === "") return;
+      let parsed: bigint;
+      try {
+        parsed = BigInt(value);
+      } catch {
+        return;
+      }
+      if (highest === null || parsed > highest) {
+        highest = parsed;
+        raw = value;
+      }
+    };
+    for (const operation of operations) {
+      if (!(operation.game_ids ?? []).some((id) => gameIds.has(id))) continue;
+      consider(operation.state_revision);
+    }
+    for (const game of snapshotGames) {
+      if (gameIds.has(game.id)) consider(game.revision);
+    }
+    return raw;
+  }
+
+  /** Games carrying a restore point, as projected by Rust. `null` while the projection is absent:
+   *  the view does not infer protection from backup rows. */
+  export function projectedProtectedGames(counts: StateCounts | null): number | null {
+    const projected = (counts as (StateCounts & { protected_games?: number }) | null)?.protected_games;
+    return typeof projected === "number" ? projected : null;
+  }
+</script>
+
 <script lang="ts">
   import { onMount } from "svelte";
   import {
     games,
     filteredGames,
-    libraryZones,
     scanInProgress,
     scanGames,
     searchQuery,
@@ -13,6 +154,8 @@
     drawerGameId,
     settings,
     persistSettings,
+    persistUiPreferences,
+    hardwarePreference,
     gameDlls,
     gameStatuses,
     relationContext,
@@ -24,94 +167,83 @@
     technologyFilter,
     antiCheatFilter,
     rescanGame,
-    manifestUpdatedAt,
     requestApplyAllOutdated,
     outdatedDllItems,
-    backups,
     loadBackups,
     type StatusFilter,
   } from "../lib/stores";
+  import { authoritativeState } from "../lib/stateSync";
   import { addBlacklistEntry, removeBlacklistEntry, openPath } from "../lib/api";
   import type { DetectedGame, LibraryViewMode, LibraryDensity, LibrarySort } from "../lib/api";
   import {
-    LIBRARY_VIEW_MODES,
-    LIBRARY_DENSITIES,
     LIBRARY_SORT_LABELS,
     LIBRARY_VIEW_MODE_DEFAULT,
     LIBRARY_DENSITY_DEFAULT,
     LIBRARY_SORT_DEFAULT,
   } from "../lib/ux";
-  import { launcherLabel, familyGroup, GROUP_VENDOR, GROUP_LABELS, GROUP_ORDER, type FamilyGroup } from "../lib/labels";
+  import { GROUP_LABELS, GROUP_ORDER } from "../lib/labels";
+  import { defaultUpdateFamily } from "../lib/hardwarePreference";
   import type { TechnologyFilter, AntiCheatFilter } from "../lib/libraryFilters";
   import GameCard from "../components/GameCard.svelte";
   import GameListRow from "../components/GameListRow.svelte";
   import FilterMenu from "../components/FilterMenu.svelte";
   import ContextMenu, { type ContextMenuAction, type ContextMenuItem } from "../components/ContextMenu.svelte";
-  import { dispatchApply, type ApplyTarget } from "../lib/applyController";
+  import { dispatchApply } from "../lib/applyController";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { TRAY_SHOW_PROGRESS_EVENT } from "../lib/api";
   import { t, locale, translate } from "../lib/i18n/index";
   import { get } from "svelte/store";
 
-  // Derive from the centralized `outdatedDllItems()` (shared with the daemon and
-  // the digest). Touch the source stores so Svelte tracks them, since the helper
-  // reads via `get(...)` internally.
-  let outdatedItems = $derived.by(() => {
+  // Rust owns which components have an applicable update and which version they target. This view
+  // reads that set; when the backend has published no game observation yet it delegates to the
+  // shared store helper, which is also what the digest and the background daemon consume.
+  let authoritativeGames = $derived($authoritativeState.games);
+  let hasAuthoritativeGames = $derived($authoritativeState.emitterId !== null);
+  let backendApplyTargets = $derived.by(() => {
+    if (hasAuthoritativeGames) return authoritativeApplyTargets(authoritativeGames, $hiddenIds);
     void $games;
     void $gameDlls;
     void $gameStatuses;
     void $relationContext;
     void $settings;
     void $hiddenIds;
-    return outdatedDllItems();
+    return targetsFromStoreItems(outdatedDllItems("all"));
   });
-  let outdatedTotal = $derived(outdatedItems.length);
-  let outdatedBreakdown = $derived.by(() => {
-    const counts: Record<FamilyGroup, number> = { dlss: 0, fsr: 0, xess: 0, advanced: 0 };
-    for (const it of outdatedItems) counts[familyGroup(it.record.family)]++;
-    const order: FamilyGroup[] = ["dlss", "fsr", "xess", "advanced"];
-    return order
-      .filter((g) => counts[g] > 0)
-      .map((g) => ({ group: g, vendor: GROUP_VENDOR[g], count: counts[g] }));
-  });
-  let upToDateCount = $derived(
-    $games.filter((g) => !$hiddenIds.has(g.id) && $gameStatuses[g.id] === "up_to_date").length,
+  let applyAllTargets = $derived(backendApplyTargets.filter(target => defaultUpdateFamily(target.record.family, $hardwarePreference)));
+  let recommendedGameIds = $derived(new Set(applyAllTargets.map(target => target.game_id)));
+  let outdatedTotal = $derived(applyAllTargets.length);
+
+
+
+  // Games touched by the last dispatch, and the observation revision Rust published for them. The
+  // view re-renders from that revision; it never rescans a game speculatively after an apply.
+  let lastApplyGameIds = $state<ReadonlySet<string>>(new Set<string>());
+  let lastApplyObservationRevision = $derived(
+    applyObservationRevision($authoritativeState.games, $authoritativeState.operations, lastApplyGameIds),
   );
-  let protectedGameCount = $derived.by(() => {
-    const ids = new Set<string>();
-    for (const b of $backups) {
-      if (!b.restored_at && b.game_id && b.backup_type !== "driver_package") ids.add(b.game_id);
-    }
-    return ids.size;
-  });
 
   async function updateAllOutdated(): Promise<void> {
-    const items = outdatedDllItems();
-    if (items.length === 0) {
-      showToast("info", translate(get(locale), "view.library.toast.allUpToDate"));
+    const targets = applyAllTargets;
+    if (targets.length === 0) {
+      if (!$hardwarePreference.known || backendApplyTargets.length > 0) {
+        showToast("info", $t(!$hardwarePreference.known ? "component.hardware.unknown" : "component.hardware.noRecommended"));
+        return;
+      }
+      showToast(
+        "info",
+        translate(
+          get(locale),
+          hasAuthoritativeGames || $games.length > 0
+            ? "view.library.toast.allUpToDate"
+            : "status.unknown",
+        ),
+      );
       return;
     }
-    const targets: ApplyTarget[] = items.map((it) => ({
-      game_id: it.game.id,
-      game_label: `${launcherLabel(it.game.launcher)} - ${it.game.name}`,
-      record: it.record,
-      target_version: it.target,
-    }));
+    lastApplyGameIds = new Set(targets.map((target) => target.game_id));
     await dispatchApply(targets, { showModal: () => applyModalOpen.set(true) });
-    const uniqueGames = new Set(items.map((i) => i.game.id));
-    for (const gid of uniqueGames) {
-      try {
-        await rescanGame(gid);
-      } catch (err: unknown) {
-        showToast(
-          "warning",
-          translate(get(locale), "view.library.toast.rescanAfterApplyFailed", {
-            id: gid,
-            error: String(err),
-          }),
-        );
-      }
-    }
+    // No per-game rescan here: Rust publishes the post-apply observation for the affected games and
+    // this view updates when that revision arrives.
   }
 
   let unlistenTrayProgress: UnlistenFn | undefined;
@@ -193,8 +325,11 @@
   function onCardClick(game: DetectedGame): void {
     drawerGameId.set(game.id);
   }
-  function onApply(game: DetectedGame): void {
-    drawerGameId.set(game.id);
+  async function onApply(game: DetectedGame): Promise<void> {
+    const targets = applyAllTargets.filter(target => target.game_id === game.id);
+    if (!targets.length) { drawerGameId.set(game.id); return; }
+    lastApplyGameIds = new Set([game.id]);
+    await dispatchApply(targets, { showModal: () => applyModalOpen.set(true) });
   }
   async function onOpenFolder(game: DetectedGame): Promise<void> {
     try {
@@ -292,7 +427,7 @@
         },
       });
       showToast("success", translate(get(locale), "view.library.toast.folderAdded", { path: result }));
-      await scanGames();
+      await scanGames({ trigger: "user_scan" });
     } catch (err: unknown) {
       showToast(
         "danger",
@@ -301,23 +436,25 @@
     }
   }
 
+  let filtersOpen = $state(false);
+  let activeFilterCount = $derived(Number($launcherFilter !== "all") + Number($technologyFilter !== "all") + Number($antiCheatFilter !== "all") + Number(!["all", "outdated", "hidden"].includes($statusFilter)));
   let availableLaunchers = $derived(new Set($games.map((g) => g.launcher)));
 
   let viewMode: LibraryViewMode = $derived(($settings?.ui_prefs.library_view_mode ?? LIBRARY_VIEW_MODE_DEFAULT) as LibraryViewMode);
   let density: LibraryDensity = $derived(($settings?.ui_prefs.library_density ?? LIBRARY_DENSITY_DEFAULT) as LibraryDensity);
   let sortKey: LibrarySort = $derived(($settings?.ui_prefs.library_sort ?? LIBRARY_SORT_DEFAULT) as LibrarySort);
 
-  async function setViewMode(mode: LibraryViewMode): Promise<void> {
-    if (!$settings || !LIBRARY_VIEW_MODES.includes(mode)) return;
-    await persistSettings({ ...$settings, ui_prefs: { ...$settings.ui_prefs, library_view_mode: mode } });
+  async function setPresentation(mode: "gallery" | "compact" | "table"): Promise<void> {
+    if (!$settings) return;
+    await persistUiPreferences({
+      library_view_mode: mode === "table" ? "list" : "grid",
+      library_density: mode === "compact" ? "compact" : "comfy",
+    });
   }
-  async function setDensity(d: LibraryDensity): Promise<void> {
-    if (!$settings || !LIBRARY_DENSITIES.includes(d)) return;
-    await persistSettings({ ...$settings, ui_prefs: { ...$settings.ui_prefs, library_density: d } });
-  }
+
   async function setSort(s: LibrarySort): Promise<void> {
     if (!$settings) return;
-    await persistSettings({ ...$settings, ui_prefs: { ...$settings.ui_prefs, library_sort: s } });
+    await persistUiPreferences({ library_sort: s });
   }
 
   const STATUS_SORT_RANK: Record<string, number> = {
@@ -329,14 +466,25 @@
     scanning: 5,
   };
 
+  // One presentation status per game. Rust's published state wins; the legacy store map is the
+  // fallback while the backend publishes no game observation.
+  let presentedStatusById = $derived.by<Record<string, UpdateStatus>>(() => {
+    const byId: Record<string, UpdateStatus> = {};
+    for (const snapshot of authoritativeGames) byId[snapshot.id] = presentedGameStatus(snapshot.status);
+    return byId;
+  });
+  function statusOf(game: DetectedGame): UpdateStatus {
+    return presentedStatusById[game.id] ?? (hasAuthoritativeGames ? "unknown" : (($gameStatuses[game.id] ?? "unknown") as UpdateStatus));
+  }
+
   function byOutdatedThenName(a: DetectedGame, b: DetectedGame): number {
-    const ra = STATUS_SORT_RANK[$gameStatuses[a.id]] ?? 9;
-    const rb = STATUS_SORT_RANK[$gameStatuses[b.id]] ?? 9;
+    const ra = STATUS_SORT_RANK[statusOf(a)] ?? 9;
+    const rb = STATUS_SORT_RANK[statusOf(b)] ?? 9;
     return ra - rb || a.name.localeCompare(b.name);
   }
 
-  let sortedActionable = $derived.by(() => {
-    const list = [...$libraryZones.actionable];
+  let sortedGames = $derived.by(() => {
+    const list = [...$filteredGames];
     switch (sortKey) {
       case "a_z":
         return list.sort((a, b) => a.name.localeCompare(b.name));
@@ -351,20 +499,8 @@
     }
   });
 
-  let outdatedGameCount = $derived.by(() => {
-    const set = new Set<string>();
-    for (const g of $games) {
-      if (!$hiddenIds.has(g.id) && $gameStatuses[g.id] === "outdated") set.add(g.id);
-    }
-    return set.size;
-  });
-
-  // Tidal-style sections: split the actionable list into "Needs update" vs the rest.
-  let needsUpdate = $derived(sortedActionable.filter((g) => $gameStatuses[g.id] === "outdated"));
-  let upToDate = $derived(sortedActionable.filter((g) => $gameStatuses[g.id] !== "outdated"));
-
-  let noDllsRevealed = $state(false);
-  function toggleNoDllsZone(): void { noDllsRevealed = !noDllsRevealed; }
+  let visibleGames = $derived($statusFilter === "outdated" && $hardwarePreference.known ? sortedGames.filter(game => recommendedGameIds.has(game.id)) : sortedGames);
+  let otherUpdateGames = $derived($statusFilter === "outdated" && $hardwarePreference.known ? sortedGames.filter(game => !recommendedGameIds.has(game.id)) : []);
 
   function reviewChanges(): void {
     launcherFilter.set("all");
@@ -388,30 +524,24 @@
   });
 </script>
 
-<header class="view-header">
-  <div>
+<header class="library-masthead">
+  <div class="library-heading">
     <h1 class="view-title">{$t("view.library.title")}</h1>
-    <p class="view-subtitle">
-      {$t("view.library.subtitle", { detected: $games.length, shown: $filteredGames.length })}
-      {#if hiddenCount > 0 && $statusFilter !== "hidden"}
-        <button
-          type="button"
-          class="hidden-chip"
-          onclick={revealHidden}
-          title={$t("view.library.hiddenChipTitle")}
-        >
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-          {$t("view.library.hiddenChip", { count: hiddenCount })}
-        </button>
+    <div class="library-summary" role="status" aria-label={$t("view.library.hero.aria")} data-update-count={outdatedTotal} data-observation-revision={lastApplyObservationRevision ?? undefined}>
+      {#if $scanInProgress && $games.length === 0}
+        <span class="spin"></span><span>{$t("status.scanning")}</span>
+      {:else}
+        <span>{$t("view.library.gameCount", { count: $filteredGames.length })}</span>
+        {#if outdatedTotal > 0}<span class="summary-separator" aria-hidden="true">·</span><span>{$t("view.library.summaryUpdates", { count: outdatedTotal, games: recommendedGameIds.size })}</span>{/if}
       {/if}
-    </p>
+    </div>
   </div>
   <div class="header-actions">
     <button class="btn btn-ghost" onclick={addCustomFolder}>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
       {$t("view.library.addFolder")}
     </button>
-    <button class="btn" disabled={$scanInProgress} onclick={() => scanGames()}>
+    <button class="btn" disabled={$scanInProgress} onclick={() => scanGames({ trigger: "user_scan" })}>
       {#if $scanInProgress}
         <span class="spin"></span>
         {$t("view.library.scanning")}
@@ -420,87 +550,41 @@
         {$t("view.library.rescan")}
       {/if}
     </button>
+    {#if outdatedTotal > 0}
+      <button class="btn btn-primary" data-testid="library-update-all" onclick={updateAllOutdated} title={$t("view.library.hero.applyAllTitle")}>{$t("view.library.hero.applyAll")}</button>
+    {/if}
   </div>
 </header>
 
-{#if $games.length > 0}
-  <div class="updates-hero-shell">
-    <aside
-      class="updates-hero"
-      data-state={outdatedTotal > 0 ? "pending" : "allclear"}
-      role="status"
-      aria-label={$t("view.library.hero.aria")}
-    >
-      <div class="updates-hero-body">
-        <div class="updates-hero-lead">
-          <span class="display-num" data-tone={outdatedTotal > 0 ? "warning" : "success"}
-            >{outdatedTotal}</span
-          >
-          <div class="updates-hero-meta">
-            <p class="updates-hero-headline">
-              {outdatedTotal > 0
-                ? $t("view.library.hero.updatesReadyLabel", { count: outdatedTotal })
-                : $t("view.library.hero.allClear")}
-            </p>
-            <p class="updates-hero-scope">
-              {outdatedTotal > 0
-                ? $t("view.library.hero.acrossGames", { count: outdatedGameCount })
-                : $t("view.library.hero.allClearDetail")}{#if $manifestUpdatedAt}<span
-                  class="updates-hero-stamp"
-                  title={$t("view.library.hero.manifestTitle")}
-                  >&ensp;·&ensp;{$t("view.library.hero.manifestStamp", { stamp: $manifestUpdatedAt })}</span
-                >{/if}
-            </p>
-          </div>
-        </div>
-        {#if outdatedTotal > 0}
-          <ul class="updates-hero-tags" role="list">
-            {#each outdatedBreakdown as bucket (bucket.group)}
-              <li class="updates-hero-tag" data-group={bucket.group}>
-                {bucket.group === "advanced"
-                  ? $t("feature.advanced.short")
-                  : $t("group." + bucket.group + ".label")}<span class="updates-hero-tag-n"
-                  >{bucket.count}</span
-                >
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </div>
-      <div class="updates-hero-kpis">
-        <div class="hero-kpi">
-          <span class="hero-kpi-num">{$games.length}</span>
-          <span class="hero-kpi-label">{$t("view.library.hero.kpiGames")}</span>
-        </div>
-        <div class="hero-kpi" data-tone="success">
-          <span class="hero-kpi-num">{upToDateCount}</span>
-          <span class="hero-kpi-label">{$t("view.library.hero.kpiUpToDate")}</span>
-        </div>
-        <div class="hero-kpi" data-tone="info" title={$t("view.library.hero.kpiProtectedTitle")}>
-          <span class="hero-kpi-num">{protectedGameCount}</span>
-          <span class="hero-kpi-label">{$t("view.library.hero.kpiProtected")}</span>
-        </div>
-      </div>
-      {#if outdatedTotal > 0}
-        <div class="updates-hero-actions">
-          <button
-            class="updates-hero-review"
-            onclick={reviewChanges}
-            title={$t("view.library.hero.reviewTitle")}>{$t("view.library.hero.review")}</button
-          >
-          <button
-            class="updates-hero-apply"
-            onclick={updateAllOutdated}
-            title={$t("view.library.hero.applyAllTitle")}>{$t("view.library.hero.applyAll")}</button
-          >
-        </div>
-      {/if}
-    </aside>
+<div class="library-workbar">
+  <nav class="library-quick-filters" aria-label={$t("view.library.filter.status")}>
+    <button class:active={$statusFilter === "all"} aria-pressed={$statusFilter === "all"} onclick={() => statusFilter.set("all")}>{$t("view.library.statusFilter.all")}</button>
+    <button class:active={$statusFilter === "outdated"} aria-pressed={$statusFilter === "outdated"} onclick={reviewChanges}>{$t("view.library.updatesTab")}<span>{recommendedGameIds.size}</span></button>
+    {#if hiddenCount > 0}<button class:active={$statusFilter === "hidden"} aria-pressed={$statusFilter === "hidden"} onclick={revealHidden}>{$t("view.library.statusFilter.hidden")}<span>{hiddenCount}</span></button>{/if}
+  </nav>
+  <div class="library-view-controls">
+    <button class="library-filter-toggle" aria-expanded={filtersOpen} onclick={() => (filtersOpen = !filtersOpen)}>
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6M16 14v6"/></svg>
+      {$t("view.library.filtersTitle")}{#if activeFilterCount > 0}<span>{activeFilterCount}</span>{/if}
+    </button>
+    <FilterMenu iconOnly label={$t("view.library.filter.sort")} selectedId={sortKey === "default" ? "outdated_first" : sortKey}
+      options={LIBRARY_SORT_LABELS.filter((option) => option.id !== "default").map((option) => ({ id: option.id, label: $t("librarySort." + option.id + ".label") }))}
+      onSelect={(value) => void setSort(value as LibrarySort)} />
+    <div class="presentation-picker" role="group" aria-label={$t("view.library.filter.view")}>
+      <button data-testid="view-gallery" class:active={viewMode === "grid" && density === "comfy"} aria-pressed={viewMode === "grid" && density === "comfy"} onclick={() => void setPresentation("gallery")} title={$t("view.library.view.gridTitle")} aria-label={$t("view.library.view.grid")}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="3" width="7" height="18" rx="1.5"/><rect x="14" y="3" width="7" height="18" rx="1.5"/></svg>
+      </button>
+      <button data-testid="view-compact" class:active={viewMode === "grid" && density === "compact"} aria-pressed={viewMode === "grid" && density === "compact"} onclick={() => void setPresentation("compact")} title={$t("view.library.density.compactTitle")} aria-label={$t("view.library.density.compact")}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+      </button>
+      <button data-testid="view-table" class:active={viewMode === "list"} aria-pressed={viewMode === "list"} onclick={() => void setPresentation("table")} title={$t("view.library.view.listTitle")} aria-label={$t("view.library.view.list")}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 9h18M3 14h18M9 4v16"/></svg>
+      </button>
+    </div>
   </div>
-{/if}
-
-<div class="filter-shell">
-<div class="filter-toolbar glass-panel" role="toolbar" aria-label={$t("view.library.filter.launcher")}>
+</div>
+{#if filtersOpen}
+  <div class="library-filter-options" role="group" aria-label={$t("view.library.filtersTitle")}>
   <FilterMenu
     label={$t("view.library.filter.launcher")}
     options={launcherOptions}
@@ -529,29 +613,8 @@
     onSelect={(id) => antiCheatFilter.set(id as AntiCheatFilter)}
   />
 
-  <div class="filter-controls">
-    <select class="sort-select" value={sortKey} onchange={(e) => void setSort((e.currentTarget as HTMLSelectElement).value as LibrarySort)} aria-label={$t("view.library.filter.sortAria")} title={$t("view.library.filter.sort")}>
-      {#each LIBRARY_SORT_LABELS as opt (opt.id)}
-        <option value={opt.id} title={opt.hint ? $t("librarySort." + opt.id + ".hint") : $t("librarySort." + opt.id + ".label")}>{$t("librarySort." + opt.id + ".label")}</option>
-      {/each}
-    </select>
-    <div class="seg" aria-label={$t("view.library.filter.view")}>
-      <button class="seg-btn" class:active={viewMode === "grid"} onclick={() => void setViewMode("grid")} aria-pressed={viewMode === "grid"} title={$t("view.library.view.gridTitle")} aria-label={$t("view.library.view.grid")}>
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-        <span class="seg-text">{$t("view.library.view.grid")}</span>
-      </button>
-      <button class="seg-btn" class:active={viewMode === "list"} onclick={() => void setViewMode("list")} aria-pressed={viewMode === "list"} title={$t("view.library.view.listTitle")} aria-label={$t("view.library.view.list")}>
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-        <span class="seg-text">{$t("view.library.view.list")}</span>
-      </button>
-    </div>
-    <div class="seg" aria-label={$t("view.library.filter.density")}>
-      <button class="seg-btn" class:active={density === "compact"} onclick={() => void setDensity("compact")} aria-pressed={density === "compact"} title={$t("view.library.density.compactTitle")}>{$t("view.library.density.compact")}</button>
-      <button class="seg-btn" class:active={density === "comfy"} onclick={() => void setDensity("comfy")} aria-pressed={density === "comfy"} title={$t("view.library.density.comfyTitle")}>{$t("view.library.density.comfy")}</button>
-    </div>
   </div>
-</div>
-</div>
+{/if}
 
 {#if $scanInProgress && $games.length === 0}
   <div class="grid">
@@ -572,7 +635,7 @@
     <p class="section-sub">{$t("view.library.empty.noGames.detail")}</p>
     <p class="section-sub">{$t("view.library.empty.noGames.customPrefix")} <span class="mono">C:\Games</span>.</p>
     <div class="empty-actions">
-      <button class="btn btn-primary" disabled={$scanInProgress} onclick={() => scanGames()}>
+      <button class="btn btn-primary" disabled={$scanInProgress} onclick={() => scanGames({ trigger: "user_scan" })}>
         {#if $scanInProgress}<span class="spin"></span>{$t("view.library.scanning")}{:else}{$t("view.library.empty.noGames.rescanNow")}{/if}
       </button>
       <button class="btn btn-ghost" onclick={addCustomFolder}>{$t("view.library.empty.noGames.addCustomFolder")}</button>
@@ -587,20 +650,22 @@
 {:else}
   {#snippet gameSection(title: string, list: DetectedGame[], viewAll: StatusFilter)}
     {#if list.length > 0}
-      <section class="lib-section">
-        <div class="section-head">
+      <section class="lib-section" data-section={viewAll}>
+        {#if title}<div class="section-head">
           <span class="section-title">{title}</span>
           <span class="section-count">{list.length}</span>
           {#if $statusFilter === "all"}
             <button class="section-viewall" onclick={() => statusFilter.set(viewAll)}>{$t("view.library.section.viewAll")}</button>
           {/if}
-        </div>
+        </div>{/if}
         {#if viewMode === "grid"}
           <div class="grid media-deck" data-density={density}>
             {#each list as g, i (g.install_dir)}
               <div class="grid-cell media-card" style:--stagger="{Math.min(i, 20) * 24}ms">
                 <GameCard
+                  coverMode={density === "comfy" ? "portrait" : "landscape"}
                   game={g}
+                  status={statusOf(g)}
                   hidden={$hiddenIds.has(g.id)}
                   favorite={$favoriteIds.has(g.id)}
                   {onApply}
@@ -619,6 +684,7 @@
               <div class="list-cell" style:--stagger="{Math.min(i, 20) * 12}ms">
                 <GameListRow
                   game={g}
+                  status={statusOf(g)}
                   hidden={$hiddenIds.has(g.id)}
                   favorite={$favoriteIds.has(g.id)}
                   {onApply}
@@ -636,44 +702,15 @@
     {/if}
   {/snippet}
 
-  {@render gameSection($t("view.library.section.needsUpdate"), needsUpdate, "outdated")}
-  {@render gameSection($t("view.library.section.upToDate"), upToDate, "up_to_date")}
-
-  {#if $libraryZones.noDlls.length > 0}
-    <div class="zone-no-dlls">
-      <button
-        class="zone-summary"
-        class:is-open={noDllsRevealed}
-        type="button"
-        onclick={toggleNoDllsZone}
-        aria-expanded={noDllsRevealed}
-      >
-        <svg class="zone-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-        <span class="zone-title">{$t("view.library.noDllsZone.title")}</span>
-        <span class="zone-count">{$libraryZones.noDlls.length}</span>
-        <span class="zone-hint">{$t("view.library.noDllsZone.hint")}</span>
-      </button>
-      {#if noDllsRevealed}
-        <div class="grid grid-dimmed stagger" data-density={density}>
-          {#each $libraryZones.noDlls as g (g.install_dir)}
-            <div>
-              <GameCard
-                game={g}
-                hidden={$hiddenIds.has(g.id)}
-                favorite={$favoriteIds.has(g.id)}
-                {onApply}
-                {onOpenFolder}
-                onBlacklist={onHideToggle}
-                onClick={onCardClick}
-                onContextMenu={openContextMenu}
-                onToggleFavorite={onToggleFav}
-              />
-            </div>
-          {/each}
-        </div>
-      {/if}
-    </div>
+  {@render gameSection("", visibleGames, $statusFilter)}
+  {#if otherUpdateGames.length > 0}
+    <details class="other-update-games">
+      <summary>{$t("component.hardware.otherTechnologies")} · {otherUpdateGames.length}</summary>
+      <p>{$t("component.hardware.otherHelp")}</p>
+      {@render gameSection("", otherUpdateGames, "outdated")}
+    </details>
   {/if}
+
 {/if}
 
 {#if contextMenu}
@@ -687,229 +724,70 @@
 {/if}
 
 <style>
-  .view-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: var(--space-4);
-    gap: var(--space-4);
-    flex-wrap: wrap;
-  }
-  .view-header > div:first-child { flex: 1 1 240px; min-width: 0; }
+
+
   .header-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; flex-shrink: 0; }
-  .view-subtitle { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
-  .hidden-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 2px 9px 2px 8px;
-    border-radius: var(--radius-full);
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    color: var(--text-secondary);
-    font-size: var(--fs-xs);
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-    cursor: pointer;
-    transition:
-      color var(--dur-fast) var(--ease),
-      background var(--dur-fast) var(--ease),
-      border-color var(--dur-fast) var(--ease);
-  }
-  .hidden-chip:hover { color: var(--text-primary); background: var(--bg-card-hover); border-color: var(--border-strong); }
-  .hidden-chip:focus-visible { outline: none; box-shadow: var(--shadow-ring); }
-  .hidden-chip svg { color: var(--text-muted); flex-shrink: 0; }
-  .filter-shell {
-    container-type: inline-size;
-    position: sticky;
-    top: var(--space-2);
-    z-index: 4;
-    margin-bottom: var(--space-4);
-  }
-  .filter-toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-3);
-    border-radius: var(--radius-lg);
-    min-width: 0;
-  }
-  .filter-controls {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-    margin-inline-start: auto;
-    flex-shrink: 1;
-    min-width: 0;
-  }
-  .filter-controls .seg { flex-shrink: 0; }
-  .seg-text { display: none; }
+
+
+
+
+
+
+
+
+
+
   /* Once the four filters + the controls can no longer share one row, drop the
      controls to their own full-width row (left-aligned) instead of overflowing. */
   @container (max-width: 900px) {
-    .filter-controls { margin-inline-start: 0; width: 100%; justify-content: flex-start; }
+
   }
   @container (max-width: 460px) {
-    .sort-select { min-width: 0; flex: 1 1 auto; }
+
   }
 
-  .updates-hero-shell { container-type: inline-size; margin-bottom: var(--space-3); }
-  .updates-hero {
-    position: relative;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
-    align-items: center;
-    column-gap: 16px;
-    padding: 16px 20px 16px 22px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    background:
-      linear-gradient(120deg, color-mix(in oklab, var(--hero-tint, var(--accent)) 10%, transparent), transparent 52%),
-      var(--bg-card);
-    overflow: hidden;
-  }
-  .updates-hero[data-state="pending"] { --hero-tint: var(--warning); }
-  .updates-hero[data-state="allclear"] { --hero-tint: var(--success); }
-  .updates-hero-body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-  .updates-hero-lead { display: flex; align-items: center; gap: 14px; min-width: 0; }
-  .updates-hero-meta { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-  .updates-hero-headline {
-    margin: 0;
-    font-size: 13px;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: var(--letter-wider);
-    color: var(--text-primary);
-    line-height: 1.2;
-  }
-  .updates-hero-scope {
-    margin: 0;
-    font-size: 11.5px;
-    color: var(--text-muted);
-    display: flex;
-    align-items: baseline;
-    flex-wrap: wrap;
-    min-width: 0;
-  }
-  .updates-hero-stamp {
-    font-variant-numeric: tabular-nums;
-    opacity: 0.8;
-    white-space: nowrap;
-  }
-  .updates-hero-kpis {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex-shrink: 0;
-    padding-inline: 16px;
-    border-inline-start: 1px solid var(--border);
-  }
-  .hero-kpi { display: flex; flex-direction: column; gap: 3px; min-width: 48px; }
-  .hero-kpi-num {
-    font-size: 20px;
-    font-weight: 700;
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: var(--letter-tight);
-    color: var(--text-primary);
-  }
-  .hero-kpi[data-tone="success"] .hero-kpi-num { color: var(--success); }
-  .hero-kpi[data-tone="info"] .hero-kpi-num { color: var(--info); }
-  .hero-kpi-label {
-    font-size: 9.5px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: var(--letter-wider);
-    color: var(--text-muted);
-    white-space: nowrap;
-  }
-  .updates-hero-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
-  .updates-hero-tag {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 3.5px 7px 3.5px 10px;
-    border-radius: var(--radius-full);
-    font-size: 10.5px;
-    font-weight: 800;
-    letter-spacing: 0.02em;
-    color: var(--vendor-chip-fg);
-    white-space: nowrap;
-  }
-  .updates-hero-tag-n {
-    font-variant-numeric: tabular-nums;
-    font-weight: 800;
-    min-width: 16px;
-    padding: 0 4px;
-    text-align: center;
-    border-radius: var(--radius-full);
-    background: color-mix(in oklab, var(--vendor-chip-fg) 18%, transparent);
-  }
-  .updates-hero-tag[data-group="dlss"]     { background: var(--vendor-nvidia-ink); }
-  .updates-hero-tag[data-group="fsr"]      { background: var(--vendor-amd-ink); }
-  .updates-hero-tag[data-group="xess"]     { background: var(--vendor-intel-ink); }
-  .updates-hero-tag[data-group="advanced"] { background: var(--vendor-microsoft-ink); }
-  .updates-hero-actions { display: inline-flex; align-items: center; gap: 10px; flex-shrink: 0; }
-  .updates-hero-review {
-    height: 34px;
-    padding: 0 14px;
-    border-radius: var(--radius-md);
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--text-secondary);
-    font-size: 12.5px;
-    font-weight: 600;
-    transition:
-      color var(--dur-fast) var(--ease),
-      background var(--dur-fast) var(--ease),
-      border-color var(--dur-fast) var(--ease);
-  }
-  .updates-hero-review:hover {
-    color: var(--text-primary);
-    background: var(--bg-elevated);
-    border-color: var(--border-strong);
-  }
-  .updates-hero-apply {
-    height: 34px;
-    padding: 0 18px;
-    border-radius: var(--radius-md);
-    background: var(--accent);
-    color: var(--accent-fg);
-    font-size: 12.5px;
-    font-weight: 600;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    transition: background var(--dur-fast) var(--ease);
-  }
-  .updates-hero-apply:hover { background: var(--accent-hover); }
-  .updates-hero :global(.display-num) { font-size: clamp(28px, 3vw, 36px); }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   @container (max-width: 760px) {
-    .updates-hero { grid-template-columns: minmax(0, 1fr) auto; row-gap: 14px; }
-    .updates-hero-actions { grid-column: 1 / -1; width: 100%; }
-    .updates-hero-actions button { flex: 1; }
+
+
+
   }
   @container (max-width: 620px) {
-    .updates-hero { grid-template-columns: 1fr; padding-bottom: 20px; }
-    .updates-hero-kpis { border-inline-start: none; padding-inline: 0; justify-content: flex-start; }
+
+
   }
 
-  .sort-select {
-    height: 32px;
-    padding: 0 var(--space-3);
-    border-radius: var(--radius-md);
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    color: var(--text-primary);
-    font-size: var(--fs-sm);
-    font-family: inherit;
-    cursor: pointer;
-    min-width: 7.5rem;
-    max-width: 100%;
-    flex-shrink: 1;
-  }
-  .sort-select:hover { border-color: var(--border-hover); }
-  .sort-select:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--shadow-ring); }
+
+
+
   .lib-section { margin-bottom: 30px; }
   .lib-section:last-of-type { margin-bottom: 8px; }
   .grid {
@@ -960,46 +838,46 @@
   .skel-line-lg { width: 70%; }
   .skel-line-sm { width: 50%; height: 10px; }
 
-  .zone-no-dlls {
-    margin-top: 28px;
-    padding-top: 20px;
-    border-top: 1px dashed var(--border);
-  }
-  .zone-summary {
-    display: flex;
-    width: 100%;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 12px;
-    border-radius: var(--radius-md);
-    color: var(--text-secondary);
-    background: transparent;
-    border: none;
-    text-align: left;
-    cursor: pointer;
-    transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
-  }
-  .zone-summary:hover { background: var(--bg-card-hover); color: var(--text-primary); }
-  .zone-summary:focus-visible { outline: none; box-shadow: var(--shadow-ring); }
-  .zone-chevron { color: var(--text-muted); transition: transform var(--dur-fast) var(--ease); flex-shrink: 0; }
-  .zone-summary.is-open .zone-chevron { transform: rotate(90deg); color: var(--accent); }
-  .zone-title { font-size: var(--fs-sm); font-weight: 600; letter-spacing: var(--letter-tight); }
-  .zone-count {
-    font-size: 10px;
-    font-weight: 700;
-    padding: 2px 8px;
-    border-radius: var(--radius-full);
-    background: var(--bg-elevated);
-    color: var(--text-muted);
-    font-variant-numeric: tabular-nums;
-  }
-  .zone-hint { font-size: var(--fs-xs); color: var(--text-muted); margin-left: auto; }
-  .grid-dimmed { margin-top: 14px; opacity: 0.72; }
-  .grid-dimmed :global(.game-card) { background: var(--bg-card); }
+
+
+
+
+
+
+
+
+
+
+
 
   .empty { padding: 80px 0; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--text-muted); }
   .empty :global(svg) { margin-bottom: 8px; opacity: 0.5; }
   .empty-title { font-size: var(--fs-lg); font-weight: 600; color: var(--text-primary); margin-bottom: 4px; }
   .empty .section-sub { max-width: 480px; }
   .empty-actions { display: inline-flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; justify-content: center; }
+
+  .library-masthead { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px 28px; flex-wrap: wrap; margin-bottom: 24px; }
+  .library-heading { min-width: 0; flex: 1 1 260px; }
+  .library-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 10px; font-size: 13px; line-height: 1.6; color: var(--text-secondary); }
+  .summary-separator { color: var(--text-muted); }
+  .library-masthead .header-actions { gap: 8px; }
+  .library-workbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 20px; padding-bottom: 16px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
+  .library-quick-filters { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .library-quick-filters button { display: flex; align-items: center; gap: 7px; padding: 10px 0; border-bottom: 2px solid transparent; color: var(--text-secondary); font-size: 14px; }
+  .library-quick-filters button.active { color: var(--text-primary); border-bottom-color: var(--text-primary); font-weight: 600; }
+  .library-quick-filters button > span { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .library-view-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+  .library-filter-toggle { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; color: var(--text-secondary); }
+  .library-filter-toggle:hover, .library-filter-toggle[aria-expanded="true"] { background: var(--bg-elevated); color: var(--text-primary); }
+  .library-filter-options { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px; margin: -8px 0 24px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; }
+  .library-filter-options :global(.filter-menu-trigger) { border: 1px solid var(--border); }
+  @container workspace (max-width: 560px) {
+    .library-masthead { gap: 18px; }
+    .library-masthead .header-actions { width: 100%; }
+    .library-view-controls { width: 100%; margin: 0; justify-content: space-between; }
+  }
+
+  .other-update-games { margin-top: 28px; border-top: 1px solid var(--border); padding-top: 20px; }
+  .other-update-games summary { font-size: 14px; cursor: pointer; color: var(--text-secondary); }
+  .other-update-games p { font-size: 13px; line-height: 1.5; color: var(--text-muted); margin: 12px 0 20px; }
 </style>

@@ -15,6 +15,9 @@ pub fn group_id_for(cdn_url: &str) -> String {
 
 pub fn classify_error(message: &str) -> &'static str {
     let lower = message.to_ascii_lowercase();
+    if lower.contains("rollback_failed:") || lower.contains("rolled_back:") {
+        return "backup";
+    }
     if lower.contains("cancelled") {
         return "cancelled";
     }
@@ -90,27 +93,12 @@ pub(crate) fn streamline_block_reason(
     installed_major: Option<u16>,
     target_major: Option<u16>,
 ) -> Option<String> {
-    if !dll_scanner::is_streamline_plugin(filename) {
-        return None;
-    }
-    if !allow_streamline {
-        return Some(format!(
-            "{filename} is an NVIDIA Streamline plugin (sl.*). Updating it without the matching \
-             sl.interposer.dll can crash the game on launch. Enable 'Update NVIDIA Streamline \
-             runtime' in Settings → Advanced to override."
-        ));
-    }
-    if let (Some(installed), Some(target)) = (installed_major, target_major) {
-        if installed != target {
-            return Some(format!(
-                "{filename} is NVIDIA Streamline v{installed}.x in this game but the update is \
-                 Streamline v{target}.x. The Streamline plug-ins are version-locked as a matched \
-                 set — mixing major releases (v{installed} with v{target}) crashes the game on \
-                 launch. Skipped; only a same-major Streamline set update is applied."
-            ));
-        }
-    }
-    None
+    dlssync_application::policy::streamline_block_reason(
+        filename,
+        allow_streamline,
+        installed_major,
+        target_major,
+    )
 }
 
 pub(crate) fn enrich_signature_error(reason: &str) -> String {
@@ -149,6 +137,13 @@ pub(crate) fn failure_outcome(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rolled_back_cancellation_is_not_plain_cancellation() {
+        assert_eq!(classify_error("cancelled"), "cancelled");
+        assert_ne!(classify_error("rolled_back: cancelled"), "cancelled");
+        assert_ne!(classify_error("rollback_failed: cancelled"), "cancelled");
+    }
 
     #[test]
     fn enrich_appends_hint_on_crypt_no_match() {

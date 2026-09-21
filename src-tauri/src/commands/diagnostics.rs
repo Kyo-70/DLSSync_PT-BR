@@ -11,14 +11,14 @@ const MAX_TAIL_LINES: usize = 2000;
 const ISSUE_TAIL_LINES: usize = 40;
 const ISSUE_BODY_MAX_CHARS: usize = 5000;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct LogPaths {
     pub logs_dir: String,
     pub current_log: Option<String>,
     pub file_count: usize,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct IssueReport {
     pub url: String,
     pub body: String,
@@ -91,6 +91,7 @@ fn truncate_chars(input: &str, max: usize) -> String {
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub fn get_log_paths(state: State<'_, AppState>) -> AppResult<LogPaths> {
     let dir = resolve_logs_dir(&state)
         .ok_or_else(|| AppError::Other("logs directory unavailable".into()))?;
@@ -103,6 +104,7 @@ pub fn get_log_paths(state: State<'_, AppState>) -> AppResult<LogPaths> {
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub fn read_recent_logs(state: State<'_, AppState>, max_lines: Option<usize>) -> AppResult<String> {
     let dir = resolve_logs_dir(&state)
         .ok_or_else(|| AppError::Other("logs directory unavailable".into()))?;
@@ -114,6 +116,7 @@ pub fn read_recent_logs(state: State<'_, AppState>, max_lines: Option<usize>) ->
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub fn build_issue_report(
     state: State<'_, AppState>,
     context: Option<String>,

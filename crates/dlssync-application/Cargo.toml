@@ -17,10 +17,13 @@ launcher-scan = { path = "../launcher-scan" }
 dll-scanner = { path = "../dll-scanner" }
 dll-catalog = { path = "../dll-catalog" }
 backup-store = { path = "../backup-store" }
+operation-journal = { path = "../operation-journal" }
 pe-version = { path = "../pe-version" }
 reqwest.workspace = true
 tempfile.workspace = true
 chrono.workspace = true
+tokio.workspace = true
+parking_lot.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -122,8 +122,7 @@ export const FAMILY_SHORT: Record<string, string> = {
 };
 
 /** Family → vendor key, derived from the canonical {@link FAMILY_META}.
- *  Previously hand-maintained and disagreed with `ux.ts` on
- *  `streamline_direct_sr` (was wrongly `nvidia` here); now single-sourced. */
+ *  Streamline DirectSR belongs to NVIDIA, matching the backend metadata. */
 export const FAMILY_TO_VENDOR: Record<string, string> = Object.fromEntries(
   (Object.entries(FAMILY_META) as [DllFamily, (typeof FAMILY_META)[DllFamily]][]).map(
     ([family, m]) => [family, m.vendor],
@@ -148,8 +147,8 @@ export const FAMILY_TO_CATALOG_KEY: Record<string, string> = {
   xess_fg: "xess_fg",
   xell: "xell",
   fsr_upscaler: "fsr_upscaler",
-  fsr_upscaler_vk: "fsr_upscaler",
-  fsr_loader: "fsr_upscaler",
+  fsr_upscaler_vk: "fsr_upscaler_vk",
+  fsr_loader: "fsr_loader",
   fsr_fg: "fsr_fg",
   fsr_denoiser: "fsr_denoiser",
   direct_storage: "direct_storage",
@@ -208,6 +207,14 @@ export function familyShort(key: string): string {
 
 export function launcherLabel(key: LauncherKind): string {
   return LAUNCHER_LABELS[key] ?? key;
+}
+
+/** Label for an operation that names a game, such as a toast or a notification.
+ *
+ *  A launcher prefix only helps when it tells the user where the game came from. A user-added game
+ *  has no launcher, so prefixing it would produce the `Manual -` wording the product forbids. */
+export function gameOperationLabel(launcher: LauncherKind, name: string): string {
+  return launcher === "manual" ? name : `${launcherLabel(launcher)} - ${name}`;
 }
 
 /** Map a DLL family key to its owning vendor string (e.g. `"dlss_sr"` → `"nvidia"`). */

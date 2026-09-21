@@ -3,6 +3,7 @@
   import { launcherLabel } from "../lib/labels";
   import { favoriteIds, toggleFavorite } from "../lib/stores";
   import type { DetectedGame } from "../lib/api";
+  import { bestArtSrc } from "../lib/gameArt";
 
   let {
     game,
@@ -41,6 +42,14 @@
   } = $props();
 
   let imgErrored = $state(false);
+  // Source of the drawn cover. Rust reports the verified asset and its dimensions; this only
+  // picks the orientation and resolves a local cache file through the Tauri asset transport.
+  const artHref = $derived(bestArtSrc(game));
+  // Rust reports that this game has no cover, or that its source failed. The surface says so
+  // instead of leaving a silent initial that looks like a loading state.
+  const coverUnavailable = $derived(
+    !artHref && (game.art?.state === "unavailable" || game.art?.state === "source_failed"),
+  );
   $effect(() => {
     void game.id;
     imgErrored = false;
@@ -49,8 +58,8 @@
   let isFavorite = $derived($favoriteIds.has(game.id));
 </script>
 
-<button class="detail-back" onclick={onClose} title={$t("component.gameDrawer.backToLibraryTitle")} aria-label={$t("component.gameDrawer.backToLibrary")}>
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+<button class="detail-back" onclick={onClose} title={$t("common.close")} aria-label={$t("common.close")}>
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 6 12 12M6 18 18 6"/></svg>
 </button>
 <button
   class="detail-fav"
@@ -64,17 +73,19 @@
 </button>
 <header class="detail-hero" data-launcher={game.launcher} style:--game-accent={coverAccentColor ?? "var(--accent)"}>
   <div class="drawer-art">
-    {#if game.image_url && !imgErrored}
-      <img src={game.image_url} alt={game.name} onerror={() => (imgErrored = true)} />
+    {#if artHref && !imgErrored}
+      <img src={artHref} alt={game.name} onerror={() => (imgErrored = true)} />
     {:else}
-      <div class="drawer-art-fallback">{game.name.slice(0, 1).toUpperCase()}</div>
+      <div class="drawer-art-fallback" title={coverUnavailable ? $t("component.cover.unavailable") : undefined}>
+        <span aria-hidden={coverUnavailable ? "true" : undefined}>{game.name.slice(0, 1).toUpperCase()}</span>
+        {#if coverUnavailable}<span class="cover-unavailable-label">{$t("component.cover.unavailable")}</span>{/if}
+      </div>
     {/if}
     <div class="drawer-art-overlay"></div>
   </div>
   <div class="drawer-meta">
     <span class="launcher-chip">{launcherLabel(game.launcher)}</span>
     <h2 class="drawer-title">{game.name}</h2>
-    <p class="drawer-path mono truncate" title={game.install_dir}>{game.install_dir}</p>
   </div>
 </header>
 
@@ -130,7 +141,7 @@
   .detail-back {
     position: absolute;
     top: var(--space-3);
-    left: var(--space-3);
+    right: 16px;
     z-index: 5;
     display: inline-flex;
     align-items: center;
@@ -152,7 +163,7 @@
   .detail-fav {
     position: absolute;
     top: var(--space-3);
-    right: var(--space-3);
+    right: 58px;
     z-index: 5;
     display: inline-flex;
     align-items: center;
@@ -180,7 +191,7 @@
     border-radius: 0;
     overflow: hidden;
   }
-  .drawer-art { width: 100%; height: clamp(132px, 20vh, 190px); overflow: hidden; position: relative; }
+  .drawer-art { width: 100%; height: clamp(130px, 21vh, 210px); overflow: hidden; position: relative; }
   .drawer-art::before {
     content: "";
     position: absolute;
@@ -204,6 +215,24 @@
     font-size: var(--fs-display);
     font-weight: 700;
     opacity: 0.55;
+  }
+  .cover-unavailable-label {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: calc(100% - 32px);
+    padding: 4px 10px;
+    border: 1px solid color-mix(in oklab, var(--text-muted) 38%, transparent);
+    border-radius: var(--radius-full);
+    background: color-mix(in oklab, var(--bg-elevated) 86%, transparent);
+    color: var(--text-secondary);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    line-height: 1.2;
+    text-align: center;
+    white-space: nowrap;
+    z-index: 1;
   }
   .drawer-art-overlay {
     position: absolute;
@@ -243,18 +272,12 @@
     color: var(--accent-fg);
   }
   .drawer-title {
-    font-size: var(--fs-xl-plus);
+    font-size: clamp(24px, 4cqi, 34px);
     font-weight: 700;
     line-height: var(--lh-tight);
     letter-spacing: var(--letter-tighter);
     color: var(--art-chrome-fg);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6), 0 2px 12px rgba(0, 0, 0, 0.8);
-  }
-  .drawer-path {
-    font-size: var(--fs-xs);
-    color: var(--art-chrome-fg-dim);
-    max-width: 100%;
-    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
   }
 
   .status-ribbon {
@@ -263,7 +286,7 @@
     align-items: center;
     gap: var(--space-2);
     margin: 0;
-    padding: 11px var(--space-4);
+    padding: 12px clamp(16px, 4cqi, 36px);
     border: none;
     border-top: 1px solid var(--border);
     border-radius: 0;
@@ -281,10 +304,10 @@
     height: 7px;
     border-radius: 50%;
     background: currentColor;
-    box-shadow: 0 0 6px currentColor;
+    box-shadow: none;
     flex-shrink: 0;
   }
-  .ribbon-dot.is-pulse { animation: pulse 2s var(--ease) infinite; }
+  .ribbon-dot.is-pulse { animation: none; }
 
   .warning-banner {
     position: relative;

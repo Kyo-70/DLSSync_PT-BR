@@ -33,14 +33,14 @@ fn percent_encode(input: &str) -> String {
     out
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
 pub struct DetectedAntiCheat {
     pub anticheat: String,
     pub kind: ProtectionKind,
     pub source: HitSource,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
 pub struct AntiCheatReport {
     pub detected: Vec<DetectedAntiCheat>,
     pub status: Option<String>,
@@ -138,6 +138,7 @@ fn combine(
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn detect_anticheat(
     state: State<'_, AppState>,
     install_dir: String,

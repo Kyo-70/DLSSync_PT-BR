@@ -5,9 +5,13 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub type DeviceClass = SystemDeviceClass;
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, specta::Type,
+)]
 #[serde(rename_all = "snake_case")]
-pub enum DeviceClass {
+pub enum SystemDeviceClass {
     Audio,
     Display,
     Monitor,

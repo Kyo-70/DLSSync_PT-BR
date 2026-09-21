@@ -1,10 +1,57 @@
+<script module lang="ts">
+  /** The app-update classifier and its wording live in `lib/appUpdateStatus.ts`, shared with the
+   *  About surface. That module imports no view, so the two lazily loaded view chunks stay
+   *  separate. The names are re-exported here for the suites that read this surface's contract. */
+  import {
+    classifyUpdateCheck,
+    updateStatusText,
+    type AppUpdateAvailability,
+  } from "../lib/appUpdateStatus";
+
+  export { classifyUpdateCheck, updateStatusText, type AppUpdateAvailability };
+
+  /** What the operating system reports about the startup entry.
+   *  `observed` is a read-back value. `unknown` means the entry could not be read, which is not the
+   *  same as "off". `mismatch` keeps both values so the difference can be reported instead of being
+   *  written away. */
+  export type AutostartState =
+    | { kind: "unknown"; reason: "not-read" | "unreadable" }
+    | { kind: "observed"; enabled: boolean }
+    | { kind: "mismatch"; observed: boolean; requested: boolean }
+    | { kind: "error"; error: string };
+
+  /** Turn an autostart read-back into state. A non-boolean answer is `unknown`, never `false`.
+   *  `requested` is `null` for a plain read with no preceding write. */
+  export function classifyAutostartReadback(readback: unknown, requested: boolean | null): AutostartState {
+    if (typeof readback !== "boolean") return { kind: "unknown", reason: "unreadable" };
+    if (requested === null || readback === requested) return { kind: "observed", enabled: readback };
+    return { kind: "mismatch", observed: readback, requested };
+  }
+
+  /** Value shown by the startup toggle. It is the read-back value whenever one exists. With no
+   *  read-back the stored preference is shown and the row states that it is not verified; the
+   *  optimistic value of the pending interaction is never shown. */
+  export function autostartCheckboxValue(state: AutostartState, storedPreference: boolean): boolean {
+    switch (state.kind) {
+      case "observed":
+        return state.enabled;
+      case "mismatch":
+        return state.observed;
+      default:
+        return storedPreference;
+    }
+  }
+</script>
+
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { preferredVendor } from "../lib/hardwarePreference";
+  import { hardwarePreference } from "../lib/stores";
+  import { onMount, untrack } from "svelte";
   import { fly } from "svelte/transition";
   import PerformanceToggles from "../components/PerformanceToggles.svelte";
   import {
     settings,
-    persistSettings,
+    persistSettings, persistUiPreferences,
     loadSettings,
     showToast,
     scanGames,
@@ -28,7 +75,7 @@
   import { t, locale, loadLocale, translate, LOCALES, LOCALE_LABELS, type Locale } from "../lib/i18n/index";
   import { get } from "svelte/store";
   import type { BrandKey } from "../lib/brands";
-  import { appUpdaterEnabled, distributionLabel } from "../lib/distribution";
+  import { appUpdaterEnabled, distributionLabel, isNexusBuild } from "../lib/distribution";
   import { EXTERNAL_URLS } from "../lib/ux";
 
   let { onToggleTheme, currentTheme }: { onToggleTheme: () => void; currentTheme: string } = $props();
@@ -37,6 +84,9 @@
   let appPaths = $state<AppPathsDto | null>(null);
   let updateChecking = $state(false);
   let lastUpdateCheck = $state<string | null>(null);
+  let updateStatus = $state<AppUpdateAvailability>(appUpdaterEnabled ? { kind: "unchecked" } : { kind: "manualOnly" });
+  let autostart = $state<AutostartState>({ kind: "unknown", reason: "not-read" });
+  let autostartBusy = $state(false);
 
   type TabId = "general" | "updates" | "detection" | "art" | "advanced";
 
@@ -49,19 +99,19 @@
 
   $effect(() => {
     const persisted = tabFromPref($settings?.ui_prefs.settings_active_tab);
-    if (persisted !== activeTab) activeTab = persisted;
+    if (persisted !== untrack(() => activeTab)) activeTab = persisted;
   });
 
   async function setActiveTab(id: TabId): Promise<void> {
     activeTab = id;
     if (!$settings || $settings.ui_prefs.settings_active_tab === id) return;
-    await persistSettings({ ...$settings, ui_prefs: { ...$settings.ui_prefs, settings_active_tab: id } });
+    await persistUiPreferences({ settings_active_tab: id });
   }
 
   async function setShowSupportNudge(on: boolean): Promise<void> {
     if (!$settings) return;
     if (on) resetNudgeSession();
-    await persistSettings({ ...$settings, ui_prefs: { ...$settings.ui_prefs, show_support_nudge: on } });
+    await persistUiPreferences({ show_support_nudge: on });
   }
 
   const TABS: { id: TabId; labelKey: string; icon: string }[] = [
@@ -84,7 +134,7 @@
     const next = localeChoice;
     void loadLocale(next);
     if ($settings) {
-      void persistSettings({ ...$settings, ui_prefs: { ...$settings.ui_prefs, language: next } });
+      void persistUiPreferences({ language: next });
     }
   });
 
@@ -106,29 +156,39 @@
     } catch {
       appPaths = null;
     }
-    if ($driverReports.length === 0) void loadDriverUpdates();
+    await readAutostartState();
+    if (!isNexusBuild && $driverReports.length === 0) void loadDriverUpdates();
   });
 
   async function checkForUpdatesNow(): Promise<void> {
     if (!appUpdaterEnabled) {
+      // Nexus policy: no self-updater and no automatic check. The action opens the mod page.
+      updateStatus = { kind: "manualOnly" };
       await openReleases();
       return;
     }
     if (updateChecking) return;
     updateChecking = true;
+    updateStatus = { kind: "checking" };
     try {
       const { check } = await import("@tauri-apps/plugin-updater");
       const update = await check();
       lastUpdateCheck = new Date().toLocaleString();
-      const available = update && (update as { available?: boolean }).available !== false;
-      if (available) {
+      const status = classifyUpdateCheck(update);
+      updateStatus = status;
+      if (status.kind === "available") {
+        // The install surface is the update banner; it re-reads the release itself.
         window.dispatchEvent(new CustomEvent("dlssync:check-updates", { detail: { force: true } }));
-        const v = (update as { version?: string }).version ?? "unknown";
+        const v = status.version ?? translate(get(locale), "status.unknown");
         showToast("info", translate(get(locale), "view.settings.updates.toast.available", { version: v }));
-      } else {
+      } else if (status.kind === "upToDate") {
         showToast("success", translate(get(locale), "view.settings.updates.toast.latest", { version: appVersion }));
+      } else {
+        showToast("warning", updateStatusText(get(locale), status, appVersion, distributionLabel));
       }
     } catch (err: unknown) {
+      lastUpdateCheck = new Date().toLocaleString();
+      updateStatus = { kind: "error", error: String(err) };
       showToast("danger", translate(get(locale), "view.settings.updates.toast.checkFailed", { error: String(err) }));
     } finally {
       updateChecking = false;
@@ -195,23 +255,51 @@
     });
   }
 
-  /** The daemon's "run at Windows startup" pref persists into settings AND drives
-   *  the autostart plugin (same enable/disable pattern as PerformanceToggles), so
-   *  the OS registration always matches the stored preference. */
-  async function setRunAtStartup(next: boolean): Promise<void> {
-    updateBackground("run_at_startup", next);
+  /** Read the startup entry from the operating system. This is a read; it never registers or
+   *  unregisters anything. */
+  async function readAutostartState(): Promise<void> {
     try {
       const mod = await import("@tauri-apps/plugin-autostart");
-      if (next) {
+      autostart = classifyAutostartReadback(await mod.isEnabled(), null);
+    } catch (err: unknown) {
+      autostart = { kind: "error", error: String(err) };
+    }
+  }
+
+  /** Request a startup-entry change, then show what the operating system reports back.
+   *  The requested value is never displayed and never stored on its own: the row shows the
+   *  read-back value, a discrepancy is reported to the user, and a failed call leaves the stored
+   *  preference untouched instead of writing a compensating value. */
+  async function setRunAtStartup(requested: boolean): Promise<void> {
+    if (autostartBusy) return;
+    autostartBusy = true;
+    try {
+      const mod = await import("@tauri-apps/plugin-autostart");
+      if (requested) {
         await mod.enable();
       } else {
         await mod.disable();
       }
-      const verified = await mod.isEnabled();
-      if (verified !== next) updateBackground("run_at_startup", verified);
+      const state = classifyAutostartReadback(await mod.isEnabled(), requested);
+      autostart = state;
+      const loc = get(locale);
+      if (state.kind === "observed") {
+        if ($settings && $settings.background.run_at_startup !== state.enabled) {
+          updateBackground("run_at_startup", state.enabled);
+        }
+      } else if (state.kind === "mismatch") {
+        if ($settings && $settings.background.run_at_startup !== state.observed) {
+          updateBackground("run_at_startup", state.observed);
+        }
+        showToast("warning", translate(loc, "view.settings.general.background.runAtStartup.mismatch"));
+      } else {
+        showToast("warning", translate(loc, "view.settings.general.background.runAtStartup.notVerified"));
+      }
     } catch (err: unknown) {
-      updateBackground("run_at_startup", !next);
+      autostart = { kind: "error", error: String(err) };
       showToast("danger", translate(get(locale), "component.perf.toast.autostartFailed", { error: String(err) }));
+    } finally {
+      autostartBusy = false;
     }
   }
 
@@ -417,11 +505,6 @@
   ];
   const featureByKey = new Map(featureToggles.map((ft) => [ft.key, ft]));
 
-  const updateBehaviorToggles: FeatureToggle[] = [
-    { key: "create_backups", labelKey: "view.settings.feature.create_backups.label", subKey: "view.settings.feature.create_backups.sub", files: null },
-    { key: "auto_apply_all_on_rescan", labelKey: "view.settings.feature.auto_apply_all_on_rescan.label", subKey: "view.settings.feature.auto_apply_all_on_rescan.sub", files: null },
-  ];
-
   let showFilesFor = $state<Record<string, boolean>>({});
   function toggleFiles(key: string): void {
     showFilesFor = { ...showFilesFor, [key]: !showFilesFor[key] };
@@ -439,26 +522,15 @@
   });
 </script>
 
-<header class="view-header">
+<header class="view-header settings-heading">
   <div>
     <h1 class="view-title">{$t("view.settings.title")}</h1>
-    <p class="view-subtitle">{$t("view.settings.savedTo")} <span class="mono">{appPaths ? appPaths.settings_file : "~/DLSSync/Settings/settings.json"}</span></p>
+    <p class="view-subtitle">{$t("view.settings.subtitle")}</p>
   </div>
-</header>
-
-{#if !$settings}
-  <div class="loading">{$t("view.settings.loading")}</div>
-{:else}
-  <section class="settings-hero" in:fly={{ y: 6, duration: 220 }}>
-    <div class="hero-meta">
-      <span class="hero-eyebrow">DLSSync</span>
-      <div class="hero-title-row">
-        <span class="hero-version mono">v{appVersion}</span>
-        <span class="hero-status chip chip-update is-strong">{$t("view.settings.hero.technologiesEnabled", { count: enabledFeatureCount, total: featureToggles.length })}</span>
-      </div>
-      <p class="hero-sub">{$t("view.settings.hero.sub")}</p>
-    </div>
-    <div class="hero-actions">
+  {#if $settings}
+    <details class="settings-files">
+      <summary>{$t("view.settings.filesAndLogs")}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></summary>
+    <div class="hero-actions" title={appPaths?.settings_file}>
       <button class="btn btn-sm btn-ghost" onclick={revealConfigFile} disabled={!appPaths} title={$t("view.settings.hero.revealConfigTitle")}>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
         {$t("view.settings.hero.revealConfig")}
@@ -476,12 +548,24 @@
         {$t("view.settings.hero.logs")}
       </button>
     </div>
-  </section>
+      <p class="settings-file-meta">v{appVersion} · {$t("view.settings.hero.technologiesEnabled", { count: enabledFeatureCount, total: featureToggles.length })}</p>
+    </details>
+  {/if}
+</header>
 
+{#if !$settings}
+  <div class="loading">{$t("view.settings.loading")}</div>
+{:else}
+  <label class="settings-section-picker">
+    <span>{$t("view.settings.sectionsAria")}</span>
+    <select value={activeTab} onchange={(event) => void setActiveTab((event.target as HTMLSelectElement).value as TabId)}>
+      {#each TABS as tab}<option value={tab.id}>{$t(tab.labelKey)}</option>{/each}
+    </select>
+  </label>
   <div class="settings-layout">
     <nav class="side-nav" aria-label={$t("view.settings.sectionsAria")}>
       {#each TABS as tab}
-        <button class="side-tab" class:active={activeTab === tab.id} onclick={() => void setActiveTab(tab.id)}>
+        <button class="side-tab" aria-pressed={activeTab === tab.id} class:active={activeTab === tab.id} onclick={() => void setActiveTab(tab.id)}>
           <span class="side-tab-icon" aria-hidden="true">
             {#if tab.icon === "settings"}
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -539,30 +623,6 @@
           <p class="section-help">{$t("view.settings.general.performance.help")}</p>
         </header>
         <PerformanceToggles />
-
-        <header class="section-head section-head-gap">
-          <h2 class="section-title-h">{$t("view.settings.general.updateBehavior.title")}</h2>
-          <p class="section-help">{$t("view.settings.general.updateBehavior.help")}</p>
-        </header>
-        <div class="card">
-          {#each updateBehaviorToggles as ft, i}
-            <div class="row" class:row-divider={i > 0}>
-              <div class="row-text">
-                <div class="row-label">{$t(ft.labelKey)}</div>
-                <div class="row-sub">{$t(ft.subKey)}</div>
-              </div>
-              <label class="toggle">
-                <input
-                  type="checkbox"
-                  checked={$settings.update_prefs[ft.key]}
-                  aria-label={$t(ft.labelKey)}
-                  onchange={(e) => updatePref(ft.key, (e.target as HTMLInputElement).checked)}
-                />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-          {/each}
-        </div>
 
         <header class="section-head section-head-gap">
           <h2 class="section-title-h">
@@ -623,16 +683,39 @@
           </div>
 
           <div class="row row-divider">
-            <div class="row-text">
+            <div class="row-text" data-testid="autostart-state" data-state={autostart.kind}>
               <div class="row-label">{$t("view.settings.general.background.runAtStartup.label")}</div>
               <div class="row-sub">{$t("view.settings.general.background.runAtStartup.sub")}</div>
+              {#if autostart.kind === "unknown"}
+                <div class="row-sub row-sub-caution">
+                  {translate($locale, "view.settings.general.background.runAtStartup.notVerified")}
+                </div>
+              {:else if autostart.kind === "mismatch"}
+                <div class="row-sub row-sub-caution">
+                  {translate($locale, "view.settings.general.background.runAtStartup.mismatch")}
+                </div>
+              {:else if autostart.kind === "error"}
+                <div class="row-sub row-sub-caution">
+                  <!-- `error` is the raw failure text from the operating system, an open wire
+                       string: inserted as a value, never translated. -->
+                  {translate($locale, "view.settings.general.background.runAtStartup.readFailed", { error: autostart.error })}
+                </div>
+              {/if}
             </div>
             <label class="toggle">
               <input
                 type="checkbox"
-                checked={$settings.background.run_at_startup}
+                checked={autostartCheckboxValue(autostart, $settings.background.run_at_startup)}
                 aria-label={$t("view.settings.general.background.runAtStartup.label")}
-                onchange={(e) => void setRunAtStartup((e.target as HTMLInputElement).checked)}
+                disabled={autostartBusy}
+                onchange={(e) => {
+                  const input = e.currentTarget as HTMLInputElement;
+                  const requested = input.checked;
+                  // The control keeps showing the last value read back from the system. The
+                  // requested value is never displayed; the new read-back replaces it.
+                  input.checked = autostartCheckboxValue(autostart, $settings.background.run_at_startup);
+                  void setRunAtStartup(requested);
+                }}
               />
               <span class="toggle-slider"></span>
             </label>
@@ -710,7 +793,15 @@
             <div class="row-text">
               <div class="row-label">{$t("view.settings.updates.currentVersion.label")}</div>
               <div class="row-sub mono">
-                v{appVersion}{#if appUpdaterEnabled && lastUpdateCheck}  ·  {$t("view.settings.updates.lastCheck", { time: lastUpdateCheck })}{:else if !appUpdaterEnabled}  ·  {$t("view.settings.updates.manualOnly", { distribution: distributionLabel })}{/if}
+                v{appVersion}{#if appUpdaterEnabled && lastUpdateCheck}  ·  {$t("view.settings.updates.lastCheck", { time: lastUpdateCheck })}{/if}
+              </div>
+              <div
+                class="row-sub update-status"
+                class:update-status-caution={updateStatus.kind === "indeterminate" || updateStatus.kind === "error"}
+                data-testid="app-update-status"
+                data-status={updateStatus.kind}
+              >
+                {updateStatusText($locale, updateStatus, appVersion, distributionLabel)}
               </div>
             </div>
             <button class="btn btn-primary" onclick={checkForUpdatesNow} disabled={appUpdaterEnabled && updateChecking}>
@@ -728,11 +819,11 @@
           <p class="section-help">{$t("view.settings.updates.prefs.help")}</p>
         </header>
         {#each featureGroups as group (group.brand)}
-          <div class="feature-group">
-            <div class="feature-group-head">
-              <span class="feature-group-logo" aria-hidden="true"><BrandMark key={group.brand} tone="color" size={16} showLabel={false} /></span>
+          <details class="feature-group" open={preferredVendor(group.brand, $hardwarePreference)}>
+            <summary class="feature-group-head">
+              <span class="feature-group-logo" aria-hidden="true"><BrandMark key={group.brand} tone="color" size={20} fit="wordmark" showLabel={false} /></span>
               <span class="feature-group-label">{$t(group.labelKey)}</span>
-            </div>
+            </summary>
             <div class="card">
               {#each group.keys as fkey, i (fkey)}
                 {@const ft = featureByKey.get(fkey)}
@@ -764,7 +855,7 @@
                 {/if}
               {/each}
             </div>
-          </div>
+          </details>
         {/each}
       </section>
 
@@ -779,7 +870,7 @@
 
       <section in:fly={{ y: 4, duration: 200 }}>
         <header class="section-head">
-          <h2 class="section-title-h">{$t("view.settings.detection.customFolders.title")}</h2>
+          <h2 class="section-title-h" id="detection-custom-folders-title">{$t("view.settings.detection.customFolders.title")}</h2>
           <p class="section-help">{$t("view.settings.detection.customFolders.help", { path: "C:\\Games" })}</p>
         </header>
         <div class="card">
@@ -788,6 +879,7 @@
               <svg class="folder-input-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
               <input
                 type="text"
+                aria-labelledby="detection-custom-folders-title"
                 placeholder="C:\Games"
                 bind:value={customFolderInput}
                 onkeydown={(e) => { if (e.key === "Enter") void addCustomFolder(); }}
@@ -825,7 +917,9 @@
             </ul>
           {/if}
           <div class="row-actions">
-            <button class="aura-pill aura-pill-ghost" onclick={() => scanGames()}>
+            <!-- An explicit user action. `user_scan` is the consent trigger the art resolver needs;
+                 the default `automatic` trigger belongs to background and startup scans. -->
+            <button class="aura-pill aura-pill-ghost" onclick={() => scanGames({ trigger: "user_scan" })}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
               {$t("view.settings.detection.rescanNow")}
             </button>
@@ -843,7 +937,7 @@
               <div class="launcher-head">
                 {@render launcherLogo(launcher)}
                 <div class="launcher-head-text">
-                  <div class="row-label">{launcherLabel(launcher)}</div>
+                  <div class="row-label" id={`launcher-${launcher}-label`}>{launcherLabel(launcher)}</div>
                   <div class="row-sub">{arr.length === 0 ? $t("view.settings.detection.launcher.defaultAuto") : $t("view.settings.detection.launcher.overrideCount", { count: arr.length })}</div>
                 </div>
               </div>
@@ -852,6 +946,7 @@
                   <div class="path-input-row">
                     <input
                       type="text"
+                      aria-labelledby={`launcher-${launcher}-label`}
                       value={p}
                       placeholder="C:\Program Files\..."
                       onchange={(e) => {
@@ -898,8 +993,8 @@
         <div class="card">
           <div class="row art-row">
             <div class="row-text">
-              <div class="row-label">{$t("view.settings.art.sgdb.label")} {#if sgdbKeyMasked}<span class="chip chip-update small-pill">{$t("view.settings.art.sgdb.active", { masked: sgdbKeyMasked })}</span>{/if}</div>
-              <div class="row-sub">{$t("view.settings.art.sgdb.sub", { file: "settings.json" })}</div>
+              <div class="row-label" id="art-sgdb-key-label">{$t("view.settings.art.sgdb.label")} {#if sgdbKeyMasked}<span class="chip chip-update small-pill">{$t("view.settings.art.sgdb.active", { masked: sgdbKeyMasked })}</span>{/if}</div>
+              <div class="row-sub" id="art-sgdb-key-sub">{$t("view.settings.art.sgdb.sub", { file: "settings.json" })}</div>
               <button class="files-disclosure" onclick={openSgdbPrefs}>
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
                 {$t("view.settings.art.sgdb.getKey")}
@@ -907,6 +1002,8 @@
             </div>
             <input
               type="password"
+              aria-labelledby="art-sgdb-key-label"
+              aria-describedby="art-sgdb-key-sub"
               placeholder={$t("view.settings.art.sgdb.placeholder")}
               value={$settings.steamgriddb.api_key}
               onchange={(e) => updateSgdb("api_key", (e.target as HTMLInputElement).value)}
@@ -922,8 +1019,8 @@
         <div class="card">
           <div class="row art-row">
             <div class="row-text">
-              <div class="row-label">{$t("view.settings.art.steamApi.keyLabel")}</div>
-              <div class="row-sub">{$t("view.settings.art.steamApi.keySub")}</div>
+              <div class="row-label" id="art-steam-key-label">{$t("view.settings.art.steamApi.keyLabel")}</div>
+              <div class="row-sub" id="art-steam-key-sub">{$t("view.settings.art.steamApi.keySub")}</div>
               <button class="files-disclosure" onclick={openSteamKey}>
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
                 steamcommunity.com/dev/apikey
@@ -931,6 +1028,8 @@
             </div>
             <input
               type="password"
+              aria-labelledby="art-steam-key-label"
+              aria-describedby="art-steam-key-sub"
               placeholder={$t("view.settings.art.steamApi.keyPlaceholder")}
               value={$settings.steam_api.api_key}
               onchange={(e) => updateSteamApi("api_key", (e.target as HTMLInputElement).value)}
@@ -938,11 +1037,13 @@
           </div>
           <div class="row art-row row-divider">
             <div class="row-text">
-              <div class="row-label">{$t("view.settings.art.steamApi.idLabel")}</div>
-              <div class="row-sub">{$t("view.settings.art.steamApi.idSub", { file: "loginusers.vdf" })}</div>
+              <div class="row-label" id="art-steam-id-label">{$t("view.settings.art.steamApi.idLabel")}</div>
+              <div class="row-sub" id="art-steam-id-sub">{$t("view.settings.art.steamApi.idSub", { file: "loginusers.vdf" })}</div>
             </div>
             <input
               type="text"
+              aria-labelledby="art-steam-id-label"
+              aria-describedby="art-steam-id-sub"
               placeholder="76561198xxxxxxxxx"
               value={$settings.steam_api.steam_id}
               onchange={(e) => updateSteamApi("steam_id", (e.target as HTMLInputElement).value)}
@@ -954,14 +1055,15 @@
     {:else if activeTab === "advanced"}
       <section in:fly={{ y: 4, duration: 200 }} class="tab-section">
         <header class="section-head">
-          <h2 class="section-title-h">{$t("view.settings.advanced.powerUser.title")}</h2>
-          <p class="section-help">{$t("view.settings.advanced.powerUser.help", { regPath: "HKCU\\SOFTWARE\\NVIDIA Corporation\\Global\\NGXCore" })}</p>
+          <h2 class="section-title-h">{$t("view.settings.advanced.optionsTitle")}</h2>
+          <p class="section-help">{$t("view.settings.advanced.optionsIntro")}</p>
         </header>
         <div class="card">
           <div class="row">
             <div class="row-text">
               <div class="row-label">{$t("view.settings.advanced.overlay.label")}</div>
               <div class="row-sub">{$t("view.settings.advanced.overlay.sub")}</div>
+              <details class="setting-detail"><summary>{$t("view.settings.advanced.registryDetails")}</summary><p>{$t("view.settings.advanced.powerUser.help", { regPath: "HKCU\\SOFTWARE\\NVIDIA Corporation\\Global\\NGXCore" })}</p></details>
             </div>
             <label class="toggle">
               <input type="checkbox" checked={dlssOverlayLive} aria-label={$t("view.settings.advanced.overlay.label")} onchange={toggleOverlay} />
@@ -1018,12 +1120,14 @@
           </div>
           <div class="row row-divider">
             <div class="row-text">
-              <div class="row-label">{$t("view.settings.advanced.parallelApplies.label")}</div>
-              <div class="row-sub">{$t("view.settings.advanced.parallelApplies.sub")}</div>
+              <div class="row-label" id="adv-parallel-applies-label">{$t("view.settings.advanced.parallelApplies.label")}</div>
+              <div class="row-sub" id="adv-parallel-applies-sub">{$t("view.settings.advanced.parallelApplies.sub")}</div>
             </div>
             <input
               type="number"
               class="inline-num"
+              aria-labelledby="adv-parallel-applies-label"
+              aria-describedby="adv-parallel-applies-sub"
               min="1"
               max="4"
               step="1"
@@ -1040,12 +1144,14 @@
           </header>
           <div class="row">
             <div class="row-text">
-              <div class="row-label">{$t("view.settings.advanced.network.retry.label")}</div>
-              <div class="row-sub">{$t("view.settings.advanced.network.retry.sub")}</div>
+              <div class="row-label" id="adv-network-retry-label">{$t("view.settings.advanced.network.retry.label")}</div>
+              <div class="row-sub" id="adv-network-retry-sub">{$t("view.settings.advanced.network.retry.sub")}</div>
             </div>
             <input
               type="number"
               class="inline-num"
+              aria-labelledby="adv-network-retry-label"
+              aria-describedby="adv-network-retry-sub"
               min="1"
               max="6"
               step="1"
@@ -1055,12 +1161,14 @@
           </div>
           <div class="row row-divider">
             <div class="row-text">
-              <div class="row-label">{$t("view.settings.advanced.network.chunkTimeout.label")}</div>
-              <div class="row-sub">{$t("view.settings.advanced.network.chunkTimeout.sub")}</div>
+              <div class="row-label" id="adv-network-chunk-timeout-label">{$t("view.settings.advanced.network.chunkTimeout.label")}</div>
+              <div class="row-sub" id="adv-network-chunk-timeout-sub">{$t("view.settings.advanced.network.chunkTimeout.sub")}</div>
             </div>
             <input
               type="number"
               class="inline-num"
+              aria-labelledby="adv-network-chunk-timeout-label"
+              aria-describedby="adv-network-chunk-timeout-sub"
               min="10"
               max="600"
               step="10"
@@ -1070,12 +1178,14 @@
           </div>
           <div class="row row-divider">
             <div class="row-text">
-              <div class="row-label">{$t("view.settings.advanced.network.connectTimeout.label")}</div>
-              <div class="row-sub">{$t("view.settings.advanced.network.connectTimeout.sub")}</div>
+              <div class="row-label" id="adv-network-connect-timeout-label">{$t("view.settings.advanced.network.connectTimeout.label")}</div>
+              <div class="row-sub" id="adv-network-connect-timeout-sub">{$t("view.settings.advanced.network.connectTimeout.sub")}</div>
             </div>
             <input
               type="number"
               class="inline-num"
+              aria-labelledby="adv-network-connect-timeout-label"
+              aria-describedby="adv-network-connect-timeout-sub"
               min="3"
               max="60"
               step="1"
@@ -1085,12 +1195,14 @@
           </div>
           <div class="row row-divider">
             <div class="row-text">
-              <div class="row-label">{$t("view.settings.advanced.network.cacheTtl.label")}</div>
-              <div class="row-sub">{$t("view.settings.advanced.network.cacheTtl.sub")}</div>
+              <div class="row-label" id="adv-network-cache-ttl-label">{$t("view.settings.advanced.network.cacheTtl.label")}</div>
+              <div class="row-sub" id="adv-network-cache-ttl-sub">{$t("view.settings.advanced.network.cacheTtl.sub")}</div>
             </div>
             <input
               type="number"
               class="inline-num"
+              aria-labelledby="adv-network-cache-ttl-label"
+              aria-describedby="adv-network-cache-ttl-sub"
               min="60"
               max="3600"
               step="60"
@@ -1114,35 +1226,19 @@
 {/if}
 
 <style>
+  .view-header.settings-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 24px; }
   .view-header { margin-bottom: var(--space-5); }
   .loading { padding: 60px 0; text-align: center; color: var(--text-muted); }
 
-  .settings-hero {
-    margin-bottom: var(--space-6);
-    padding: var(--space-5) var(--space-6);
-    border-radius: var(--radius-xl);
-    background: linear-gradient(135deg, var(--bg-card), var(--bg-elevated));
-    border: 1px solid var(--border);
-    box-shadow: var(--shadow-xs);
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: var(--space-5);
-    align-items: center;
-  }
+
   @media (max-width: 640px) {
-    .settings-hero { grid-template-columns: 1fr; }
+
   }
-  .hero-eyebrow {
-    font-size: var(--fs-2xs);
-    font-weight: 700;
-    color: var(--accent);
-    letter-spacing: var(--letter-wider);
-    text-transform: uppercase;
-  }
-  .hero-title-row { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-1); flex-wrap: wrap; }
-  .hero-version { font-size: var(--fs-xl); font-weight: 700; color: var(--text-primary); letter-spacing: var(--letter-tighter); font-variant-numeric: tabular-nums; }
-  .hero-status { padding: 4px 10px; font-size: var(--fs-2xs); }
-  .hero-sub { font-size: var(--fs-sm); color: var(--text-secondary); margin-top: var(--space-2); line-height: var(--lh-snug); max-width: 540px; }
+
+
+
+
+
   .hero-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
 
   .settings-layout {
@@ -1339,6 +1435,9 @@
   }
   .row-label { font-size: var(--fs-base); font-weight: 600; color: var(--text-primary); display: inline-flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
   .row-sub { font-size: var(--fs-xs); color: var(--text-secondary); margin-top: 3px; line-height: var(--lh-normal); }
+  .row-sub-caution { color: var(--warning); }
+  .update-status { font-weight: 500; }
+  .update-status-caution { color: var(--warning); }
   .row-text { min-width: 0; }
   .settings-card {
     background: var(--bg-card);
@@ -1575,4 +1674,44 @@
     .files-disclosure .chev, .folder-input-wrap, .path-row, .path-action,
     .path-remove, .path-input-row input, .add-path-pill, .interval-select { transition: none; }
   }
+
+  .settings-files { position: relative; align-self: flex-start; margin-left: auto; }
+  .settings-files > summary { display: flex; align-items: center; gap: 12px; list-style: none; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 13px; color: var(--text-secondary); }
+  .settings-files > summary::-webkit-details-marker { display: none; }
+  .settings-files[open] { min-width: min(100%, 290px); padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-card); }
+  .settings-files[open] > summary { padding: 0 0 12px; border: 0; border-radius: 0; justify-content: space-between; }
+  .settings-files .hero-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .settings-file-meta { font-size: 12px; color: var(--text-muted); margin: 12px 0 0; }
+  .settings-section-picker { display: none; margin-bottom: 28px; }
+  .settings-section-picker > span { font-size: 12px; color: var(--text-secondary); }
+  .settings-section-picker > select { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-input); color: var(--text-primary); font: inherit; }
+  .settings-layout { grid-template-columns: 180px minmax(0, 1fr); gap: 36px; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
+  .settings-layout .side-nav { flex-direction: column; padding: 0 20px 0 0; border: 0; border-right: 1px solid var(--border); }
+  .tab-panels { width: 100%; min-width: 0; }
+  .tab-panels .section-head { padding: 0; border: 0; }
+  .section-title-h { font-size: 20px; line-height: 1.4; margin-bottom: 6px; }
+  .section-help { font-size: 13px; line-height: 1.55; }
+  .tab-panels .card { padding: 0; border: 0; background: none; box-shadow: none; }
+  .tab-panels .row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 24px; padding: 22px 0; }
+  .tab-panels .row-text { min-width: 0; }
+  .tab-panels .row-label { font-size: 14px; line-height: 1.45; }
+  .tab-panels .row-sub { font-size: 13px; line-height: 1.55; max-width: 64ch; margin-top: 5px; }
+  .tab-panels .row > .toggle { margin-top: 2px; }
+
+  .setting-detail { margin-top: 10px; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+  .setting-detail summary { cursor: pointer; width: fit-content; }
+  .setting-detail p { margin: 8px 0 0; overflow-wrap: anywhere; }
+  @container workspace (max-width: 760px) {
+    .settings-layout { display: block; }
+    .settings-layout .side-nav { display: none; }
+    .settings-section-picker { display: grid; gap: 8px; }
+    .tab-panels .row { gap: 20px; }
+  }
+  @container workspace (max-width: 420px) {
+    .tab-panels .art-row { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  .feature-group > summary { cursor: pointer; padding: 16px 0; }
+  .feature-group:not([open]) { border-bottom: 1px solid var(--border); }
+  .feature-group-logo { width: auto; min-width: 30px; }
 </style>

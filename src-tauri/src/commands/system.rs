@@ -4,6 +4,7 @@ use crate::system_info::{self, SystemInfo};
 use tauri::State;
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn get_system_info(state: State<'_, AppState>) -> AppResult<SystemInfo> {
     {
         let guard = state.system_info.read();

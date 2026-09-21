@@ -12,6 +12,7 @@ fn store_required<'a>(
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn list_notifications(
     state: State<'_, AppState>,
     filter: Option<ListFilter>,
@@ -23,6 +24,7 @@ pub async fn list_notifications(
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn mark_notification_read(state: State<'_, AppState>, id: String) -> AppResult<()> {
     let guard = state.notifications.read();
     let store = store_required(&guard)?;
@@ -31,6 +33,7 @@ pub async fn mark_notification_read(state: State<'_, AppState>, id: String) -> A
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn mark_all_notifications_read(state: State<'_, AppState>) -> AppResult<u32> {
     let guard = state.notifications.read();
     let store = store_required(&guard)?;
@@ -38,6 +41,7 @@ pub async fn mark_all_notifications_read(state: State<'_, AppState>) -> AppResul
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn dismiss_notification(state: State<'_, AppState>, id: String) -> AppResult<()> {
     let guard = state.notifications.read();
     let store = store_required(&guard)?;
@@ -90,6 +94,7 @@ fn sanitize_notification_link(link: Option<String>) -> Option<String> {
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn push_notification(
     state: State<'_, AppState>,
     app: AppHandle,
@@ -108,6 +113,7 @@ pub async fn push_notification(
 }
 
 #[tauri::command]
+#[cfg_attr(feature = "bindings", specta::specta)]
 pub async fn notifications_unread_count(state: State<'_, AppState>) -> AppResult<u32> {
     let guard = state.notifications.read();
     let store = store_required(&guard)?;

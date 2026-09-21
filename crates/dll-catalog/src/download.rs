@@ -123,15 +123,23 @@ pub async fn fetch_shared(
     let entry = cache.get_or_init(url);
     let url_owned = url.to_string();
     let client = client.clone();
-    let init_opts = opts.clone();
-    let result = entry
-        .get_or_init(|| async move {
-            match download_with_retry(&client, &url_owned, init_opts).await {
-                Ok(bytes) => Ok(Arc::new(bytes)),
-                Err(e) => Err(Arc::new(e)),
-            }
-        })
-        .await;
+    let cancel = opts.cancel.clone().unwrap_or_default();
+    let mut init_opts = opts;
+    // Cancellation belongs to this waiter, not the URL-keyed cell. Dropping the
+    // initializer leaves the cell empty and an uncancelled waiter takes over.
+    // No detached transfer outlives the adapter's download semaphore permit.
+    init_opts.cancel = None;
+    let initialize = entry.get_or_init(|| async move {
+        match download_with_retry(&client, &url_owned, init_opts).await {
+            Ok(bytes) => Ok(Arc::new(bytes)),
+            Err(e) => Err(Arc::new(e)),
+        }
+    });
+    let result = tokio::select! {
+        biased;
+        () = cancel.cancelled() => return Err(CatalogError::Cancelled),
+        result = initialize => result,
+    };
     match result {
         Ok(bytes) => Ok(bytes.clone()),
         Err(err) => {
@@ -333,6 +341,66 @@ mod tests {
         let evicted = cache.evict_idle();
         assert_eq!(evicted, 1);
         assert!(cache.is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn cancelled_participant_does_not_fail_shared_waiter(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let url = format!("http://{}/shared", listener.local_addr()?);
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut first, _) = listener.accept().await?;
+            let mut request = [0; 2048];
+            // A single partial read is sufficient: the test only needs the request line to
+            // arrive before the response is produced.
+            let _first_request_bytes = first.read(&mut request).await?;
+            let _ = started_tx.send(());
+            // The cancelled initializer drops its response future; another participant
+            // must initialize the same cell, rather than receive a cached cancellation.
+            let (mut second, _) = listener.accept().await?;
+            let _second_request_bytes = second.read(&mut request).await?;
+            second
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                .await?;
+            Ok::<_, std::io::Error>(())
+        });
+        let cache = DownloadCache::new();
+        let client = reqwest::Client::new();
+        let cancel = CancellationToken::new();
+        let first = tokio::spawn({
+            let cache = cache.clone();
+            let client = client.clone();
+            let url = url.clone();
+            let cancel = cancel.clone();
+            async move {
+                fetch_shared(
+                    &cache,
+                    &client,
+                    &url,
+                    DownloadOptions {
+                        cancel: Some(cancel),
+                        ..Default::default()
+                    },
+                )
+                .await
+            }
+        });
+        started_rx.await?;
+        let second = fetch_shared(&cache, &client, &url, DownloadOptions::default());
+        tokio::pin!(second);
+        // Poll B into the existing cell before cancelling A.
+        assert!(tokio::time::timeout(Duration::from_millis(20), &mut second)
+            .await
+            .is_err());
+        cancel.cancel();
+        let first_result = tokio::time::timeout(Duration::from_secs(2), first).await??;
+        assert!(matches!(first_result, Err(CatalogError::Cancelled)));
+        let bytes = tokio::time::timeout(Duration::from_secs(2), second).await??;
+        assert_eq!(bytes.as_ref().as_ref(), b"ok");
+        server.await??;
+        Ok(())
     }
 
     #[test]

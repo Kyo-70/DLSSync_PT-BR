@@ -1,13 +1,102 @@
+<script module lang="ts">
+  import type { HistoryView, OperationKind, OperationRecord, OperationStatus } from "../lib/api";
+  import { translate, type Locale, type TranslationVars } from "../lib/i18n/index";
+
+  /** One Activity row. `source` records where the row came from, so the pre-snapshot fallback is
+   *  never presented as the authoritative projection. */
+  export interface HistoryRow {
+    id: string;
+    record: OperationRecord;
+    recoveryOutcome: NonNullable<HistoryView["recovery_outcome"]> | null;
+    at: string;
+    source: "authoritative" | "journal_store";
+  }
+
+  /** Rows from the authoritative history projection (phase 4 contract, result 10.15).
+   *  Nothing is reclassified here: the published record and its `recovery_outcome` pass through
+   *  untouched, and the view only orders them for display. */
+  export function projectHistoryRows(history: readonly HistoryView[]): HistoryRow[] {
+    return history
+      .map((item) => ({
+        id: item.id,
+        record: item.record,
+        recoveryOutcome: item.recovery_outcome ?? null,
+        at: item.historical_at ?? item.record.created_at,
+        source: "authoritative" as const,
+      }))
+      .sort((left, right) => right.at.localeCompare(left.at));
+  }
+
+  /** Rows read from the journal command. Used only until the first authoritative history lands;
+   *  they carry no recovery outcome because that projection is what publishes it. */
+  export function journalStoreRows(records: readonly OperationRecord[]): HistoryRow[] {
+    return records.map((record) => ({
+      id: record.id,
+      record,
+      recoveryOutcome: null,
+      at: record.created_at,
+      source: "journal_store" as const,
+    }));
+  }
+
+  /** Presentation filter over fields the backend already published. */
+  export function filterHistoryRows(
+    rows: readonly HistoryRow[],
+    kind: OperationKind | "",
+    status: OperationStatus | "",
+  ): HistoryRow[] {
+    return rows.filter(
+      (row) =>
+        (kind === "" || row.record.kind === kind) && (status === "" || row.record.status === status),
+    );
+  }
+
+  /** Wording for a published recovery stage. An unlisted stage resolves to the neutral unknown
+   *  label instead of being reported as a success or a failure. */
+  const RECOVERY_FALLBACK_KEYS: Record<string, string> = {
+    rolled_back: "view.journal.kinds.rollback",
+    rollback_failed: "view.journal.failed",
+  };
+
+  export function recoveryLabel(outcome: string): { key: string; fallbackKey: string } {
+    return {
+      key: `view.journal.recovery.${outcome}`,
+      fallbackKey: RECOVERY_FALLBACK_KEYS[outcome] ?? "status.unknown",
+    };
+  }
+
+  /** Open-ended backend reason codes retain a neutral fallback for unknown values. */
+  export function messageWithFallback(
+    loc: Locale,
+    key: string,
+    fallbackKey: string,
+    vars?: TranslationVars,
+  ): string {
+    const value = translate(loc, key, vars);
+    return value === key ? translate(loc, fallbackKey, vars) : value;
+  }
+</script>
+
 <script lang="ts">
   import { onMount } from "svelte";
-  import { exportJournal, listJournal, type OperationKind, type OperationRecord, type OperationStatus } from "../lib/api";
+  import { exportJournal, listJournal } from "../lib/api";
   import { currentView } from "../lib/stores";
-  import { t } from "../lib/i18n/index";
+  import { authoritativeState } from "../lib/stateSync";
+  import { locale, t } from "../lib/i18n/index";
 
   let records = $state<OperationRecord[]>([]);
   let loading = $state(true);
   let kind = $state<OperationKind | "">("");
   let status = $state<OperationStatus | "">("");
+
+  // Rust owns Activity: the authoritative history projection is the source whenever it carries
+  // rows. The journal command stays as the pre-snapshot fallback and is labelled as such.
+  let projected = $derived(projectHistoryRows($authoritativeState.history));
+  let usingProjection = $derived(projected.length > 0);
+  let rows = $derived(
+    filterHistoryRows(usingProjection ? projected : journalStoreRows(records), kind, status),
+  );
+  let syncPending = $derived($authoritativeState.historySyncPending);
 
   async function load(): Promise<void> {
     loading = true;
@@ -44,9 +133,15 @@
     <label><span>{$t("view.journal.result")}</span><select bind:value={status} onchange={load}><option value="">{$t("view.journal.all")}</option><option value="succeeded">{$t("view.journal.succeeded")}</option><option value="failed">{$t("view.journal.failed")}</option><option value="cancelled">{$t("view.journal.cancelled")}</option></select></label>
   </section>
 
-  {#if loading}
+  {#if syncPending}
+    <p class="journal-empty" data-testid="journal-sync-pending">
+      {translate($locale, "view.journal.syncPending")}
+    </p>
+  {/if}
+
+  {#if !usingProjection && loading}
     <p class="journal-empty">{$t("view.journal.loading")}</p>
-  {:else if records.length === 0}
+  {:else if rows.length === 0}
     <div class="journal-empty journal-empty-state">
       <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 9 8 9"/><line x1="12" y1="8" x2="12" y2="12.5"/><line x1="12" y1="15.5" x2="12.01" y2="15.5"/></svg>
       <p class="journal-empty-title">{$t("view.journal.empty")}</p>
@@ -54,12 +149,18 @@
     </div>
   {:else}
     <ol class="journal-list">
-      {#each records as record (record.id)}
-        <li class="journal-entry" data-status={record.status}>
+      {#each rows as row (row.id)}
+        {@const record = row.record}
+        <li
+          class="journal-entry"
+          data-status={record.status}
+          data-source={row.source}
+          data-recovery={row.recoveryOutcome}
+        >
           <span class="entry-mark" aria-hidden="true"></span>
           <div class="entry-main">
             <div class="entry-line"><strong>{record.summary}</strong><span class="entry-status">{$t(`view.journal.${record.status}`)}</span></div>
-            <div class="entry-meta"><span>{new Date(record.created_at).toLocaleString()}</span><span>{$t(`view.journal.actors.${record.actor}`)}</span><span>{$t(`view.journal.kinds.${record.kind}`)}</span>{#if record.duration_ms != null}<span>{record.duration_ms} ms</span>{/if}</div>
+            <div class="entry-meta"><span>{new Date(row.at).toLocaleString()}</span><span>{$t(`view.journal.actors.${record.actor}`)}</span><span>{$t(`view.journal.kinds.${record.kind}`)}</span>{#if record.duration_ms != null}<span>{record.duration_ms} ms</span>{/if}{#if row.recoveryOutcome}<span class="entry-recovery" data-testid="journal-recovery">{messageWithFallback($locale, recoveryLabel(row.recoveryOutcome).key, recoveryLabel(row.recoveryOutcome).fallbackKey)}</span>{/if}</div>
             {#if record.error}<p class="entry-error">{record.error}</p>{/if}
           </div>
         </li>
@@ -82,6 +183,9 @@
   .entry-line { display: flex; justify-content: space-between; gap: 12px; }
   .entry-status { color: var(--text-muted); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .08em; }
   .entry-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; color: var(--text-muted); font-size: var(--fs-xs); }
+  .entry-recovery { color: var(--text-secondary); font-weight: 600; }
+  .journal-entry[data-recovery="rollback_failed"] .entry-recovery { color: var(--danger); }
+  .journal-entry[data-recovery="rolled_back"] .entry-recovery { color: var(--success); }
   .entry-error { margin: 8px 0 0; color: var(--danger); font-size: var(--fs-sm); }
   .journal-empty { padding: 48px 16px; text-align: center; color: var(--text-muted); }
   .journal-empty-state {

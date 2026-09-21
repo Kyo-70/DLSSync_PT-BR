@@ -1,9 +1,12 @@
 from pathlib import Path
+import tomllib
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
 
 ROOT = Path(__file__).resolve().parents[1]
+VERSION = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))["workspace"]["package"]["version"]
+PRODUCT_NAME = tomllib.loads((ROOT / "product.toml").read_text(encoding="utf-8"))["product"]["name"]
 SOURCE = ROOT / ".github/assets/nexus/source/dlssync-v170-cover-background-native.png"
 ICON = ROOT / "src-tauri/icons/app-icon-1024.png"
 FONT_REGULAR = Path("C:/Windows/Fonts/segoeui.ttf")
@@ -50,7 +53,7 @@ def compose(width: int, height: int) -> Image.Image:
 
     brand_x = margin + icon_size + int(width * 0.018)
     brand_y = icon_y + int(icon_size * 0.03)
-    draw.text((brand_x, brand_y), "DLSSync", font=font(int(height * 0.078), True), fill=(244, 248, 252, 255))
+    draw.text((brand_x, brand_y), PRODUCT_NAME, font=font(int(height * 0.078), True), fill=(244, 248, 252, 255))
     draw.text(
         (brand_x, brand_y + int(height * 0.088)),
         "SYNC  /  VERIFY  /  APPLY",
@@ -95,7 +98,7 @@ def compose(width: int, height: int) -> Image.Image:
 
     draw.text(
         (margin, int(height * 0.9)),
-        "v1.7.0  |  Windows 10 / 11  |  Open source  |  Zero telemetry",
+        f"v{VERSION}  |  Windows 10 / 11  |  Open source  |  Zero telemetry",
         font=font(int(height * 0.024)),
         fill=(135, 151, 168, 255),
     )

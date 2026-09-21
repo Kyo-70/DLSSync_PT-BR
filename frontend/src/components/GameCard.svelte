@@ -1,8 +1,51 @@
+<script lang="ts" module>
+  /** Authoritative component readers for the card.
+   *
+   *  Rust owns which component carries an applicable update and which version it targets. Nothing
+   *  here compares versions, resolves a target or decides compatibility. `null` means Rust has
+   *  published nothing for that game yet, which stays distinct from "no update available". */
+  import type { ComponentState, GameSnapshot } from "../generated/bindings";
+  import type { DllRecord } from "../lib/api";
+  import { recordFeature, type FeatureSlot } from "../lib/labels";
+
+  /** Components Rust published for one game, or `null` while it published none. An empty array is
+   *  a published "this game has no components" and is NOT the same as `null`. */
+  export function publishedComponents(
+    snapshots: GameSnapshot[],
+    gameId: string,
+  ): ComponentState[] | null {
+    const snapshot = snapshots.find((candidate) => candidate.id === gameId);
+    if (!snapshot) return null;
+    return snapshot.components ?? null;
+  }
+
+  /** An update the surface may present: Rust reports one available, reports it applicable, and
+   *  published the candidate that would be installed. `newer`, `current`, `unchecked`, `unknown`,
+   *  `disabled`, `externally_managed` and `incompatible` are never presented as an update. */
+  export function isOfferedUpdate(component: ComponentState): boolean {
+    return (
+      component.status === "update_available" &&
+      component.applicability !== "not_applicable" &&
+      component.candidate !== null
+    );
+  }
+
+  /** Feature slot of an authoritative component. Streamline plug-ins resolve by filename, the same
+   *  rule a scanned record path uses. */
+  export function componentFeature(component: ComponentState): FeatureSlot {
+    return recordFeature({
+      family: component.identity.family as DllRecord["family"],
+      path: component.identity.filename,
+      current_version: component.observed_version,
+      file_description: null,
+    });
+  }
+</script>
+
 <script lang="ts">
-  import type { DetectedGame, DllRecord } from "../lib/api";
+  import type { DetectedGame } from "../lib/api";
   import {
     launcherLabel,
-    recordFeature,
     featureShort,
     featureIconId,
     featureVendor,
@@ -11,19 +54,24 @@
     vendorInkVar,
     GROUP_ACCENT_VAR,
     type UpdateStatus,
-    type FeatureSlot,
   } from "../lib/labels";
-  import { gameDlls, gameDllsLoading, gameStatuses, relationContext } from "../lib/stores";
-  import { dllRelation } from "../lib/relation";
+  import { gameDlls, gameDllsLoading, gameStatuses, hardwarePreference } from "../lib/stores";
+  import { preferredFamily } from "../lib/hardwarePreference";
+  import { familyLabel } from "../lib/labels";
+  import { authoritativeState } from "../lib/stateSync";
   import { launcherIcon } from "../lib/launcherIcons";
   import { setActiveArt } from "../lib/artContext";
+  import { bestArtSrc } from "../lib/gameArt";
   import { t } from "../lib/i18n/index";
   import FeatureIcon from "./FeatureIcon.svelte";
 
-  let { game, hidden = false, favorite = false, onApply, onOpenFolder, onBlacklist, onClick, onContextMenu, onToggleFavorite }: {
+  let { game, coverMode = "portrait", status: statusProp = null, hidden = false, favorite = false, onApply, onOpenFolder, onBlacklist, onClick, onContextMenu, onToggleFavorite }: {
     game: DetectedGame;
+    /** Presentation status resolved by the owning view from the authoritative state. */
+    status?: UpdateStatus | null;
     hidden?: boolean;
     favorite?: boolean;
+    coverMode?: "portrait" | "landscape";
     onApply: (g: DetectedGame) => void;
     onOpenFolder: (g: DetectedGame) => void;
     onBlacklist: (g: DetectedGame) => void;
@@ -33,15 +81,28 @@
   } = $props();
 
   let imgErrored = $state(false);
-  let status: UpdateStatus = $derived(($gameStatuses[game.id] ?? "unknown") as UpdateStatus);
+  // Source of the drawn cover. Rust reports the verified asset and its dimensions; this only
+  // picks the orientation and resolves a local cache file through the Tauri asset transport.
+  const artHref = $derived(bestArtSrc(game, coverMode));
+  // Rust reports that this game has no cover, or that its source failed. The surface says so
+  // instead of leaving a silent initial that looks like a loading state.
+  const coverUnavailable = $derived(
+    !artHref && (game.art?.state === "unavailable" || game.art?.state === "source_failed"),
+  );
+  // The card presents the status it is given; it does not classify the game itself.
+  let status: UpdateStatus = $derived(statusProp ?? (($gameStatuses[game.id] ?? "unknown") as UpdateStatus));
   let loading = $derived($gameDllsLoading[game.id] ?? false);
-  let dlls: DllRecord[] = $derived($gameDlls[game.id] ?? []);
-
-  function recordOutdated(r: DllRecord): boolean {
-    return dllRelation(r, $relationContext) === "outdated";
-  }
-
-  let outdatedCount = $derived(dlls.filter(recordOutdated).length);
+  // Authoritative components for this game, or `null` while Rust published none for it.
+  let components = $derived(publishedComponents($authoritativeState.games, game.id));
+  // Files the scan listed. Used only to keep the chip inventory visible while Rust has published
+  // no component state; it never decides whether an update exists.
+  let scannedRecords = $derived($gameDlls[game.id] ?? []);
+  let fileCount = $derived(components ? components.length : scannedRecords.length);
+  /** Pending updates Rust published, or `null` when it published no component state: unknown, and
+   *  never presented as zero pending updates. */
+  let outdatedCount = $derived<number | null>(
+    components ? components.filter(component => isOfferedUpdate(component) && preferredFamily(component.identity.family, $hardwarePreference)).length : null,
+  );
 
   type FeatureChip = {
     feature: FeatureSlot;
@@ -53,12 +114,23 @@
     iconId: string;
   };
 
+  // One entry per drawn chip source. With authoritative components the update mark comes from
+  // Rust; without them the chips list the scanned files and carry no update claim at all.
+  let chipSources = $derived.by<{ feature: FeatureSlot; outdated: boolean }[]>(() =>
+    components
+      ? components.filter(component => preferredFamily(component.identity.family, $hardwarePreference)).map((component) => ({
+          feature: componentFeature(component),
+          outdated: isOfferedUpdate(component),
+        }))
+      : scannedRecords.filter(record => preferredFamily(record.family, $hardwarePreference)).map((record) => ({ feature: recordFeature(record), outdated: false })),
+  );
+
   let featureChips = $derived.by<FeatureChip[]>(() => {
     const map = new Map<FeatureSlot, FeatureChip>();
-    for (const r of dlls) {
-      const f = recordFeature(r);
+    for (const source of chipSources) {
+      const f = source.feature;
       const existing = map.get(f);
-      const out = recordOutdated(r);
+      const out = source.outdated;
       if (!existing) {
         map.set(f, {
           feature: f,
@@ -67,7 +139,7 @@
           vendorAccent:
             f === "advanced" ? GROUP_ACCENT_VAR.advanced : vendorAccentVar(featureVendor(f)),
           vendorInk: vendorInkVar(featureVendor(f)),
-          short: f === "advanced" ? $t("feature.advanced.short") : featureShort(f),
+          short: f === "advanced" ? $t("component.hardware.supportLibraries") : featureShort(f),
           iconId: featureIconId(f),
         });
       } else {
@@ -82,6 +154,7 @@
   let visibleChips = $derived(featureChips.slice(0, 4));
   let hiddenChipCount = $derived(Math.max(0, featureChips.length - visibleChips.length));
 
+  let otherFamilies = $derived([...new Set((components ?? []).filter(component => !preferredFamily(component.identity.family, $hardwarePreference)).map(component => component.identity.family))]);
   let brandMark = $derived(launcherIcon(game.launcher));
 
   let haloVariant = $derived(
@@ -94,28 +167,35 @@
 
 <div
   class="game-card halo {haloVariant}"
+  data-cover-mode={coverMode}
   class:is-active={haloActive}
   class:status-outdated={status === "outdated"}
   class:status-up_to_date={status === "up_to_date"}
   class:status-no_dlls={status === "no_dlls"}
   class:status-scan_failed={status === "scan_failed"}
   class:is-hidden={hidden}
+  class:has-cover={!!artHref && !imgErrored}
   role="presentation"
   oncontextmenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(game, e); } : undefined}
-  onmouseenter={() => setActiveArt(game.image_url)}
+  onmouseenter={() => setActiveArt(bestArtSrc(game))}
 >
   <div class="art" data-launcher={game.launcher}>
-    {#if game.image_url && !imgErrored}
+    {#if artHref && !imgErrored}
       <img
         class="art-img"
-        src={game.image_url}
+        src={artHref}
         alt={game.name}
         loading="lazy"
         onerror={() => (imgErrored = true)}
       />
     {:else}
-      <div class="art-fallback" class:is-empty-dotted={status === "no_dlls"}>
-        <span class="art-fallback-text">{game.name.slice(0, 1).toUpperCase()}</span>
+      <div
+        class="art-fallback"
+        class:is-empty-dotted={status === "no_dlls"}
+        title={coverUnavailable ? $t("component.cover.unavailable") : undefined}
+      >
+        <span class="art-fallback-text" aria-hidden={coverUnavailable ? "true" : undefined}>{game.name.slice(0, 1).toUpperCase()}</span>
+        {#if coverUnavailable}<span class="cover-unavailable-label">{$t("component.cover.unavailable")}</span>{/if}
         {#if status === "no_dlls"}
           <span class="art-empty-hint">{$t("component.card.customFolderHint")}</span>
         {/if}
@@ -146,7 +226,7 @@
           <span class="status-pill is-danger" title={$t("component.card.scanFailedTitle")} aria-label={$t("status.scan_failed")}>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
           </span>
-        {:else if outdatedCount > 0}
+        {:else if outdatedCount !== null && outdatedCount > 0}
           <span class="status-count" aria-label={$t("component.card.updatesAvailable", { count: outdatedCount })}>
             {outdatedCount}
           </span>
@@ -163,9 +243,9 @@
           {$t("common.restore")}
         </button>
       {:else if status === "outdated"}
-        <button class="hover-btn primary" onclick={() => onApply(game)} title={$t("component.card.applyLatest")}>
+        <button class="hover-btn primary" onclick={() => $hardwarePreference.known && outdatedCount !== 0 ? onApply(game) : onClick(game)} title={$t($hardwarePreference.known && outdatedCount !== 0 ? "component.card.applyLatest" : "component.hardware.reviewUpdates")}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.85.93 6.63 2.46"/><polyline points="21 4 21 9 16 9"/></svg>
-          {$t("common.apply")}
+          {$t($hardwarePreference.known && outdatedCount !== 0 ? "common.update" : "component.hardware.reviewUpdates")}
         </button>
       {/if}
       <button class="hover-btn round" onclick={() => onOpenFolder(game)} title={$t("component.card.openInstallFolder")} aria-label={$t("component.card.openInstallFolder")}>
@@ -183,7 +263,7 @@
       <button
         class="game-name-btn truncate"
         onclick={() => onClick(game)}
-        onfocus={() => setActiveArt(game.image_url)}
+        onfocus={() => setActiveArt(bestArtSrc(game))}
       >{game.name}</button>
     </h3>
     {#if loading}
@@ -191,7 +271,7 @@
         <span class="loading-dot"></span>
         <span class="loading-text">{$t("status.scanning")}</span>
       </div>
-    {:else if dlls.length === 0}
+    {:else if fileCount === 0}
       <div class="meta-row">
         <span class="meta-text">{$t("component.card.noSupportedDlls")}</span>
       </div>
@@ -215,16 +295,30 @@
           <span class="feature-chip overflow" title={$t("component.card.moreCount", { count: hiddenChipCount })}>+{hiddenChipCount}</span>
         {/if}
       </div>
-      <div class="card-status">
+      {#if otherFamilies.length > 0}
+      <details class="other-technologies"><summary>{$t("component.hardware.otherTechnologies")} ({otherFamilies.length})</summary><p>{otherFamilies.map(familyLabel).join(" · ")}</p></details>
+    {/if}
+    <div class="card-status">
         {#if status === "outdated"}
           <span class="state-dot" data-state="outdated"></span>
-          <span class="card-status-text is-outdated">{$t("component.card.updatesShort", { count: outdatedCount })}</span>
+          <!-- With no published component count the surface says an update is available without
+               inventing how many. -->
+          <span class="card-status-text is-outdated">
+            {outdatedCount === null
+              ? $t("status.outdated")
+              : outdatedCount === 0 ? $t("component.hardware.otherUpdates") : $t("component.card.updatesShort", { count: outdatedCount })}
+          </span>
         {:else if status === "scan_failed"}
           <span class="state-dot" data-state="failed"></span>
           <span class="card-status-text is-danger">{$t("status.scan_failed")}</span>
-        {:else}
+        {:else if status === "up_to_date"}
           <span class="state-dot" data-state="current"></span>
           <span class="card-status-text">{$t("status.up_to_date")}</span>
+        {:else}
+          <!-- `unchecked`, `unknown`, `no_dlls` and `non_actionable` keep their own presentation
+               and are never drawn as up to date. -->
+          <span class="state-dot" data-state="unknown"></span>
+          <span class="card-status-text">{$t("status." + status)}</span>
         {/if}
       </div>
     {/if}
@@ -332,6 +426,23 @@
     color: var(--launcher-accent, var(--accent));
     opacity: 0.42;
     text-shadow: 0 1px 0 color-mix(in oklab, var(--launcher-accent, var(--accent)) 20%, transparent);
+  }
+  .cover-unavailable-label {
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: calc(100% - 20px);
+    padding: 3px 8px;
+    border: 1px solid color-mix(in oklab, var(--text-muted) 35%, transparent);
+    border-radius: var(--radius-full);
+    background: color-mix(in oklab, var(--bg-elevated) 84%, transparent);
+    color: var(--text-secondary);
+    font-size: var(--fs-2xs);
+    font-weight: 600;
+    line-height: 1.2;
+    text-align: center;
+    white-space: nowrap;
   }
   .art-overlay {
     position: absolute;
@@ -581,4 +692,8 @@
     animation: blink 1.2s infinite;
   }
   @keyframes blink { 0%, 100% { opacity: 0.3 } 50% { opacity: 1 } }
+
+  .other-technologies { position: relative; z-index: 2; font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+  .other-technologies summary { cursor: pointer; }
+  .other-technologies p { margin: 6px 0 0; overflow-wrap: anywhere; }
 </style>

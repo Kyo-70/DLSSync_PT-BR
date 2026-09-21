@@ -3,6 +3,7 @@
   import { fly } from "svelte/transition";
   import { locale, setLocale, LOCALES, LOCALE_LABELS, t, type Locale } from "../lib/i18n/index";
   import { settings, persistSettings } from "../lib/stores";
+  import { focusTrap } from "../actions/focusTrap";
 
   let { open, onClose }: { open: boolean; onClose: () => void } = $props();
 
@@ -83,6 +84,7 @@
     tabindex="-1"
     bind:this={panelEl}
     transition:fly={{ y: 8, duration: reduced ? 0 : 160 }}
+    use:focusTrap
   >
     {#each LOCALES as loc, i (loc)}
       <button

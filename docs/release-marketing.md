@@ -1,52 +1,40 @@
-# Release marketing and discovery
+# Write accurate release descriptions
 
-DLSSync should be discoverable without looking like keyword spam. The public promise is:
+Release copy must help readers choose a build and complete a task without overstating safety or compatibility. This document is local guidance; publication still requires the release owner.
 
-> One trusted Windows app that updates DLSS, FSR, XeSS, Streamline, DirectStorage, GPU drivers, and Windows device drivers with vendor signatures, hash checks, backups, and rollback.
+## Use a supported description
 
-## GitHub README
+> DLSSync is an open-source Windows app for updating supported DLSS, FSR, XeSS, Streamline and DirectStorage DLLs already present in game folders. It also offers GPU and Windows device-driver workflows. Signed catalog metadata, per-entry hashes, publisher checks, local DLL backups and an operation journal help you inspect changes and recover retained snapshots.
 
-- Lead with the minimalist banner: `.github/assets/nexus/banner-2560x720.png`.
-- Keep the first paragraph under 90 words and include the real search phrases users type: DLSS updater, FSR updater, XeSS updater, GPU driver updater, DLSS swapper alternative.
-- Keep the visible "Also useful if you searched for" line. Do not hide a keyword block in HTML comments.
-- Keep the release chip current with the exact app version and changelog anchor. For v1.7.0, lead with review-before-apply trust: signed catalog evidence, exact Update Plans, Operation Journal, CLI parity, portable isolation, and the explicit Nexus-safe catalog refresh.
-- Keep security claims tied to the implementation: signed manifest, exact source provenance, per-entry catalog hashes (SHA-256 for vendor-direct assets, MD5 for DLSS Swapper-archived entries), Authenticode publisher gate, local backup snapshots, one-click rollback, zero telemetry. Do not call every asset vendor-direct: historical NVIDIA DLSS and much of the AMD FSR and Intel XeSS back-catalog currently use the labeled DLSS Swapper community archive.
+Use “DLSS updater,” “FSR updater,” “XeSS updater” and “GPU driver updater” naturally where the task calls for them. Do not add “Also useful if you searched for” lists, hidden keyword blocks or search-ranking promises.
 
-## Nexus Mods
+## Keep the factual boundaries
 
-Use the Nexus page as the conversion surface, not the full manual. The top description should fit in one scan:
+- **Release state:** link the actual changelog heading. Do not imply that a tag or downloadable artifact exists from version metadata alone; name the published assets you checked.
+- **Integrity:** separate catalog signatures, artifact digests, Authenticode and backup SHA-256. Historical artifact rows can use MD5.
+- **Sources:** catalog sources include first-party releases and labeled DLSS Swapper community-archive history. Do not claim vendor-direct-only distribution or unsupported succession/affiliation.
+- **Recovery:** one-click restore starts an action for a retained snapshot. Missing/corrupt files, locks, permissions and validation failures can prevent recovery. GPU installers are not universally reversible.
+- **Signing:** optional Windows signing is not evidence of a signed artifact. Tauri payload signatures do not establish Authenticode signing of the installer.
+- **Compatibility:** a correct hash, publisher or architecture does not prove a game or hardware combination works. Avoid universal game/launcher detection claims.
+- **UX:** describe routine game updates as one click, not a mandatory confirmation or review workflow. Follow [UI wording rules](../AGENTS.md#ux-wording-and-behavior-rules).
+- **Privacy:** explain functional network actions and optional bearer-authenticated artwork lookup. Prefilled issue URLs transmit their contents when opened.
+- **Comparison:** use only the [dated evidence matrix](competitive-comparison.md). “Not verified” is not “No.” Do not regenerate unsupported cells from the old registry.
+- **Performance:** no current desktop footprint measurements are verified. Omit installer-size, RAM, startup and CPU promises until reproducible measurements exist.
 
-```text
-DLSSync updates DLSS, FSR, XeSS, Streamline, DirectStorage, NVIDIA/AMD/Intel GPU drivers, and Windows device drivers from one place. Every DLL or installer is hash-checked, vendor-signed, reversible, and zero-telemetry.
-```
+## Describe the Nexus channel precisely
 
-Recommended description order:
+NexusBuild- has no self-updater and must make no automatic app-update or catalog calls. Catalog refresh and every other network action must be explicit and manual. Standard and Nexus must use the same commit and one `v1.7.0` tag, with distinct `NexusBuild-` assets. Standard's `latest.json` must reference only the exact Standard installer and contain its nonempty matching signature. Publication must refuse to delete an existing release.
 
-1. Hero image: `.github/assets/nexus/banner-header-1300x372.png`.
-2. One-line value prop.
-3. "What it updates" bullets grouped by NVIDIA, AMD, Intel, Microsoft, and Drivers.
-4. "Why it is safe" bullets: official sources, signed manifest, hashes, Authenticode, backups, rollback, anti-cheat warnings.
-5. "How to use" in five steps: download, scan, review, apply, restore if needed.
-6. Nexus behavior: app self-updates and automatic catalog requests are disabled; `Refresh Catalog` is the only action that contacts the signed public upstream.
-7. v1.7.0 highlights: Update Plan, Trust Center, Operation Journal, CLI, portable mode, and eight locales.
-8. GitHub source, signed manifest, issue, and support links.
+The [channel guide](nexus-build.md) records residual source and artifact-verification gaps. Do not publish blanket compliance language until the release owner has resolved and tested them. Keep [the Nexus description](nexus-description-v1.7.bbcode) as a draft until then.
 
-Nexus BBCode is stricter than old mod pages. Keep formatting simple: headings, bullets, bold labels, links, and images. Avoid nested spoiler-heavy layouts or custom table tricks.
+## Reuse existing assets
 
-## Asset map
-
-| Surface | Asset |
-|:---|:---|
+| Surface | Repository asset |
+|---|---|
 | GitHub hero | `.github/assets/nexus/banner-2560x720.png` |
 | Nexus header | `.github/assets/nexus/banner-header-1300x372.png` |
 | Social preview | `.github/assets/preview-card-clean.png` |
 | Nexus preview card | `.github/assets/nexus/preview-card-clean-600x338.png` |
-| Feature gallery | `.github/assets/nexus/gallery/*.png` |
+| Feature gallery | `.github/assets/nexus/gallery/` |
 
-## Growth checklist
-
-- GitHub repo description should include "DLSS, FSR, XeSS, signed catalog, GPU drivers, rollback, CLI, zero telemetry".
-- GitHub topics should include `dlss`, `fsr`, `xess`, `directstorage`, `nvidia`, `amd`, `intel`, `gpu-drivers`, `signed-catalog`, `tauri`, `svelte`, `windows`, `pc-gaming`.
-- Discovery copy may mention "RenderPilot alternative" only where the surrounding comparison is factual, dated, and linked to the generated competitive registry.
-- Nexus tags should stay aligned with the current page: Performance Optimization, Modder's Resource, Utilities for Modders, Utilities for Players, Quality of Life.
-- Every public release should update README version copy, Nexus "What's new", screenshots/previews when UI changes, and the changelog excerpt.
+Review embedded text and screenshots separately before publication; a corrected README does not validate older image copy. This task does not update assets or remote descriptions.
